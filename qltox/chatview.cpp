@@ -189,12 +189,61 @@ struct DownloadBarInfo {
 
 static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRect,
     const QFont& baseFont, const StyleParams::Palette& pal,
-    ChatElement::DownloadState state, int fileSize)
+    ChatElement::DownloadState state, int fileSize, int progressPct = -1)
 {
     const int kPad = 8, btnH = 26, retryBtnH = 22;
     QFont bf = baseFont; bf.setPointSize(10); bf.setBold(true);
     QFontMetrics bfm(bf);
 
+    // ── InProgress：底部 4px 细线性进度条 + 固定预算 % 标签（无按钮，不回跳）──
+    if (state == ChatElement::InProgress) {
+        int pct = progressPct;
+        bool unknown = (pct < 0);
+        if (pct < 0) { pct = 0; }
+        if (pct > 100) { pct = 100; }
+
+        // 标签宽度按 "100%" 全程预算，% 增长不会推动任何元素移位
+        QString label = unknown ? qFromUtf8("…") : (QString::number(pct) + "%");
+        int labelW = bfm.width("100%") + 6;
+        int labelX = parentRect.right() - kPad - labelW;
+
+        int barH = 4;
+        int barTop = parentRect.bottom() - barH - 4;
+        int trackX = parentRect.x() + kPad;
+        int trackRight = labelX - kPad;
+        if (trackRight - trackX < 10) { trackRight = trackX + 10; }
+        QRect track(trackX, barTop, trackRight - trackX, barH);
+
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(70, 70, 70));          // 轨道底色
+        p.drawRect(track);
+        if (!unknown && pct > 0) {
+            QRect fillRect(track.x(), track.y(),
+                           static_cast<int>((long long)track.width() * pct / 100), track.height());
+            p.setBrush(pal.accent);
+            p.drawRect(fillRect);
+        }
+
+        if (!unknown && pct > 0) {
+            p.setPen(pal.accent);
+            p.setFont(bf);
+            p.drawText(labelX, parentRect.bottom() - btnH - 2, labelW, btnH,
+                       Qt::AlignLeft | Qt::AlignVCenter, label);
+        } else if (unknown) {
+            p.setPen(pal.textMuted);
+            p.setFont(bf);
+            p.drawText(labelX, parentRect.bottom() - btnH - 2, labelW, btnH,
+                       Qt::AlignLeft | Qt::AlignVCenter, label);
+        }
+        p.setFont(baseFont);
+
+        DownloadBarInfo info;
+        info.downloadBtn = QRect();
+        info.retryBtn    = QRect();
+        return info;
+    }
+
+    // ── 其它状态：右→左文本/按钮排布 ──
     // ── Build text for each element ──
     QString statusText;
     QColor statusColor = pal.textMuted;
@@ -203,8 +252,6 @@ static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRe
     } else if (state == ChatElement::Completed) {
         statusText = qFromUtf8("✓ 已下载");
         statusColor = QColor(80, 180, 80);
-    } else if (state == ChatElement::InProgress) {
-        statusText = qFromUtf8("⏳ 下载中");
     } else if (state == ChatElement::Failed) {
         statusText = qFromUtf8("✗ 失败");
         statusColor = QColor(200, 50, 50);
@@ -302,7 +349,7 @@ static int paintThumbnail(QPainter& p, const QRect& imgRect,
     const StyleParams::Palette& pal,
     ChatElement::DownloadState state,
     QRect* downloadBtnOut = nullptr, QRect* retryBtnOut = nullptr,
-    int fileSize = 0)
+    int fileSize = 0, int progressPct = -1)
 {
     int maxW = imgRect.width(), maxH = imgRect.height();
     int dw, dh;
@@ -355,7 +402,7 @@ static int paintThumbnail(QPainter& p, const QRect& imgRect,
     }
     // ── 状态栏（右下角右对齐）──
     DownloadBarInfo bi = paintDownloadStatusBar(p, imgRect, baseFont, pal,
-                                                state, fileSize);
+                                                state, fileSize, progressPct);
     if (downloadBtnOut) { *downloadBtnOut = bi.downloadBtn; }
     if (retryBtnOut)    { *retryBtnOut    = bi.retryBtn; }
     return dh;
@@ -383,7 +430,7 @@ static void paintMediaContent(QPainter& p, const QRect& bubbleRect,
     int emojiW, const StyleParams::Palette& pal,
     ChatElement::DownloadState state,
     QRect* downloadBtnOut = nullptr, QRect* retryBtnOut = nullptr,
-    int fileSize = 0)
+    int fileSize = 0, int progressPct = -1)
 {
     const int kBubbleHPad = 12, kBubbleVPad = 8, kPad = 8;
     QRect imgRect(bubbleRect.x() + kBubbleHPad, bubbleRect.y() + kBubbleVPad,
@@ -398,7 +445,7 @@ static void paintMediaContent(QPainter& p, const QRect& bubbleRect,
 #endif
     }
     const QPixmap& src = !frame.isNull() ? frame : fullImage;
-    int imgDispH = paintThumbnail(p, imgRect, src, mediaWidth, mediaHeight, baseFont, fm, pal, state, downloadBtnOut, retryBtnOut, fileSize);
+    int imgDispH = paintThumbnail(p, imgRect, src, mediaWidth, mediaHeight, baseFont, fm, pal, state, downloadBtnOut, retryBtnOut, fileSize, progressPct);
 
     // GIF badge
     if (etype == ChatElement::Gif || gifLikeVideo) {
@@ -1394,7 +1441,7 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
                           scaledDisplay, caption,
                           mediaWidth, mediaHeight, durationSec, movie,
                           baseFont, fm, emojiW, pal, downloadState,
-                           &downloadBtnRect, &retryBtnRect, fileSize);
+                           &downloadBtnRect, &retryBtnRect, fileSize, downloadProgress);
         if (!firstInGroup) { drawGroupedTime(p, baseFont, fm, bubbleRect, time, pal); }
         break;
     }
@@ -1566,7 +1613,7 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
         thumbnailRect = bubbleRect;   // 双击命中区（复用媒体字段）
         {
             DownloadBarInfo bi = paintDownloadStatusBar(p, bubbleRect, baseFont, pal,
-                downloadState, fileSize);
+                downloadState, fileSize, downloadProgress);
             downloadBtnRect = bi.downloadBtn;
             retryBtnRect    = bi.retryBtn;
         }
@@ -1916,7 +1963,7 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
         // 下载按钮
         {
             DownloadBarInfo bi = paintDownloadStatusBar(p, bubbleRect, baseFont, pal,
-                downloadState, fileSize);
+                downloadState, fileSize, downloadProgress);
             downloadBtnRect = bi.downloadBtn;
             retryBtnRect    = bi.retryBtn;
         }
@@ -2462,6 +2509,14 @@ void ChatView::updateElement(int msgIndex) {
 int ChatView::contentWidth() const {
     int sbw = m_vScrollBar->sizeHint().width();
     return width() - sbw;
+}
+
+// 进度类轻量刷新：只标脏该元素所在行，不做高度重算/布局更新
+void ChatView::repaintMessageElement(int msgIndex) {
+    if (!m_history || msgIndex < 0 || msgIndex >= (int)m_history->size()) { return; }
+    QRect r = messageRect(msgIndex);
+    if (r.isEmpty()) { return; }
+    QWidget::update(r);
 }
 
 void ChatView::relayout() {

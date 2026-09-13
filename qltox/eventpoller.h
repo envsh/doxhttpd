@@ -35,6 +35,7 @@ const EventType34 MediaDownloadReadyType = toEventType34(QEvent::User + 103);
 const EventType34 AvatarDownloadReadyType = toEventType34(QEvent::User + 104);
 const EventType34 DiskLoadReadyType       = toEventType34(QEvent::User + 105);
 const EventType34 RowidBackfillReadyType  = toEventType34(QEvent::User + 106);
+const EventType34 MediaDownloadProgressType = toEventType34(QEvent::User + 107);
 
 // ── API 请求类型 ──
 enum ApiRequestType {
@@ -178,6 +179,17 @@ public:
     bool isShortGif  = false;
     bool pendingPlay = false;
     bool postprocDone = false;   // true=后处理完成，走播放/动图落地；false=下载完成
+};
+
+// 媒体下载进度（100ms 节流；total<=0 表示未知长度，UI 走不确定进度）
+class MediaDownloadProgressEvent : public CustomEventBase {
+public:
+    MediaDownloadProgressEvent() : CustomEventBase(MediaDownloadProgressType) {}
+    int chatId = 0;
+    std::string chatType;
+    int msgIndex = 0;
+    long long received = 0;
+    long long total = 0;
 };
 
 class AvatarDownloadEvent : public CustomEventBase {
@@ -329,6 +341,8 @@ struct HttpRequest {
     std::string data;
     int timeoutSec;
     std::map<std::string, std::string> extraHeaders;
+    // 下载进度回调（poller 线程触发；100ms 节流在 xferinfoCb 内处理）
+    void (*progress)(long long received, long long total, void* udata) = nullptr;
 
     HttpRequest() : method("GET"), timeoutSec(35) {}
     HttpRequest(std::string url, std::string method = "GET",
@@ -347,6 +361,8 @@ struct HttpCtx {
     curl_slist* requestHeaders;
     void (*done)(const HttpResponse& resp, void* udata);
     void* udata;
+    void (*progress)(long long received, long long total, void* udata);
+    TimePoint lastEmitTp;   // 进度节流：上一次发射时刻（单调时钟）
 };
 
 class EventPoller : public QThread {

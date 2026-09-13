@@ -43,6 +43,20 @@ static size_t headerCb(void* contents, size_t size, size_t nmemb, void* userp) {
     return total;
 }
 
+// 下载进度回调（curl_multi pump 线程内）：≥100ms 或传输完成才转发一次
+static int xferinfoCb(void* clientp, curl_off_t dltotal, curl_off_t dlnow,
+                      curl_off_t ultotal, curl_off_t ulnow) {
+    (void)ultotal; (void)ulnow;
+    auto* ctx = static_cast<HttpCtx*>(clientp);
+    if (!ctx || !ctx->progress) { return 0; }
+    bool done = (dltotal > 0 && dlnow >= dltotal);
+    if (done || elapsedMs(ctx->lastEmitTp) >= 100) {
+        ctx->lastEmitTp = timeNow();
+        ctx->progress((long long)dlnow, (long long)dltotal, ctx->udata);
+    }
+    return 0;
+}
+
 EventPoller::EventPoller()
     : QThread(), running(true), multi(nullptr) {
     curl_global_init(CURL_GLOBAL_DEFAULT);
@@ -83,7 +97,7 @@ void EventPoller::addRequest(const HttpRequest& req,
 
     auto* ctx = new HttpCtx{req.url, req.data,
                              std::string(), std::map<std::string, std::string>(),
-                             nullptr, done, udata};
+                             nullptr, done, udata, req.progress, timeNow()};
 
     curl_easy_setopt(easy, CURLOPT_URL, ctx->urlStr.c_str());
     curl_easy_setopt(easy, CURLOPT_PRIVATE, ctx);
@@ -96,6 +110,13 @@ void EventPoller::addRequest(const HttpRequest& req,
     curl_easy_setopt(easy, CURLOPT_FORBID_REUSE, 1L);
     curl_easy_setopt(easy, CURLOPT_FRESH_CONNECT, 1L);
     curl_easy_setopt(easy, CURLOPT_SSL_SESSIONID_CACHE, 0L);
+
+    // 下载进度：≥100ms 或传输完成才转发一次，避免高频重绘刷新
+    if (req.progress) {
+        curl_easy_setopt(easy, CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(easy, CURLOPT_XFERINFOFUNCTION, xferinfoCb);
+        curl_easy_setopt(easy, CURLOPT_XFERINFODATA, ctx);
+    }
 
     if (req.method == "POST") {
         curl_easy_setopt(easy, CURLOPT_POSTFIELDS, ctx->postData.c_str());

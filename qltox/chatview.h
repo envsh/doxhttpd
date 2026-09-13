@@ -83,7 +83,7 @@ struct ChatElement {
     // File only
     QString fileName;
     int fileSize;
-    int progress;
+    int downloadProgress;
     QString localPath;
 
     // Video only
@@ -114,7 +114,7 @@ struct ChatElement {
         , transState(TransState::None), needsTranslateComputed(false), needsTranslateResult(false)
         , downloadState(NotRequested)
         , mediaWidth(0), mediaHeight(0)
-        , fileSize(0), progress(0), durationSec(0), gifLikeVideo(false), pendingPlay(false)
+        , fileSize(0), downloadProgress(0), durationSec(0), gifLikeVideo(false), pendingPlay(false)
         , movie(nullptr)
         , cachedWidth(-1), height(0), firstInGroup(1), sendState(SendSending) {}
 
@@ -167,6 +167,7 @@ public:
     void setFavRowid(int64_t rowid, bool fav);
     void updateElement(int msgIndex);
     void relayout();
+    void repaintMessageElement(int msgIndex);
     void onGifFrameUpdated(int msgIndex);
 
     // ChatHistoryObserver

@@ -158,6 +158,7 @@ private:
                             std::string& outBody,
                             const std::string& data = "",
                             int timeoutSec = 35);
+    static void mediaProgressCb(long long received, long long total, void* udata);
 
     static QObject* s_target;
     static std::string s_baseUrl;

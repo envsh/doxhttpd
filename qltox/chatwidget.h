@@ -43,6 +43,7 @@ public:
     ChatElement messageAt(int index) const;
     ChatElement& mutableMessageAt(int index);
     void updateElement(int msgIndex) { messageArea->updateElement(msgIndex); }
+    void repaintMessageElement(int msgIndex) { messageArea->repaintMessageElement(msgIndex); }
     void relayout() { messageArea->relayout(); }
     void repaintMessages() { messageArea->update(); }
     void setBuffer(ChatHistory* hist);

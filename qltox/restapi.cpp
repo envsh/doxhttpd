@@ -411,9 +411,24 @@ void ToxAPI::getMessagesHistory(int contactId, const std::string& contactType) {
             + "&contact_type=" + contactType, "GET", ""}, ctx);
 }
 
+// 媒体下载进度回调（poller 线程）：转发为 MediaDownloadProgressEvent
+void ToxAPI::mediaProgressCb(long long received, long long total, void* udata) {
+    auto* ctx = static_cast<ApiCtx*>(udata);
+    if (!ctx || !s_target) { return; }
+    auto* ev = new MediaDownloadProgressEvent();
+    ev->chatId   = ctx->id;
+    ev->chatType = ctx->str1;
+    ev->msgIndex = ctx->n1;
+    ev->received = received;
+    ev->total    = total;
+    QApplication::postEvent(s_target, ev);
+}
+
 void ToxAPI::downloadMedia(int chatId, const std::string& chatType, int msgIndex, const std::string& mxcUrl) {
     auto* ctx = new ApiCtx(ApiMediaDownload, chatId, chatType, mxcUrl, msgIndex);
-    request({"/api/media_download?url=" + urlEncode(mxcUrl), "GET"}, ctx);
+    HttpRequest req("/api/media_download?url=" + urlEncode(mxcUrl), "GET");
+    req.progress = mediaProgressCb;
+    request(req, ctx);
 }
 
 void ToxAPI::downloadAvatar(const std::string& mxcUrl) {

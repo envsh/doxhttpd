@@ -800,9 +800,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 }
 
                 elp->downloadState = ChatElement::Completed;
-            }
-
-            if (elp) {
+                elp->downloadProgress = 100;
                 bool elPendingPlay = elp->pendingPlay;
                 bool isVideo = (elp->etype == ChatElement::Video);
                 bool isGifElem = (elp->etype == ChatElement::Gif);
@@ -820,6 +818,29 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 elp->downloadState = ChatElement::Failed;
                 elp->mediaUrl = qFromUtf8(e->mxcUrl);
                 if (isCurrent) { chatWidget->updateElement(e->msgIndex); }
+            }
+        }
+        return;
+    }
+
+    // 媒体下载进度（100ms 节流，仅更新 % 并局部重绘，不动布局缓存）
+    if (event->type() == MediaDownloadProgressType) {
+        MediaDownloadProgressEvent* e = static_cast<MediaDownloadProgressEvent*>(event);
+        ChatHistory* target = m_chatbuf.ptr(e->chatId, e->chatType);
+        if (target && e->msgIndex >= 0 && e->msgIndex < target->size()) {
+            ChatElement& el = (*target)[e->msgIndex];
+            int pct = -1;   // -1=未知长度，UI 显示不确定进度
+            if (e->total > 0) {
+                long long p = e->received * 100LL / e->total;
+                if (p < 0) { p = 0; }
+                if (p > 100) { p = 100; }
+                pct = (int)p;
+                if (pct < el.downloadProgress) { pct = el.downloadProgress; }   // 百分比只增不减
+            }
+            el.downloadProgress = pct;
+            if (currentChatId == e->chatId
+                && currentChatType == qFromUtf8(e->chatType)) {
+                chatWidget->repaintMessageElement(e->msgIndex);
             }
         }
         return;
@@ -1526,6 +1547,7 @@ void MainWindow::onContactSelected(int id, const QString& type, const QString& n
                 // 已恢复动画源/本地文件的消息不显示下载覆盖（内容仍在缓存盘/DB）
                 if (el.etype == ChatElement::Video && !el.gifPath.isEmpty()) {
                     el.downloadState = ChatElement::Completed;
+                    el.downloadProgress = 100;
                 } else if ((el.etype == ChatElement::Video || el.etype == ChatElement::Audio)
                            && !el.mediaUrl.isEmpty()) {
                     std::string fkey = mediaCacheKey("file", el.mediaUrl);
@@ -1533,6 +1555,7 @@ void MainWindow::onContactSelected(int id, const QString& type, const QString& n
                                       + makeCacheFsPath(fkey.c_str());
                     if (::access(fpath.c_str(), F_OK) == 0) {
                         el.downloadState = ChatElement::Completed;
+                        el.downloadProgress = 100;
                     }
                 }
                 els.push_back(el);
@@ -2300,6 +2323,7 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
                                 el.scaledDisplay = decodeRawToThumb(rawBytes.data(), rawBytes.size(),
                                     el.mediaWidth, el.mediaHeight, chatWidget->width() * 70 / 100);
                                 el.downloadState = ChatElement::Completed;
+                                el.downloadProgress = 100;
                             } else {
                                 auto dbData = Storage::instance().cacheDb()->loadMedia(
                                     mediaCacheKey("file", mxc).c_str());
@@ -2308,9 +2332,11 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
                                     el.scaledDisplay = decodeRawToThumb((const char*)dbData.data(), dbData.size(),
                                         el.mediaWidth, el.mediaHeight, chatWidget->width() * 70 / 100);
                                     el.downloadState = ChatElement::Completed;
+                                    el.downloadProgress = 100;
                                 } else {
                                     if (hm.fileSize > 0 && hm.fileSize < 1048576) {
                                         el.downloadState = ChatElement::InProgress;
+                                        el.downloadProgress = 0;
                                         ToxAPI::downloadMedia(chatId, chatType, newIdx, hm.mediaUrl);
                                     }
                                 }
@@ -3100,6 +3126,7 @@ void MainWindow::onRetryClicked(int msgIndex, const QString& mediaUrl, const QSt
         el.scaledDisplay = decodeRawToThumb(rawBytes.data(), rawBytes.size(),
             el.mediaWidth, el.mediaHeight, chatWidget->width() * 70 / 100);
         el.downloadState = ChatElement::Completed;
+        el.downloadProgress = 100;
         chatWidget->updateElement(msgIndex);
         if (el.pendingPlay) { scheduleMediaPlayback(msgIndex, true); }
         return;
@@ -3111,6 +3138,7 @@ void MainWindow::onRetryClicked(int msgIndex, const QString& mediaUrl, const QSt
         el.scaledDisplay = decodeRawToThumb((const char*)dbData.data(), dbData.size(),
             el.mediaWidth, el.mediaHeight, chatWidget->width() * 70 / 100);
         el.downloadState = ChatElement::Completed;
+        el.downloadProgress = 100;
         chatWidget->updateElement(msgIndex);
         if (el.pendingPlay) { scheduleMediaPlayback(msgIndex, true); }
         return;
@@ -3118,6 +3146,7 @@ void MainWindow::onRetryClicked(int msgIndex, const QString& mediaUrl, const QSt
 
     chatWidget->updateElement(msgIndex);
     el.downloadState = ChatElement::InProgress;
+    el.downloadProgress = 0;
     ToxAPI::downloadMedia(currentChatId, std::string(qToUtf8(currentChatType).data()),
                           msgIndex, std::string(qToUtf8(mediaUrl).data()));
 }
