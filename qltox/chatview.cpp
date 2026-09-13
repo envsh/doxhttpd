@@ -195,7 +195,7 @@ static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRe
     QFont bf = baseFont; bf.setPointSize(10); bf.setBold(true);
     QFontMetrics bfm(bf);
 
-    // ── InProgress：底部 4px 细线性进度条 + 固定预算 % 标签（无按钮，不回跳）──
+    // ── InProgress：顶部 4px 细线性进度条 + 固定预算 % 标签（无按钮，不回跳）──
     if (state == ChatElement::InProgress) {
         int pct = progressPct;
         bool unknown = (pct < 0);
@@ -207,8 +207,9 @@ static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRe
         int labelW = bfm.width("100%") + 6;
         int labelX = parentRect.right() - kPad - labelW;
 
+        // 4px 条在预览区顶部，标签紧跟在条下方
         int barH = 4;
-        int barTop = parentRect.bottom() - barH - 4;
+        int barTop = parentRect.top() + 2;
         int trackX = parentRect.x() + kPad;
         int trackRight = labelX - kPad;
         if (trackRight - trackX < 10) { trackRight = trackX + 10; }
@@ -224,15 +225,16 @@ static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRe
             p.drawRect(fillRect);
         }
 
+        int labelY = barTop + barH + 2;   // 条下方 2px
         if (!unknown && pct > 0) {
             p.setPen(pal.accent);
             p.setFont(bf);
-            p.drawText(labelX, parentRect.bottom() - btnH - 2, labelW, btnH,
+            p.drawText(labelX, labelY, labelW, btnH,
                        Qt::AlignLeft | Qt::AlignVCenter, label);
         } else if (unknown) {
             p.setPen(pal.textMuted);
             p.setFont(bf);
-            p.drawText(labelX, parentRect.bottom() - btnH - 2, labelW, btnH,
+            p.drawText(labelX, labelY, labelW, btnH,
                        Qt::AlignLeft | Qt::AlignVCenter, label);
         }
         p.setFont(baseFont);
