@@ -67,6 +67,7 @@ signals:
     void resendMessage(int msgIndex);
     void requestRedactMessage(int msgIndex);
     void favoriteClicked(int msgIndex);
+    void screenshotRequested();
 
 private slots:
     void onSendClicked();
@@ -89,6 +90,7 @@ private slots:
     void onDeleteRequested(int msgIndex);
     void onRedactRequested(int msgIndex);
     void onForwardRequested(int msgIndex);
+    void onScreenshotClicked();
     void onReplyStripClose();
     void hideUnreadBanner();
 
@@ -115,6 +117,8 @@ private:
     EmojiPushButton* fileBtn;
     EmojiPushButton* stickerBtn;
     EmojiPushButton* quickReplyBtn;
+    EmojiPushButton* historyBtn;
+    EmojiPushButton* screenshotBtn;
     QPushButton* sendBtn;
     QPushButton* m_sendEnBtn;
     EmojiPicker* emojiPicker;

@@ -79,6 +79,7 @@ protected slots:
     void onOpenFullSizeImage(int msgIndex, const QString& mediaUrl);
     void onOpenMediaPlayer(int msgIndex);
     void onFavoriteClicked(int msgIndex);
+    void onChatScreenshotRequested();
     void renderHistoryMessages(const std::vector<HistoryMessage>& messages);
     void openSettings();
     void openStickerManager();

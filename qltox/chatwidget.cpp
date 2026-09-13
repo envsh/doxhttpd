@@ -215,7 +215,7 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent) {
     
     // 输入区域 (2行 x 3列)
 #ifdef QT3_BUILD
-    QGridLayout* inputGrid = new QGridLayout(2, 4, 2);
+    QGridLayout* inputGrid = new QGridLayout(2, 6, 2);
     inputEdit = new MessageInput(this);
     inputGrid->addMultiCellWidget(inputEdit, 0, 1, 0, 0);
     emojiBtn = new EmojiPushButton(qFromUtf8("😊"), this);
@@ -234,18 +234,26 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent) {
     quickReplyBtn->setFixedSize(24, 24);
     qSetToolTip(quickReplyBtn, _("tooltips.quickreply"));
     inputGrid->addWidget(quickReplyBtn, 1, 2);
+    historyBtn = new EmojiPushButton(qFromUtf8("🕘"), this);
+    historyBtn->setFixedSize(24, 24);
+    qSetToolTip(historyBtn, qFromUtf8("显示历史消息"));
+    inputGrid->addWidget(historyBtn, 0, 3);
+    screenshotBtn = new EmojiPushButton(qFromUtf8("📷"), this);
+    screenshotBtn->setFixedSize(24, 24);
+    qSetToolTip(screenshotBtn, qFromUtf8("屏幕抓图"));
+    inputGrid->addWidget(screenshotBtn, 1, 3);
     sendBtn = new QPushButton(_("buttons.send"), this);
     QFontMetrics fm = inputEdit->fontMetrics();
     int twoLineH = fm.lineSpacing() * 2 + fm.lineSpacing() / 2 + 6;
     inputEdit->setMaximumHeight(twoLineH);
     sendBtn->setFixedSize(twoLineH, twoLineH);
-    inputGrid->addMultiCellWidget(sendBtn, 0, 1, 3, 3);
+    inputGrid->addMultiCellWidget(sendBtn, 0, 1, 4, 4);
     inputGrid->setColStretch(0, 1);
 
     m_sendEnBtn = new QPushButton("Send EN", this);
     m_sendEnBtn->setFixedWidth(60);
     m_sendEnBtn->setFixedHeight(twoLineH);
-    inputGrid->addMultiCellWidget(m_sendEnBtn, 0, 1, 4, 4);
+    inputGrid->addMultiCellWidget(m_sendEnBtn, 0, 1, 5, 5);
 #else
     QGridLayout* inputGrid = new QGridLayout();
     inputGrid->setSpacing(2);
@@ -267,18 +275,26 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent) {
     quickReplyBtn->setFixedSize(24, 24);
     qSetToolTip(quickReplyBtn, _("tooltips.quickreply"));
     inputGrid->addWidget(quickReplyBtn, 1, 2);
+    historyBtn = new EmojiPushButton(qFromUtf8("🕘"), this);
+    historyBtn->setFixedSize(24, 24);
+    qSetToolTip(historyBtn, qFromUtf8("显示历史消息"));
+    inputGrid->addWidget(historyBtn, 0, 3);
+    screenshotBtn = new EmojiPushButton(qFromUtf8("📷"), this);
+    screenshotBtn->setFixedSize(24, 24);
+    qSetToolTip(screenshotBtn, qFromUtf8("屏幕抓图"));
+    inputGrid->addWidget(screenshotBtn, 1, 3);
     sendBtn = new QPushButton(_("buttons.send"), this);
     QFontMetrics fm = inputEdit->fontMetrics();
     int twoLineH = fm.lineSpacing() * 2 + fm.lineSpacing() / 2 + 6;
     inputEdit->setMaximumHeight(twoLineH);
     sendBtn->setFixedSize(twoLineH, twoLineH);
-    inputGrid->addWidget(sendBtn, 0, 3, 2, 1);
+    inputGrid->addWidget(sendBtn, 0, 4, 2, 1);
     inputGrid->setColumnStretch(0, 1);
 
     m_sendEnBtn = new QPushButton("Send EN", this);
     m_sendEnBtn->setFixedWidth(60);
     m_sendEnBtn->setFixedHeight(twoLineH);
-    inputGrid->addWidget(m_sendEnBtn, 0, 4, 2, 1);
+    inputGrid->addWidget(m_sendEnBtn, 0, 5, 2, 1);
 #endif
 
         inputEdit->setPlaceholderText(_("placeholders.type_message"));
@@ -294,6 +310,7 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent) {
     connect(fileBtn, SIGNAL(clicked()), this, SLOT(onFileClicked()));
     connect(stickerBtn, SIGNAL(clicked()), this, SLOT(onStickerClicked()));
     connect(quickReplyBtn, SIGNAL(clicked()), this, SLOT(onQuickReplyClicked()));
+    connect(screenshotBtn, SIGNAL(clicked()), this, SLOT(onScreenshotClicked()));
     connect(inputEdit, SIGNAL(filePasteRequested(const QString&, const QString&)), this, SLOT(onFilePaste(const QString&, const QString&)));
     
     mainLayout->addLayout(inputGrid);
@@ -854,4 +871,8 @@ void ChatWidget::onForwardRequested(int msgIndex) {
     inputEdit->setPlainText(text);
 #endif
     inputEdit->setFocus();
+}
+
+void ChatWidget::onScreenshotClicked() {
+    emit screenshotRequested();
 }

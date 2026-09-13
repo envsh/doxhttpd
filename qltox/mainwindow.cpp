@@ -580,6 +580,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(chatWidget, SIGNAL(openMediaPlayer(int)),
             this, SLOT(onOpenMediaPlayer(int)));
     connect(chatWidget, SIGNAL(favoriteClicked(int)), this, SLOT(onFavoriteClicked(int)));
+    connect(chatWidget, SIGNAL(screenshotRequested()), this, SLOT(onChatScreenshotRequested()));
     connect(chatWidget, SIGNAL(fileSendRequested(const QString&, const QString&)),
             this, SLOT(onFileSendRequested(const QString&, const QString&)));
     connect(&Translator::instance(), SIGNAL(languageChanged()), this, SLOT(retranslateUi()));
@@ -3511,6 +3512,14 @@ void MainWindow::onFavoriteClicked(int msgIndex) {
         Storage::instance().messageDbAsync()->add_bookmark(
             rowid, chanid, "", [rowid](bool ok) { qWarning("favorite add rowid=%lld ok=%d", (long long)rowid, ok); });
     }
+}
+
+void MainWindow::onChatScreenshotRequested() {
+#ifdef Q_OS_MAC
+    qStartProcessDetached(QString::fromLatin1("screencapture"), QStringList() << "-i");
+#else
+    qStartProcessDetached(QString::fromLatin1("xfce4-screenshooter"), QStringList() << "-r");
+#endif
 }
 
 void MainWindow::onSourceClicked(int msgIndex) {
