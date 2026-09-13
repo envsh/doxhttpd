@@ -50,6 +50,11 @@
 #else
 #include <QFileInfo>
 #endif
+#ifdef QT3_BUILD
+#include <qdir.h>
+#else
+#include <QDir>
+#endif
 #include "toastwidget.h"
 #include "sharedstatusbar.h"
 #include "photoviewer.h"
@@ -3515,10 +3520,19 @@ void MainWindow::onFavoriteClicked(int msgIndex) {
 }
 
 void MainWindow::onChatScreenshotRequested() {
-#ifdef Q_OS_MAC
-    qStartProcessDetached(QString::fromLatin1("screencapture"), QStringList() << "-i");
+#if defined(Q_OS_MAC) || defined(Q_OS_MACX) || defined(Q_OS_DARWIN)
+    QString shotPath = QDir::tempPath()
+        + QString("/qltox_shot_%1.png").arg(QString::number(QDateTime::currentMSecsSinceEpoch()));
+    bool ok = qStartProcessDetached(QString::fromLatin1("screencapture"),
+                                    QStringList() << "-i" << shotPath);
+    if (!ok) {
+        qWarning("onChatScreenshotRequested: screencapture 启动失败，回退 open -a Screenshot");
+        qStartProcessDetached(QString::fromLatin1("open"), QStringList() << "-a" << "Screenshot");
+    }
 #else
-    qStartProcessDetached(QString::fromLatin1("xfce4-screenshooter"), QStringList() << "-r");
+    if (!qStartProcessDetached(QString::fromLatin1("xfce4-screenshooter"), QStringList() << "-r")) {
+        qWarning("onChatScreenshotRequested: xfce4-screenshooter 启动失败");
+    }
 #endif
 }
 
