@@ -2,6 +2,7 @@
 #include "compat34.h"
 #include <qtextcodec.h>
 #include <qdir.h>
+#include <qfileinfo.h>
 
 void QtappSetup::setup(QApplication& app) {
     QtappSetup& s = inst();
@@ -130,10 +131,19 @@ void QtappSetup::installQtTranslations(const QString& langCode) {
         }
     }
 #else
-    // Qt4: 文件名 qt_zh_CN.qm (下划线+大写); 路径通过 QLibraryInfo 定位
+    // Qt4/Qt5: 文件名 qt_zh_CN.qm (下划线+大写); mac bundle Resource 优先，其次 QLibraryInfo
     qtLang = langCode;
     qtLang.replace("-", "_");
-    path = QLibraryInfo::location(QLibraryInfo::TranslationsPath);
+    {
+        QString bundleRes = QCoreApplication::applicationDirPath() + "/../Resources";
+        if (QDir(bundleRes).exists()) {
+            QFileInfo fi(bundleRes + "/qt_" + qtLang + ".qm");
+            if (fi.exists()) { path = bundleRes; }
+        }
+    }
+    if (path.isEmpty()) {
+        path = QLibraryInfo::location(QLibraryInfo::TranslationsPath);
+    }
 #endif
 
     QString filePath = path + "/qt_" + qtLang + ".qm";
