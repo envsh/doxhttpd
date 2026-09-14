@@ -195,7 +195,7 @@ static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRe
     QFont bf = baseFont; bf.setPointSize(10); bf.setBold(true);
     QFontMetrics bfm(bf);
 
-    // ── InProgress：顶部 4px 细线性进度条 + 固定预算 % 标签（无按钮，不回跳）──
+    // ── InProgress：顶部 4px 细线性进度条 + % 标签；底部按钮/状态仍照常绘制 ──
     if (state == ChatElement::InProgress) {
         int pct = progressPct;
         bool unknown = (pct < 0);
@@ -238,11 +238,6 @@ static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRe
                        Qt::AlignLeft | Qt::AlignVCenter, label);
         }
         p.setFont(baseFont);
-
-        DownloadBarInfo info;
-        info.downloadBtn = QRect();
-        info.retryBtn    = QRect();
-        return info;
     }
 
     // ── 其它状态：右→左文本/按钮排布 ──
@@ -254,6 +249,8 @@ static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRe
     } else if (state == ChatElement::Completed) {
         statusText = qFromUtf8("✓ 已下载");
         statusColor = QColor(80, 180, 80);
+    } else if (state == ChatElement::InProgress) {
+        statusText = qFromUtf8("⏳ 下载中");
     } else if (state == ChatElement::Failed) {
         statusText = qFromUtf8("✗ 失败");
         statusColor = QColor(200, 50, 50);

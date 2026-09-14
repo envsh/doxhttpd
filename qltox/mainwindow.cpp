@@ -3121,6 +3121,7 @@ void MainWindow::onRetryClicked(int msgIndex, const QString& mediaUrl, const QSt
     if (currentChatId < 0) { return; }
 
     ChatElement& el = chatWidget->mutableMessageAt(msgIndex);
+    if (el.downloadState == ChatElement::InProgress) { return; }   // 已在下载，防重复
     QByteArray rawBytes = MediaShmemCache::inst().getThumb(mediaUrl);
     if (!rawBytes.isEmpty()) {
         el.scaledDisplay = decodeRawToThumb(rawBytes.data(), rawBytes.size(),
