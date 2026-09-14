@@ -105,7 +105,7 @@ struct ChatElement {
     QString messageId;        // 服务端消息 ID（暂未填充）
     QString sendErrorMsg;
     QRect resendIconRect;
-    QStringList replyTos;
+    QStringList relatesTos;
     QStringList mentions;
     bool redacted = false;
 

@@ -20,9 +20,9 @@ public:
             " category,caption,media_url,media_mime,"
             " media_width,media_height,file_name,file_size,"
             " duration_sec,local_path,gif_path,thumbnail_key,"
-            " cache_tag,send_state,reply_to_rowid,edited,"
+            " cache_tag,send_state,relates_to_rowid,edited,"
             " forwarded_from,mention,"
-            " reply_to_ids,mentions_text,redacted) "
+            " relates_to_ids,mentions_text,redacted) "
             "VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,"
             "?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,"
             "?21,?22,?23,?24,?25,?26,?27,?28,?29,?30,"
@@ -55,11 +55,11 @@ public:
         if (!stmt.bind(i++, row.thumbnail_key.c_str())) { return 0; }
         if (!stmt.bind(i++, row.cache_tag)) { return 0; }
         if (!stmt.bind(i++, row.send_state)) { return 0; }
-        if (!stmt.bind(i++, row.reply_to_rowid)) { return 0; }
+        if (!stmt.bind(i++, row.relates_to_rowid)) { return 0; }
         if (!stmt.bind(i++, row.edited)) { return 0; }
         if (!stmt.bind(i++, row.forwarded_from.c_str())) { return 0; }
         if (!stmt.bind(i++, row.mention)) { return 0; }
-        if (!stmt.bind(i++, row.reply_to_ids.c_str())) { return 0; }
+        if (!stmt.bind(i++, row.relates_to_ids.c_str())) { return 0; }
         if (!stmt.bind(i++, row.mentions_text.c_str())) { return 0; }
         if (!stmt.bind(i++, row.redacted)) { return 0; }
         if (!stmt.step()) {
@@ -100,7 +100,7 @@ public:
         if (upd.hasRedacted)     addField("redacted");
         if (upd.hasForwardedFrom) addField("forwarded_from");
         if (upd.hasMention)      addField("mention");
-        if (upd.hasReplyToIds)   addField("reply_to_ids");
+        if (upd.hasRelatesToIds)   addField("relates_to_ids");
         if (upd.hasMentionsText) addField("mentions_text");
         if (n == 0) { return true; }
         sql += " WHERE rowid=?1";
@@ -128,7 +128,7 @@ public:
         if (upd.hasRedacted)     { stmt.bind(idx++, upd.redacted); }
         if (upd.hasForwardedFrom) { stmt.bind(idx++, upd.forwarded_from.c_str()); }
         if (upd.hasMention)      { stmt.bind(idx++, upd.mention); }
-        if (upd.hasReplyToIds)   { stmt.bind(idx++, upd.reply_to_ids.c_str()); }
+        if (upd.hasRelatesToIds)   { stmt.bind(idx++, upd.relates_to_ids.c_str()); }
         if (upd.hasMentionsText) { stmt.bind(idx++, upd.mentions_text.c_str()); }
         return stmt.step();
     }
@@ -152,9 +152,9 @@ public:
             " category,caption,media_url,media_mime,"
             " media_width,media_height,file_name,file_size,"
             " duration_sec,local_path,gif_path,thumbnail_key,"
-            " cache_tag,send_state,reply_to_rowid,edited,"
+            " cache_tag,send_state,relates_to_rowid,edited,"
             " forwarded_from,mention,"
-            " reply_to_ids,mentions_text,redacted "
+            " relates_to_ids,mentions_text,redacted "
             "FROM messages WHERE rowid=?1");
         if (!stmt.isPrepared()) { return nullptr; }
         if (!stmt.bind(1, rowid)) { return nullptr; }
@@ -188,11 +188,11 @@ public:
         row->thumbnail_key  = stmt.columnText(i++);
         row->cache_tag      = stmt.columnInt(i++);
         row->send_state     = stmt.columnInt(i++);
-row->reply_to_rowid = stmt.columnInt64(i++);
+row->relates_to_rowid = stmt.columnInt64(i++);
         row->edited         = stmt.columnInt(i++);
         row->forwarded_from = stmt.columnText(i++);
         row->mention        = stmt.columnInt(i++);
-        row->reply_to_ids   = stmt.columnText(i++);
+        row->relates_to_ids   = stmt.columnText(i++);
         row->mentions_text  = stmt.columnText(i++);
         row->redacted       = stmt.columnInt(i++);
         return row;
@@ -209,9 +209,9 @@ row->reply_to_rowid = stmt.columnInt64(i++);
             " category,caption,media_url,media_mime,"
             " media_width,media_height,file_name,file_size,"
             " duration_sec,local_path,gif_path,thumbnail_key,"
-            " cache_tag,send_state,reply_to_rowid,edited,"
+            " cache_tag,send_state,relates_to_rowid,edited,"
             " forwarded_from,mention,"
-            " reply_to_ids,mentions_text,redacted "
+            " relates_to_ids,mentions_text,redacted "
             "FROM messages WHERE chanid=?1 "
             "ORDER BY rowid DESC LIMIT ?2");
         if (!stmt.isPrepared()) { return rows; }
@@ -236,9 +236,9 @@ row->reply_to_rowid = stmt.columnInt64(i++);
             " category,caption,media_url,media_mime,"
             " media_width,media_height,file_name,file_size,"
             " duration_sec,local_path,gif_path,thumbnail_key,"
-            " cache_tag,send_state,reply_to_rowid,edited,"
+            " cache_tag,send_state,relates_to_rowid,edited,"
             " forwarded_from,mention,"
-            " reply_to_ids,mentions_text,redacted "
+            " relates_to_ids,mentions_text,redacted "
             "FROM messages WHERE chanid=?1 AND rowid<?2 "
             "ORDER BY rowid DESC LIMIT ?3");
         if (!stmt.isPrepared()) { return rows; }
@@ -491,11 +491,11 @@ private:
         row.thumbnail_key  = stmt.columnText(i++);
         row.cache_tag      = stmt.columnInt(i++);
         row.send_state     = stmt.columnInt(i++);
-        row.reply_to_rowid = stmt.columnInt64(i++);
+        row.relates_to_rowid = stmt.columnInt64(i++);
         row.edited         = stmt.columnInt(i++);
         row.forwarded_from = stmt.columnText(i++);
         row.mention        = stmt.columnInt(i++);
-        row.reply_to_ids   = stmt.columnText(i++);
+        row.relates_to_ids   = stmt.columnText(i++);
         row.mentions_text  = stmt.columnText(i++);
         row.redacted       = stmt.columnInt(i++);
         return row;
@@ -732,7 +732,7 @@ bool init_message_db(SqliteDb& db) {
         "  thumbnail_key TEXT,"
         "  cache_tag   INTEGER DEFAULT 0,"
         "  send_state  INTEGER DEFAULT 0,"
-        "  reply_to_rowid INTEGER DEFAULT 0,"
+        "  relates_to_rowid INTEGER DEFAULT 0,"
         "  edited      INTEGER DEFAULT 0,"
         "  deleted_at  TIMESTAMP,"
         "  forwarded_from TEXT DEFAULT '',"
@@ -753,7 +753,8 @@ bool init_message_db(SqliteDb& db) {
         }
     }
 
-    db.exec("ALTER TABLE messages ADD COLUMN reply_to_ids TEXT DEFAULT ''");
+    db.exec("ALTER TABLE messages ADD COLUMN relates_to_rowid INTEGER DEFAULT 0");
+    db.exec("ALTER TABLE messages ADD COLUMN relates_to_ids TEXT DEFAULT ''");
     db.exec("ALTER TABLE messages ADD COLUMN mentions_text TEXT DEFAULT ''");
     db.exec("ALTER TABLE messages ADD COLUMN redacted INTEGER DEFAULT 0");
 

@@ -57,7 +57,7 @@ public:
     static void getSelf();
     static void getFriends();
     // sendMessage 扩展字段 context：落入 POST body 表单字段，不进入 URL。
-    // key 必须在白名单内（见 restapi.cpp ctxAllowedKeys）：reply_to / mentions / visibility。
+    // key 必须在白名单内（见 restapi.cpp ctxAllowedKeys）：relates_to / mentions / visibility。
     // 多值用逗号拼接；白名单外的 key 在 sendMessage 遍历核对时记日志并跳过。
     static int  sendMessage(int chatId, const std::string& type, const std::string& message,
                              const std::string& idOverride = "",

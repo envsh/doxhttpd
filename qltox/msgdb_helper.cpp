@@ -35,8 +35,8 @@ ChatElement msgRowToElement(const MessageRow& row) {
     el.messageId    = qFromUtf8(row.event_id);
     el.dbRowid      = row.rowid;
     el.redacted     = (row.redacted != 0);
-    if (!row.reply_to_ids.empty())
-        el.replyTos = qSplit(qFromUtf8(row.reply_to_ids), QString(","));
+    if (!row.relates_to_ids.empty())
+        el.relatesTos = qSplit(qFromUtf8(row.relates_to_ids), QString(","));
     if (!row.mentions_text.empty())
         el.mentions = qSplit(qFromUtf8(row.mentions_text), QString(","));
     return el;
@@ -70,8 +70,8 @@ static MessageRow elementToRow(int id, const std::string& type,
     row.redacted    = el.redacted ? 1 : 0;
     {
         QStringList sl;
-        for (const auto& s : el.replyTos) sl.append(s);
-        row.reply_to_ids = std::string(qToUtf8(sl.join(QString(","))).data());
+        for (const auto& s : el.relatesTos) sl.append(s);
+        row.relates_to_ids = std::string(qToUtf8(sl.join(QString(","))).data());
     }
     {
         QStringList sl;

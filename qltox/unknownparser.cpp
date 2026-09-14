@@ -140,7 +140,7 @@ static void parseGomuksEvents(cJSON* roomObj, const std::string& roomId, ParseRe
                         cJSON* eid = cJSON_GetObjectItem(ir, "event_id");
                         if (eid && cJSON_IsString(eid)) {
                             replyTexts.push_back(cJSON_GetStringValue(eid));
-                            hm.replyTos.push_back(cJSON_GetStringValue(eid));
+                            hm.relatesTos.push_back(cJSON_GetStringValue(eid));
                         }
                     }
                 }
@@ -610,7 +610,7 @@ static bool tryParseMisskeyNote(const std::string& rawStr, ParseResult& ret) {
 
     cJSON* replyIdItem = cJSON_GetObjectItem(root, "replyId");
     if (replyIdItem && cJSON_IsString(replyIdItem)) {
-        hm.replyTos.push_back(cJSON_GetStringValue(replyIdItem));
+        hm.relatesTos.push_back(cJSON_GetStringValue(replyIdItem));
         cJSON* replyObj = cJSON_GetObjectItem(root, "reply");
         if (replyObj && cJSON_IsObject(replyObj)) {
             std::string replyText = jsonGetString(replyObj, "text");
@@ -622,7 +622,7 @@ static bool tryParseMisskeyNote(const std::string& rawStr, ParseResult& ret) {
 
     cJSON* renoteIdItem = cJSON_GetObjectItem(root, "renoteId");
     if (renoteIdItem && cJSON_IsString(renoteIdItem)) {
-        hm.replyTos.push_back(cJSON_GetStringValue(renoteIdItem));
+        hm.relatesTos.push_back(cJSON_GetStringValue(renoteIdItem));
         cJSON* renoteObj = cJSON_GetObjectItem(root, "renote");
         if (renoteObj && cJSON_IsObject(renoteObj)) {
             std::string renoteText = jsonGetString(renoteObj, "text");

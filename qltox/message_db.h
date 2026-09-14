@@ -33,12 +33,12 @@ struct MessageRow {
     std::string thumbnail_key;
     int cache_tag = 0;
     int send_state = 0;
-    int64_t reply_to_rowid = 0;
+    int64_t relates_to_rowid = 0;
     int edited = 0;
     int redacted = 0;
     std::string forwarded_from;
     int mention = 0;
-    std::string reply_to_ids;    // "eventId1,eventId2"
+    std::string relates_to_ids;    // "eventId1,eventId2"
     std::string mentions_text;   // "@user1,@user2"
 };
 
@@ -63,7 +63,7 @@ struct MessageUpdate {
     bool hasRedacted = false;       int redacted;
     bool hasForwardedFrom = false;  std::string forwarded_from;
     bool hasMention = false;        int mention;
-    bool hasReplyToIds = false;     std::string reply_to_ids;
+    bool hasRelatesToIds = false;     std::string relates_to_ids;
     bool hasMentionsText = false;   std::string mentions_text;
 };
 
