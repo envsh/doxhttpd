@@ -747,13 +747,15 @@ void ChatWidget::onMentionClicked(const QString& senderName, const QString& nick
 void ChatWidget::onReplyRequested(int msgIndex) {
     QString text = messageArea->messageAt(msgIndex).messageText;
     inputEdit->clearPlaceholder();
+    // one > works well for reply
+    // tow >> will show as ||foo
 #ifdef QT3_BUILD
-    inputEdit->insert(">> " + text + "\n\n");
+    inputEdit->insert("> " + text + "\n\n");
 #else
-    inputEdit->insertPlainText(">> " + text + "\n\n");
+    inputEdit->insertPlainText("> " + text + "\n\n");
 #endif
     inputEdit->setFocus();
-    ChatElement& target = messageArea->messageAt(msgIndex);   // 仅追加副作用，不改变 >> 行为
+    ChatElement& target = messageArea->messageAt(msgIndex);   // 仅追加副作用，不改变 > 行为
     if (!target.messageId.isEmpty()) {
         // 引用条为单值：新回复覆盖旧引用，并把旧引用捆绑的提到先撤掉
         if (!m_replyMentionedName.isEmpty())
