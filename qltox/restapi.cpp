@@ -310,7 +310,7 @@ static const QMap<QString, bool>& ctxAllowedKeys() {
     static QMap<QString, bool> m;
     static bool initialized = false;
     if (!initialized) {
-        m.insert("reply_to",   true);
+        m.insert("relates_to",   true); // not reply_to
         m.insert("mentions",   true);
         m.insert("visibility", true);
         initialized = true;

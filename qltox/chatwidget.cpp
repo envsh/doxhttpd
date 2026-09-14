@@ -745,22 +745,27 @@ void ChatWidget::onMentionClicked(const QString& senderName, const QString& nick
 }
 
 void ChatWidget::onReplyRequested(int msgIndex) {
+    ChatElement& target = messageArea->messageAt(msgIndex);   // 仅追加副作用，不改变 > 行为
     QString text = messageArea->messageAt(msgIndex).messageText;
     inputEdit->clearPlaceholder();
     // one > works well for reply
     // tow >> will show as ||foo
+	if (target.messageId.isEmpty()) {
 #ifdef QT3_BUILD
     inputEdit->insert("> " + text + "\n\n");
 #else
     inputEdit->insertPlainText("> " + text + "\n\n");
 #endif
+	} else {
+		// relates_to 字段会正确的传递给客户,客户端根据会查找到引用的消息文本
+	}
     inputEdit->setFocus();
-    ChatElement& target = messageArea->messageAt(msgIndex);   // 仅追加副作用，不改变 > 行为
+
     if (!target.messageId.isEmpty()) {
         // 引用条为单值：新回复覆盖旧引用，并把旧引用捆绑的提到先撤掉
         if (!m_replyMentionedName.isEmpty())
             removeCsvField(m_pendingCtx, "mentions", m_replyMentionedName);
-        appendCsvField(m_pendingCtx, "reply_to", target.messageId);
+            appendCsvField(m_pendingCtx, "relates_to", target.messageId);
         m_replyDisplayName = target.senderName;
         m_replySnippetText = snippetOneLine(target.messageText);
     } else {
@@ -779,7 +784,7 @@ void ChatWidget::onReplyRequested(int msgIndex) {
 
 void ChatWidget::onReplyStripClose() {
     qWarning("DIA onReplyStripClose called");
-    m_pendingCtx.remove("reply_to");
+    m_pendingCtx.remove("relates_to");
     if (!m_replyMentionedName.isEmpty())
         removeCsvField(m_pendingCtx, "mentions", m_replyMentionedName);
     m_replyMentionedName.truncate(0);

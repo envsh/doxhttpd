@@ -126,7 +126,7 @@ private:
     StickerPicker* m_stickerPicker = nullptr;
     bool m_autoTranslateEnabled = false;
     // 待发送扩展上下文（key=wire 表单字段名）。key 必须在白名单内：
-    //   reply_to   —— 引用目标（逗号分隔）
+    //   relates_to —— 引用目标（逗号分隔）
     //   mentions   —— 提及目标（逗号分隔）
     //   visibility —— 可见性
     // 必须及时清理：onSendClicked 发送后 clear()；切换会话/清空输入等时机也应 clear()。
