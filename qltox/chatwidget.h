@@ -85,7 +85,7 @@ private slots:
     void onSendEnClicked();
     void onTranslateClicked(int msgIndex);
     void onAutoTranslateRequested(int msgIndex, const QString& text, const QString& toLang);
-    void onMentionClicked(const QString& senderName);
+    void onMentionClicked(const QString& senderName, const QString& nickName);
     void onReplyRequested(int msgIndex);
     void onEditRequested(int msgIndex);
     void onDeleteRequested(int msgIndex);

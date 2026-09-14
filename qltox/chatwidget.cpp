@@ -202,8 +202,8 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent) {
             this, SIGNAL(openFullSizeImage(int, const QString&)));
     connect(messageArea, SIGNAL(openMediaPlayer(int)),
             this, SIGNAL(openMediaPlayer(int)));
-    connect(messageArea, SIGNAL(mentionClicked(const QString&)),
-            this, SLOT(onMentionClicked(const QString&)));
+    connect(messageArea, SIGNAL(mentionClicked(const QString&,const QString&)),
+            this, SLOT(onMentionClicked(const QString&,const QString&)));
     connect(messageArea, SIGNAL(autoTranslateRequested(int, const QString&, const QString&)),
             this, SLOT(onAutoTranslateRequested(int, const QString&, const QString&)));
     connect(messageArea, SIGNAL(replyRequested(int)), this, SLOT(onReplyRequested(int)));
@@ -727,8 +727,10 @@ static void clearChipRow(QWidget* row, ChipWidgetList& chips) {
     chips.clear();
 }
 
-void ChatWidget::onMentionClicked(const QString& senderName) {
-    QString mention = "@" + senderName + " ";
+void ChatWidget::onMentionClicked(const QString& senderName, const QString& nickName) {
+    // QString mention = "@" + senderName + " ";
+    QString nickfix = nickName.isEmpty() ? senderName : nickName;
+    QString mention = qFromUtf8("[%1](%2) ").arg(nickfix).arg(senderName);
     inputEdit->clearPlaceholder();
 #ifdef QT3_BUILD
     inputEdit->insert(mention);
@@ -746,9 +748,9 @@ void ChatWidget::onReplyRequested(int msgIndex) {
     QString text = messageArea->messageAt(msgIndex).messageText;
     inputEdit->clearPlaceholder();
 #ifdef QT3_BUILD
-    inputEdit->insert(">> " + text);
+    inputEdit->insert(">> " + text + "\n\n");
 #else
-    inputEdit->insertPlainText(">> " + text);
+    inputEdit->insertPlainText(">> " + text + "\n\n");
 #endif
     inputEdit->setFocus();
     ChatElement& target = messageArea->messageAt(msgIndex);   // 仅追加副作用，不改变 >> 行为

@@ -199,7 +199,7 @@ protected:
 signals:
     void translateClicked(int msgIndex);
     void sourceClicked(int msgIndex);
-    void mentionClicked(const QString& senderName);
+    void mentionClicked(const QString& senderName, const QString& nickName);
     void retryClicked(int msgIndex, const QString& mediaUrl, const QString& source);
     void downloadNeeded(int msgIndex, const QString& mediaUrl);
     void openFullSizeImage(int msgIndex, const QString& mediaUrl);
