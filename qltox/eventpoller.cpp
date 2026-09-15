@@ -86,18 +86,24 @@ void EventPoller::stop() {
 void EventPoller::addRequest(const HttpRequest& req,
                               void (*done)(const HttpResponse& resp, void* udata),
                               void* udata) {
-    if (!s_instance || !s_instance->multi) { return; }
+    if (!s_instance || !s_instance->multi) {
+        ALOG_WARN("addRequest dropped: EventPoller not ready", req.method, req.url);
+        return;
+    }
 
     ALOG_INFO(">>", req.method, req.url);
 
     auto t0 = timeNow();
 
     CURL* easy = curl_easy_init();
-    if (!easy) { return; }
+    if (!easy) {
+        ALOG_WARN("addRequest dropped: curl_easy_init failed", req.method, req.url);
+        return;
+    }
 
     auto* ctx = new HttpCtx{req.url, req.data,
                              std::string(), std::map<std::string, std::string>(),
-                             nullptr, done, udata, req.progress, timeNow()};
+                             nullptr, done, udata, req.progress, timeNow(), timeNow()};
 
     curl_easy_setopt(easy, CURLOPT_URL, ctx->urlStr.c_str());
     curl_easy_setopt(easy, CURLOPT_PRIVATE, ctx);
@@ -106,6 +112,7 @@ void EventPoller::addRequest(const HttpRequest& req,
     curl_easy_setopt(easy, CURLOPT_HEADERFUNCTION, headerCb);
     curl_easy_setopt(easy, CURLOPT_HEADERDATA, &ctx->headers);
     curl_easy_setopt(easy, CURLOPT_TIMEOUT, (long)req.timeoutSec);
+    curl_easy_setopt(easy, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(easy, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(easy, CURLOPT_FORBID_REUSE, 1L);
     curl_easy_setopt(easy, CURLOPT_FRESH_CONNECT, 1L);
@@ -131,20 +138,41 @@ void EventPoller::addRequest(const HttpRequest& req,
         curl_easy_setopt(easy, CURLOPT_HTTPHEADER, ctx->requestHeaders);
     }
 
-    s_instance->multiMutex.lock();
-    curl_multi_add_handle(s_instance->multi, easy);
-    s_instance->multiMutex.unlock();
+    s_instance->pendingMutex.lock();
+    s_instance->pendingHandles.push_back(easy);
+    s_instance->pendingMutex.unlock();
 
     ALOG_INFO("addRequest setup took", timeSince(t0), "for", ctx->urlStr);
 }
 
 void EventPoller::run() {
     while (running) {
-        int numfds;
-        curl_multi_wait(multi, NULL, 0, 50, &numfds);
-        int r;
-        while (curl_multi_perform(multi, &r) == CURLM_CALL_MULTI_PERFORM) { }
+        // 1) 泵线程内统一 add_handle —— libcurl multi 非线程安全，
+        //    所有 multi 操作只能在泵线程发生，GUI 线程只入挂起队列。
+        {
+            QMutexLocker lock(&pendingMutex);
+            while (!pendingHandles.empty()) {
+                curl_multi_add_handle(multi, pendingHandles.front());
+                pendingHandles.pop_front();
+            }
+        }
 
+        // 2) 阻塞等待 I/O：curl_multi_poll 官方推荐，无事件也会休眠（最多 20ms），
+        //    避免对"永远活跃"的 socket 形成无节流忙循环。
+        int numfds = 0;
+        curl_multi_poll(multi, NULL, 0, 20, &numfds);
+
+        // 3) 每轮只调用一次 curl_multi_perform，绝不用废弃的
+        //    `while (perform == CURLM_CALL_MULTI_PERFORM)` 忙循环。
+        int stillRunning = 0;
+        curl_multi_perform(multi, &stillRunning);
+
+        // 4) 兜底防空转：无 fd 可等且无在跑 handle 时主动休眠
+        if (numfds == 0 && stillRunning == 0) {
+            qSleepMs(10);
+        }
+
+        // 5) 无条件派发完成消息，防止被任意分支饿死
         CURLMsg* msg;
         int left;
         while ((msg = curl_multi_info_read(multi, &left))) {

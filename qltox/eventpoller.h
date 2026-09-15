@@ -3,6 +3,7 @@
 
 #include "compatcore34.h"
 #include <vector>
+#include <deque>
 #include <string>
 #include <map>
 #include <cstdint>
@@ -363,6 +364,7 @@ struct HttpCtx {
     void* udata;
     void (*progress)(long long received, long long total, void* udata);
     TimePoint lastEmitTp;   // 进度节流：上一次发射时刻（单调时钟）
+    TimePoint startTp;      // 请求发出时刻（看门狗/诊断用）
 };
 
 class EventPoller : public QThread {
@@ -379,7 +381,8 @@ private:
     static EventPoller* s_instance;
     bool running;
     CURLM* multi;
-    QMutex multiMutex;
+    QMutex pendingMutex;            // 仅保护 pendingHandles（GUI↔泵线程交接）
+    std::deque<CURL*> pendingHandles;
 };
 
 #endif
