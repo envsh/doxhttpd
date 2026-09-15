@@ -875,11 +875,19 @@ void ChatWidget::onForwardRequested(int msgIndex) {
     resetPendingContext();
     inputEdit->clearPlaceholder();
 #ifdef QT3_BUILD
-    inputEdit->setText(text);
+    inputEdit->setText(inputEdit->text()+" "+text);
 #else
-    inputEdit->setPlainText(text);
+    inputEdit->setPlainText(inputEdit->toPlainText()+" "+text);
 #endif
     inputEdit->setFocus();
+    // setFocus 后光标移到最后（QT3:setCursorPosition / QT4:QTextCursor::End，照抄 :406-413 双分支）
+#ifdef QT3_BUILD
+    inputEdit->setCursorPosition(0, inputEdit->text().length());
+#else
+    QTextCursor cursor = inputEdit->textCursor();
+    cursor.movePosition(QTextCursor::End);
+    inputEdit->setTextCursor(cursor);
+#endif
 }
 
 void ChatWidget::onScreenshotClicked() {
