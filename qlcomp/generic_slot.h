@@ -1,7 +1,7 @@
 #ifndef GENERIC_SLOT_H
 #define GENERIC_SLOT_H
 
-#include "compat34.h"
+#include "compatcore34.h"
 #include "generic_slot_base.h"
 #include <functional>
 #include <memory>

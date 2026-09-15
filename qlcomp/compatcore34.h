@@ -5,6 +5,7 @@
 #include <qstring.h>         // QString, QByteArray, QStringList
 #include <ctime>             // timespec, clock_gettime
 #ifdef QT3_BUILD
+#include <qobjectlist.h>     // Qt3 QObjectList（完整定义，用于 children()）
 #include <qevent.h>          // QCustomEvent (Qt3)
 #else
 #include <qcoreevent.h>      // QEvent::Type + QEvent (Qt4+, 纯 QtCore)

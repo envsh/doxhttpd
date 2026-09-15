@@ -83,7 +83,11 @@ qt_add_executable(qsktox
     ${qlapp_dir}/unknownparser.cpp
     ${qlcomp_dir}/compatcore34.cpp
     ${qlcomp_dir}/limelog.cpp
+    ${qlcomp_dir}/assertf.cpp
+    ${qlcomp_dir}/generic_slot.cpp
+    ${qlcomp_dir}/qthooks.cpp
     ${qlcomp_dir}/md5.c
+    ${qlcomp_dir}/qcrc64.cpp
 )
 
 # ── vendor: cJSON header ──

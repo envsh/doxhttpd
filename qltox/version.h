@@ -1,7 +1,7 @@
 #ifndef VERSION_H
 #define VERSION_H
 
-#define APP_VERSION "0.1.0"
+#define APP_VERSION "0.5.0"
 
 #define _STR(x) #x
 #define STR(x) _STR(x)

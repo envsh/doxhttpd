@@ -121,7 +121,7 @@ void qInfo(const char* fmt, ...) {
 }
 
 #else  // ===== Qt4: 消息处理器 =====
-#include <QApplication>
+#include <qglobal.h>
 #include <cstdio>
 #include <ctime>
 

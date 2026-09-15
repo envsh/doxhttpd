@@ -1,7 +1,7 @@
 #ifndef GENERIC_SLOT_BASE_H
 #define GENERIC_SLOT_BASE_H
 
-#include "compat34.h"
+#include "compatcore34.h"
 
 class GenericSlotBase : public QObject {
     Q_OBJECT
