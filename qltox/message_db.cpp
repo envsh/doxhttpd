@@ -733,6 +733,9 @@ bool init_message_db(SqliteDb& db) {
         "  cache_tag   INTEGER DEFAULT 0,"
         "  send_state  INTEGER DEFAULT 0,"
         "  relates_to_rowid INTEGER DEFAULT 0,"
+        "  relates_to_ids   TEXT DEFAULT '',"
+        "  mentions_text    TEXT DEFAULT '',"
+        "  redacted         INTEGER DEFAULT 0,"
         "  edited      INTEGER DEFAULT 0,"
         "  deleted_at  TIMESTAMP,"
         "  forwarded_from TEXT DEFAULT '',"
@@ -753,10 +756,37 @@ bool init_message_db(SqliteDb& db) {
         }
     }
 
-    db.exec("ALTER TABLE messages ADD COLUMN relates_to_rowid INTEGER DEFAULT 0");
-    db.exec("ALTER TABLE messages ADD COLUMN relates_to_ids TEXT DEFAULT ''");
-    db.exec("ALTER TABLE messages ADD COLUMN mentions_text TEXT DEFAULT ''");
-    db.exec("ALTER TABLE messages ADD COLUMN redacted INTEGER DEFAULT 0");
+    // 存量库迁移：新装库 CREATE 已含新列（自然跳过）；老库幂等补齐
+    {
+        bool hasRelRowid = false;
+        bool hasRelIds = false;
+        bool hasMentions = false;
+        bool hasRedacted = false;
+        auto stmt = db.prepare("PRAGMA table_info(messages)");
+        while (stmt.isPrepared() && stmt.stepRow()) {
+            const std::string name = stmt.columnText(1);
+            if (name == "relates_to_rowid") hasRelRowid = true;
+            if (name == "relates_to_ids")   hasRelIds   = true;
+            if (name == "mentions_text")    hasMentions = true;
+            if (name == "redacted")         hasRedacted = true;
+        }
+        if (!hasRelRowid &&
+            !db.exec("ALTER TABLE messages ADD COLUMN relates_to_rowid INTEGER DEFAULT 0")) {
+            return false;
+        }
+        if (!hasRelIds &&
+            !db.exec("ALTER TABLE messages ADD COLUMN relates_to_ids TEXT DEFAULT ''")) {
+            return false;
+        }
+        if (!hasMentions &&
+            !db.exec("ALTER TABLE messages ADD COLUMN mentions_text TEXT DEFAULT ''")) {
+            return false;
+        }
+        if (!hasRedacted &&
+            !db.exec("ALTER TABLE messages ADD COLUMN redacted INTEGER DEFAULT 0")) {
+            return false;
+        }
+    }
 
     db.exec("CREATE INDEX IF NOT EXISTS idx_messages_chanid"
             "  ON messages(chanid, rowid DESC)");
