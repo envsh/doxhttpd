@@ -84,6 +84,7 @@ struct ChatElement {
     QString fileName;
     int fileSize;
     int downloadProgress;
+    int downloadSpeedBps;   // 最近进度事件实测速率（B/s），0=不显示
     QString localPath;
 
     // Video only
@@ -114,7 +115,8 @@ struct ChatElement {
         , transState(TransState::None), needsTranslateComputed(false), needsTranslateResult(false)
         , downloadState(NotRequested)
         , mediaWidth(0), mediaHeight(0)
-        , fileSize(0), downloadProgress(0), durationSec(0), gifLikeVideo(false), pendingPlay(false)
+        , fileSize(0), downloadProgress(0), downloadSpeedBps(0)
+        , durationSec(0), gifLikeVideo(false), pendingPlay(false)
         , movie(nullptr)
         , cachedWidth(-1), height(0), firstInGroup(1), sendState(SendSending) {}
 

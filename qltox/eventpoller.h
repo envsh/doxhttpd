@@ -191,6 +191,7 @@ public:
     int msgIndex = 0;
     long long received = 0;
     long long total = 0;
+    long long speedBps = 0;   // 本次节流区间实测速率（B/s）
 };
 
 class AvatarDownloadEvent : public CustomEventBase {
@@ -341,17 +342,20 @@ struct HttpRequest {
     std::string method;
     std::string data;
     int timeoutSec;
+    int stallSec;      // 无进展停滞超时（秒）；0=禁用；仅对带 progress 的下载生效
     std::map<std::string, std::string> extraHeaders;
     // 下载进度回调（poller 线程触发；100ms 节流在 xferinfoCb 内处理）
-    void (*progress)(long long received, long long total, void* udata) = nullptr;
+    void (*progress)(long long received, long long total,
+                     long long speedBps, void* udata) = nullptr;
 
-    HttpRequest() : method("GET"), timeoutSec(35) {}
+    HttpRequest() : method("GET"), timeoutSec(35), stallSec(0) {}
     HttpRequest(std::string url, std::string method = "GET",
                 std::string data = "", int timeoutSec = 35,
-                std::map<std::string, std::string> extraHeaders = {})
+                std::map<std::string, std::string> extraHeaders = {},
+                int stallSec = 0)
         : url(std::move(url)), method(std::move(method)),
           data(std::move(data)), timeoutSec(timeoutSec),
-          extraHeaders(std::move(extraHeaders)) {}
+          extraHeaders(std::move(extraHeaders)), stallSec(stallSec) {}
 };
 
 struct HttpCtx {
@@ -362,9 +366,14 @@ struct HttpCtx {
     curl_slist* requestHeaders;
     void (*done)(const HttpResponse& resp, void* udata);
     void* udata;
-    void (*progress)(long long received, long long total, void* udata);
+    void (*progress)(long long received, long long total,
+                     long long speedBps, void* udata);
     TimePoint lastEmitTp;   // 进度节流：上一次发射时刻（单调时钟）
     TimePoint startTp;      // 请求发出时刻（看门狗/诊断用）
+    long long lastEmitBytes;   // 上次节流发射时的已收字节（算速度用）
+    long long lastSpeedBps;    // 上次节流实测速率（B/s）
+    TimePoint lastActiveTp;    // 最近一次收发活动时刻（看门狗用）
+    int stallSec;              // 无进展超时（秒）；0=禁用
 };
 
 class EventPoller : public QThread {
@@ -383,6 +392,7 @@ private:
     CURLM* multi;
     QMutex pendingMutex;            // 仅保护 pendingHandles（GUI↔泵线程交接）
     std::deque<CURL*> pendingHandles;
+    std::vector<CURL*> activeHandles;   // 泵线程私有：在跑句柄（看门狗用）
 };
 
 #endif

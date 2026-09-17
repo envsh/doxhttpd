@@ -786,36 +786,54 @@ void MainWindow::customEvent(CustomEventBase* event) {
 
         if (e->success) {
             if (elp) {
-                // Cache raw bytes (JPEG/WebP), not QPixmap
-                MediaShmemCache::inst().putThumb(qFromUtf8(e->mxcUrl), (const char*)e->rawData.data(), e->rawData.size());
-                elp->scaledDisplay = decodeRawToThumb((const char*)e->rawData.data(), e->rawData.size(),
+                bool isImgLike = (elp->etype == ChatElement::Image
+                                  || elp->etype == ChatElement::Gif);
+                bool sizeOk = (elp->fileSize <= 0)
+                              || ((int)e->rawData.size() == elp->fileSize);
+                QPixmap thumb = decodeRawToThumb((const char*)e->rawData.data(), e->rawData.size(),
                     elp->mediaWidth, elp->mediaHeight, chatWidget->width() * 70 / 100);
+                if (sizeOk && (!isImgLike || !thumb.isNull())) {
+                    elp->scaledDisplay = thumb;
 
-                {
-                    std::string key = mediaCacheKey("file", qFromUtf8(e->mxcUrl));
-                    const auto& rd = e->rawData;
-                    std::vector<uint8_t> data(rd.begin(), rd.end());
-                    Storage::instance().cacheDbAsync()->storeMedia(
-                        std::move(key), std::move(data), "", 2, nullptr);
-                }
+                    // Cache raw bytes (JPEG/WebP), not QPixmap
+                    MediaShmemCache::inst().putThumb(qFromUtf8(e->mxcUrl), (const char*)e->rawData.data(), e->rawData.size());
 
-                elp->downloadState = ChatElement::Completed;
-                elp->downloadProgress = 100;
-                bool elPendingPlay = elp->pendingPlay;
-                bool isVideo = (elp->etype == ChatElement::Video);
-                bool isGifElem = (elp->etype == ChatElement::Gif);
-                if (isVideo || isGifElem || elPendingPlay) {
-                    std::vector<uint8_t> procData(e->rawData.begin(), e->rawData.end());
-                    scheduleMediaPlayback(e->msgIndex, elPendingPlay, &procData,
-                                          e->chatId, qFromUtf8(e->chatType));
+                    {
+                        std::string key = mediaCacheKey("file", qFromUtf8(e->mxcUrl));
+                        const auto& rd = e->rawData;
+                        std::vector<uint8_t> data(rd.begin(), rd.end());
+                        Storage::instance().cacheDbAsync()->storeMedia(
+                            std::move(key), std::move(data), "", 2, nullptr);
+                    }
+
+                    elp->downloadState = ChatElement::Completed;
+                    elp->downloadProgress = 100;
+                    elp->downloadSpeedBps = 0;
+                    bool elPendingPlay = elp->pendingPlay;
+                    bool isVideo = (elp->etype == ChatElement::Video);
+                    bool isGifElem = (elp->etype == ChatElement::Gif);
+                    if (isVideo || isGifElem || elPendingPlay) {
+                        std::vector<uint8_t> procData(e->rawData.begin(), e->rawData.end());
+                        scheduleMediaPlayback(e->msgIndex, elPendingPlay, &procData,
+                                              e->chatId, qFromUtf8(e->chatType));
+                    }
+                } else {
+                    qWarning("Media download corrupt: chat=%d/%s idx=%d want=%d got=%d",
+                             e->chatId, e->chatType.c_str(), e->msgIndex,
+                             elp->fileSize, (int)e->rawData.size());
+                    elp->downloadState = ChatElement::Failed;
+                    elp->downloadProgress = 0;
+                    elp->downloadSpeedBps = 0;
+                    elp->mediaUrl = qFromUtf8(e->mxcUrl);
                 }
+                if (isCurrent) { chatWidget->updateElement(e->msgIndex); }
             }
-            if (isCurrent && elp) { chatWidget->updateElement(e->msgIndex); }
         } else {
             qWarning("Media download failed: chat=%d/%s idx=%d err=%s",
                      e->chatId, e->chatType.c_str(), e->msgIndex, e->errorInfo.c_str());
             if (elp) {
                 elp->downloadState = ChatElement::Failed;
+                elp->downloadSpeedBps = 0;
                 elp->mediaUrl = qFromUtf8(e->mxcUrl);
                 if (isCurrent) { chatWidget->updateElement(e->msgIndex); }
             }
@@ -838,6 +856,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 if (pct < el.downloadProgress) { pct = el.downloadProgress; }   // 百分比只增不减
             }
             el.downloadProgress = pct;
+            el.downloadSpeedBps = (int)e->speedBps;
             if (currentChatId == e->chatId
                 && currentChatType == qFromUtf8(e->chatType)) {
                 chatWidget->repaintMessageElement(e->msgIndex);
@@ -2337,7 +2356,7 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
                                     if (hm.fileSize > 0 && hm.fileSize < 1048576) {
                                         el.downloadState = ChatElement::InProgress;
                                         el.downloadProgress = 0;
-                                        ToxAPI::downloadMedia(chatId, chatType, newIdx, hm.mediaUrl);
+                                        ToxAPI::downloadMedia(chatId, chatType, newIdx, hm.mediaUrl, hm.fileSize);
                                     }
                                 }
                             }
@@ -3148,8 +3167,9 @@ void MainWindow::onRetryClicked(int msgIndex, const QString& mediaUrl, const QSt
     chatWidget->updateElement(msgIndex);
     el.downloadState = ChatElement::InProgress;
     el.downloadProgress = 0;
+    el.downloadSpeedBps = 0;
     ToxAPI::downloadMedia(currentChatId, std::string(qToUtf8(currentChatType).data()),
-                          msgIndex, std::string(qToUtf8(mediaUrl).data()));
+                          msgIndex, std::string(qToUtf8(mediaUrl).data()), el.fileSize);
 }
 
 void MainWindow::onResendMessage(int msgIndex) {

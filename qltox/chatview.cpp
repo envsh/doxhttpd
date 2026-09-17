@@ -182,6 +182,15 @@ static QString formatFileSize(int bytes) {
     return QString::number(mb, 'f', 1) + qFromUtf8(" MB");
 }
 
+static QString formatSpeed(int bps) {
+    if (bps <= 0) { return QString(); }
+    if (bps < 1024) { return QString::number(bps) + qFromUtf8(" B/s"); }
+    double kb = bps / 1024.0;
+    if (kb < 1024.0) { return QString::number(kb, 'f', 1) + qFromUtf8(" KB/s"); }
+    double mb = kb / 1024.0;
+    return QString::number(mb, 'f', 1) + qFromUtf8(" MB/s");
+}
+
 struct DownloadBarInfo {
     QRect downloadBtn;
     QRect retryBtn;
@@ -189,7 +198,8 @@ struct DownloadBarInfo {
 
 static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRect,
     const QFont& baseFont, const StyleParams::Palette& pal,
-    ChatElement::DownloadState state, int fileSize, int progressPct = -1)
+    ChatElement::DownloadState state, int fileSize,
+    int progressPct = -1, int speedBps = 0)
 {
     const int kPad = 8, btnH = 26, retryBtnH = 22;
     QFont bf = baseFont; bf.setPointSize(10); bf.setBold(true);
@@ -205,7 +215,14 @@ static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRe
         // 标签宽度按 "100%" 全程预算，% 增长不会推动任何元素移位
         QString label = unknown ? qFromUtf8("…") : (QString::number(pct) + "%");
         int labelW = bfm.width("100%") + 6;
-        int labelX = parentRect.right() - kPad - labelW;
+        QString speedText;
+        int speedW = 0;
+        if (speedBps > 0 && !unknown) {
+            speedText = formatSpeed(speedBps);
+            speedW = bfm.width(speedText);
+        }
+        int labelX = parentRect.right() - kPad - labelW
+                   - (speedText.isEmpty() ? 0 : speedW + kPad);
 
         // 4px 条在预览区顶部，标签紧跟在条下方
         int barH = 4;
@@ -236,6 +253,15 @@ static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRe
             p.setFont(bf);
             p.drawText(labelX, labelY, labelW, btnH,
                        Qt::AlignLeft | Qt::AlignVCenter, label);
+        }
+        if (!speedText.isEmpty()) {
+            int sX = labelX - kPad - speedW;
+            if (sX >= trackX + kPad) {   // 不覆盖进度条
+                p.setPen(pal.textMuted);
+                p.setFont(bf);
+                p.drawText(sX, labelY, speedW, btnH,
+                           Qt::AlignRight | Qt::AlignVCenter, speedText);
+            }
         }
         p.setFont(baseFont);
     }
@@ -348,7 +374,7 @@ static int paintThumbnail(QPainter& p, const QRect& imgRect,
     const StyleParams::Palette& pal,
     ChatElement::DownloadState state,
     QRect* downloadBtnOut = nullptr, QRect* retryBtnOut = nullptr,
-    int fileSize = 0, int progressPct = -1)
+    int fileSize = 0, int progressPct = -1, int speedBps = 0)
 {
     int maxW = imgRect.width(), maxH = imgRect.height();
     int dw, dh;
@@ -401,7 +427,7 @@ static int paintThumbnail(QPainter& p, const QRect& imgRect,
     }
     // ── 状态栏（右下角右对齐）──
     DownloadBarInfo bi = paintDownloadStatusBar(p, imgRect, baseFont, pal,
-                                                state, fileSize, progressPct);
+                                                state, fileSize, progressPct, speedBps);
     if (downloadBtnOut) { *downloadBtnOut = bi.downloadBtn; }
     if (retryBtnOut)    { *retryBtnOut    = bi.retryBtn; }
     return dh;
@@ -429,7 +455,7 @@ static void paintMediaContent(QPainter& p, const QRect& bubbleRect,
     int emojiW, const StyleParams::Palette& pal,
     ChatElement::DownloadState state,
     QRect* downloadBtnOut = nullptr, QRect* retryBtnOut = nullptr,
-    int fileSize = 0, int progressPct = -1)
+    int fileSize = 0, int progressPct = -1, int speedBps = 0)
 {
     const int kBubbleHPad = 12, kBubbleVPad = 8, kPad = 8;
     QRect imgRect(bubbleRect.x() + kBubbleHPad, bubbleRect.y() + kBubbleVPad,
@@ -444,7 +470,7 @@ static void paintMediaContent(QPainter& p, const QRect& bubbleRect,
 #endif
     }
     const QPixmap& src = !frame.isNull() ? frame : fullImage;
-    int imgDispH = paintThumbnail(p, imgRect, src, mediaWidth, mediaHeight, baseFont, fm, pal, state, downloadBtnOut, retryBtnOut, fileSize, progressPct);
+    int imgDispH = paintThumbnail(p, imgRect, src, mediaWidth, mediaHeight, baseFont, fm, pal, state, downloadBtnOut, retryBtnOut, fileSize, progressPct, speedBps);
 
     // GIF badge
     if (etype == ChatElement::Gif || gifLikeVideo) {
@@ -1436,11 +1462,12 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
             thumbnailRect = QRect(bubbleRect.x() + kBubbleHPad, bubbleRect.y() + kBubbleVPad,
                                   bubbleRect.width() - 2*kBubbleHPad, bubbleRect.height() - 2*kBubbleVPad);
         }
-        paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
+paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
                           scaledDisplay, caption,
                           mediaWidth, mediaHeight, durationSec, movie,
                           baseFont, fm, emojiW, pal, downloadState,
-                           &downloadBtnRect, &retryBtnRect, fileSize, downloadProgress);
+                          &downloadBtnRect, &retryBtnRect, fileSize, downloadProgress,
+                          downloadSpeedBps);
         if (!firstInGroup) { drawGroupedTime(p, baseFont, fm, bubbleRect, time, pal); }
         break;
     }
@@ -1612,7 +1639,7 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
         thumbnailRect = bubbleRect;   // 双击命中区（复用媒体字段）
         {
             DownloadBarInfo bi = paintDownloadStatusBar(p, bubbleRect, baseFont, pal,
-                downloadState, fileSize, downloadProgress);
+                downloadState, fileSize, downloadProgress, downloadSpeedBps);
             downloadBtnRect = bi.downloadBtn;
             retryBtnRect    = bi.retryBtn;
         }
@@ -1962,7 +1989,7 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
         // 下载按钮
         {
             DownloadBarInfo bi = paintDownloadStatusBar(p, bubbleRect, baseFont, pal,
-                downloadState, fileSize, downloadProgress);
+                downloadState, fileSize, downloadProgress, downloadSpeedBps);
             downloadBtnRect = bi.downloadBtn;
             retryBtnRect    = bi.retryBtn;
         }

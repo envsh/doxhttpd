@@ -50,9 +50,15 @@ static int xferinfoCb(void* clientp, curl_off_t dltotal, curl_off_t dlnow,
     auto* ctx = static_cast<HttpCtx*>(clientp);
     if (!ctx || !ctx->progress) { return 0; }
     bool done = (dltotal > 0 && dlnow >= dltotal);
-    if (done || elapsedMs(ctx->lastEmitTp) >= 100) {
+    long long dMs = elapsedMs(ctx->lastEmitTp);
+    if (done || dMs >= 100) {
+        long long dByt = (long long)dlnow - ctx->lastEmitBytes;
+        long long speed = 0;
+        if (dMs > 0 && dByt >= 0) { speed = dByt * 1000 / dMs; }
+        ctx->lastEmitBytes = (long long)dlnow;
         ctx->lastEmitTp = timeNow();
-        ctx->progress((long long)dlnow, (long long)dltotal, ctx->udata);
+        ctx->lastActiveTp = timeNow();
+        ctx->progress((long long)dlnow, (long long)dltotal, speed, ctx->udata);
     }
     return 0;
 }
@@ -103,7 +109,8 @@ void EventPoller::addRequest(const HttpRequest& req,
 
     auto* ctx = new HttpCtx{req.url, req.data,
                              std::string(), std::map<std::string, std::string>(),
-                             nullptr, done, udata, req.progress, timeNow(), timeNow()};
+                             nullptr, done, udata, req.progress,
+                             timeNow(), timeNow(), 0, 0, timeNow(), req.stallSec};
 
     curl_easy_setopt(easy, CURLOPT_URL, ctx->urlStr.c_str());
     curl_easy_setopt(easy, CURLOPT_PRIVATE, ctx);
@@ -152,7 +159,9 @@ void EventPoller::run() {
         {
             QMutexLocker lock(&pendingMutex);
             while (!pendingHandles.empty()) {
-                curl_multi_add_handle(multi, pendingHandles.front());
+                CURL* easy = pendingHandles.front();
+                curl_multi_add_handle(multi, easy);
+                activeHandles.push_back(easy);
                 pendingHandles.pop_front();
             }
         }
@@ -166,6 +175,56 @@ void EventPoller::run() {
         //    `while (perform == CURLM_CALL_MULTI_PERFORM)` 忙循环。
         int stillRunning = 0;
         curl_multi_perform(multi, &stillRunning);
+
+        // 3.5) 停滞看门狗：带 progress 的请求连续无收发活动 → 取证真实网络状态后中断
+        {
+            std::vector<HttpCtx*> stalled;
+            for (size_t i = 0; i < activeHandles.size(); ++i) {
+                HttpCtx* c = nullptr;
+                curl_easy_getinfo(activeHandles[i], CURLINFO_PRIVATE, &c);
+                if (!c || c->stallSec <= 0 || !c->progress) { continue; }
+                if (elapsedMs(c->lastActiveTp) <= (long long)c->stallSec * 1000) { continue; }
+                stalled.push_back(c);
+            }
+            for (HttpCtx* c : stalled) {
+                for (auto it = activeHandles.begin(); it != activeHandles.end(); ++it) {
+                    HttpCtx* cc = nullptr;
+                    curl_easy_getinfo(*it, CURLINFO_PRIVATE, &cc);
+                    if (cc != c) { continue; }
+                    // ── 取证真实网络状态（不凭猜测重置 UI）──
+                    long respCode = 0; long long recv = 0, expect = 0;
+                    double speed = 0, totalT = 0, connectT = 0, startT = 0;
+                    curl_easy_getinfo(*it, CURLINFO_RESPONSE_CODE, &respCode);
+                    curl_easy_getinfo(*it, CURLINFO_SIZE_DOWNLOAD_T, &recv);
+                    curl_easy_getinfo(*it, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &expect);
+                    curl_easy_getinfo(*it, CURLINFO_SPEED_DOWNLOAD, &speed);
+                    curl_easy_getinfo(*it, CURLINFO_TOTAL_TIME, &totalT);
+                    curl_easy_getinfo(*it, CURLINFO_CONNECT_TIME, &connectT);
+                    curl_easy_getinfo(*it, CURLINFO_STARTTRANSFER_TIME, &startT);
+                    std::string phase = (connectT <= 0) ? "not_connected"
+                        : (startT <= 0 ? "waiting_headers" : "in_body");
+                    std::string reason = "stall: no data for " + std::to_string(c->stallSec) + "s"
+                        + " http=" + std::to_string(respCode)
+                        + " got=" + std::to_string(recv)
+                        + "/" + std::to_string(expect)
+                        + " speed=" + std::to_string((long)speed) + "B/s"
+                        + " elapsed=" + std::to_string((long)totalT) + "s"
+                        + " phase=" + phase;
+                    ALOG_WARN("!! stall timeout", c->urlStr, reason);
+
+                    HttpResponse resp;
+                    resp.httpCode = (int)respCode;   // 0 = 尚未收到响应头，如实反映
+                    resp.curlErrStr = reason;
+                    curl_multi_remove_handle(multi, *it);
+                    activeHandles.erase(it);
+                    curl_easy_cleanup(*it);
+                    if (c->requestHeaders) { curl_slist_free_all(c->requestHeaders); }
+                    c->done(resp, c->udata);
+                    delete c;
+                    break;
+                }
+            }
+        }
 
         // 4) 兜底防空转：无 fd 可等且无在跑 handle 时主动休眠
         if (numfds == 0 && stillRunning == 0) {
@@ -207,6 +266,9 @@ void EventPoller::run() {
                 }
 
                 curl_multi_remove_handle(multi, msg->easy_handle);
+                for (auto it = activeHandles.begin(); it != activeHandles.end(); ++it) {
+                    if (*it == msg->easy_handle) { activeHandles.erase(it); break; }
+                }
                 curl_easy_cleanup(msg->easy_handle);
 
                 if (ctx->requestHeaders) {

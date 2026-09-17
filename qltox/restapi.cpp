@@ -412,7 +412,8 @@ void ToxAPI::getMessagesHistory(int contactId, const std::string& contactType) {
 }
 
 // 媒体下载进度回调（poller 线程）：转发为 MediaDownloadProgressEvent
-void ToxAPI::mediaProgressCb(long long received, long long total, void* udata) {
+void ToxAPI::mediaProgressCb(long long received, long long total,
+                             long long speedBps, void* udata) {
     auto* ctx = static_cast<ApiCtx*>(udata);
     if (!ctx || !s_target) { return; }
     auto* ev = new MediaDownloadProgressEvent();
@@ -421,12 +422,22 @@ void ToxAPI::mediaProgressCb(long long received, long long total, void* udata) {
     ev->msgIndex = ctx->n1;
     ev->received = received;
     ev->total    = total;
+    ev->speedBps = speedBps;
     QApplication::postEvent(s_target, ev);
 }
 
-void ToxAPI::downloadMedia(int chatId, const std::string& chatType, int msgIndex, const std::string& mxcUrl) {
+void ToxAPI::downloadMedia(int chatId, const std::string& chatType, int msgIndex,
+                           const std::string& mxcUrl, int fileSize) {
     auto* ctx = new ApiCtx(ApiMediaDownload, chatId, chatType, mxcUrl, msgIndex);
-    HttpRequest req("/api/media_download?url=" + urlEncode(mxcUrl), "GET");
+    // 大文件放宽硬超时（按 50KB/s 估算，下限 90s），配停滞看门狗防止永久卡住
+    int timeoutSec = 120;
+    if (fileSize > 0) {
+        int est = fileSize / 51200 + 1;
+        if (est < 90) { est = 90; }
+        timeoutSec = est;
+    }
+    HttpRequest req("/api/media_download?url=" + urlEncode(mxcUrl),
+                    "GET", "", timeoutSec, {}, 25);
     req.progress = mediaProgressCb;
     request(req, ctx);
 }
@@ -1272,9 +1283,11 @@ void ToxAPI::dispatchResult(ApiCtx* ctx, const HttpResponse& resp) {
         ev->chatType = ctx->str1;
         ev->mxcUrl = ctx->str2;
         ev->msgIndex = ctx->n1;
-        if (resp.httpCode != 200 || resp.body.empty()) {
+        if (resp.httpCode != 200 || resp.body.empty() || !resp.curlErrStr.empty()) {
             ev->success = false;
-            ev->errorInfo = "HTTP " + std::to_string(resp.httpCode);
+            ev->errorInfo = resp.curlErrStr.empty()
+                ? "HTTP " + std::to_string(resp.httpCode)
+                : resp.curlErrStr;
             QApplication::postEvent(s_target, ev);
             break;
         }

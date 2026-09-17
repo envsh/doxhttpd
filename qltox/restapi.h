@@ -113,7 +113,8 @@ public:
     static bool setConferenceTitleSync(int conferenceId, const std::string& title);
     static void setGroupTopic(int groupId, const std::string& topic);
     static void setConferenceTitle(int conferenceId, const std::string& title);
-    static void downloadMedia(int chatId, const std::string& chatType, int msgIndex, const std::string& mxcUrl);
+    static void downloadMedia(int chatId, const std::string& chatType, int msgIndex,
+                              const std::string& mxcUrl, int fileSize = -1);
     static void downloadAvatar(const std::string& mxcUrl);
     static bool setSelfInfoSync(const std::string& name, const std::string& statusMessage);
     static bool joinGroupSync(int friendNumber, const std::string& chatId,
@@ -158,7 +159,8 @@ private:
                             std::string& outBody,
                             const std::string& data = "",
                             int timeoutSec = 35);
-    static void mediaProgressCb(long long received, long long total, void* udata);
+    static void mediaProgressCb(long long received, long long total,
+                                long long speedBps, void* udata);
 
     static QObject* s_target;
     static std::string s_baseUrl;
