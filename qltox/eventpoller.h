@@ -189,6 +189,7 @@ public:
     int chatId = 0;
     std::string chatType;
     int msgIndex = 0;
+    std::string mxcUrl;   // 身份解析用（环形裁剪/prepend 后索引会错位）
     long long received = 0;
     long long total = 0;
     long long speedBps = 0;   // 本次节流区间实测速率（B/s）

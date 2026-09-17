@@ -57,8 +57,12 @@ static int xferinfoCb(void* clientp, curl_off_t dltotal, curl_off_t dlnow,
         if (dMs > 0 && dByt >= 0) { speed = dByt * 1000 / dMs; }
         ctx->lastEmitBytes = (long long)dlnow;
         ctx->lastEmitTp = timeNow();
-        ctx->lastActiveTp = timeNow();
-        ctx->progress((long long)dlnow, (long long)dltotal, speed, ctx->udata);
+        // 看门狗"活动"只看真实字节推进：零字节发射（zombie 连接/挂起上游）不得重置停滞计时
+        if (dByt > 0) { ctx->lastActiveTp = timeNow(); }
+        // 零字节且未完成时不发进度事件（避免无效重绘）；done 仍照发
+        if (done || dByt > 0) {
+            ctx->progress((long long)dlnow, (long long)dltotal, speed, ctx->udata);
+        }
     }
     return 0;
 }

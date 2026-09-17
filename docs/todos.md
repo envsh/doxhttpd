@@ -55,3 +55,4 @@
 - [ ] 把fedbridge后端打包为子进程/库, 可以完整发布
 - [x] systray unread count
 - [ ] media/文件下载进度显示
+- [ ] 命令前缀解析与处理/@

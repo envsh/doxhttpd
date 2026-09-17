@@ -760,6 +760,28 @@ MainWindow::~MainWindow() {
     Storage::instance().close();
 }
 
+// 环形缓冲裁剪/prepend 会移动索引：以 mediaUrl 身份定位真实目标。
+// 命中且 url 一致走原索引；越界或 url 不符则按 url 扫描；url 为空回退 msgIndex。
+static ChatElement* resolveMediaElement(ChatHistory* target, const std::string& mxcUrl,
+                                        int msgIndex, int* outIndex) {
+    if (outIndex) { *outIndex = -1; }
+    if (!target) { return nullptr; }
+    if (msgIndex >= 0 && msgIndex < target->size()
+        && ((*target)[msgIndex].mediaUrl == qFromUtf8(mxcUrl) || mxcUrl.empty())) {
+        if (outIndex) { *outIndex = msgIndex; }
+        return &(*target)[msgIndex];
+    }
+    if (mxcUrl.empty()) { return nullptr; }
+    QString want = qFromUtf8(mxcUrl);
+    for (int i = 0; i < target->size(); ++i) {
+        if ((*target)[i].mediaUrl == want) {
+            if (outIndex) { *outIndex = i; }
+            return &(*target)[i];
+        }
+    }
+    return nullptr;
+}
+
 void MainWindow::customEvent(CustomEventBase* event) {
     TimePoint _t0 = timeNow();
     // 事件轮询结果
@@ -777,10 +799,8 @@ void MainWindow::customEvent(CustomEventBase* event) {
         // 不依赖当前激活聊天：字节缓存、DB、状态都落到目标聊天的 buffer 元素上，
         // 仅在目标聊天正是当前聊天时才刷新视图。
         ChatHistory* target = m_chatbuf.ptr(e->chatId, e->chatType);
-        ChatElement* elp = nullptr;
-        if (target && e->msgIndex >= 0 && e->msgIndex < target->size()) {
-            elp = &(*target)[e->msgIndex];
-        }
+        int realIdx = -1;
+        ChatElement* elp = resolveMediaElement(target, e->mxcUrl, e->msgIndex, &realIdx);
         bool isCurrent = (currentChatId == e->chatId
                           && currentChatType == qFromUtf8(e->chatType));
 
@@ -814,28 +834,29 @@ void MainWindow::customEvent(CustomEventBase* event) {
                     bool isGifElem = (elp->etype == ChatElement::Gif);
                     if (isVideo || isGifElem || elPendingPlay) {
                         std::vector<uint8_t> procData(e->rawData.begin(), e->rawData.end());
-                        scheduleMediaPlayback(e->msgIndex, elPendingPlay, &procData,
+                        scheduleMediaPlayback(realIdx, elPendingPlay, &procData,
                                               e->chatId, qFromUtf8(e->chatType));
                     }
                 } else {
                     qWarning("Media download corrupt: chat=%d/%s idx=%d want=%d got=%d",
-                             e->chatId, e->chatType.c_str(), e->msgIndex,
+                             e->chatId, e->chatType.c_str(), realIdx,
                              elp->fileSize, (int)e->rawData.size());
                     elp->downloadState = ChatElement::Failed;
                     elp->downloadProgress = 0;
                     elp->downloadSpeedBps = 0;
                     elp->mediaUrl = qFromUtf8(e->mxcUrl);
                 }
-                if (isCurrent) { chatWidget->updateElement(e->msgIndex); }
+                if (isCurrent) { chatWidget->updateElement(realIdx); }
             }
         } else {
             qWarning("Media download failed: chat=%d/%s idx=%d err=%s",
-                     e->chatId, e->chatType.c_str(), e->msgIndex, e->errorInfo.c_str());
+                     e->chatId, e->chatType.c_str(), realIdx, e->errorInfo.c_str());
             if (elp) {
                 elp->downloadState = ChatElement::Failed;
+                elp->downloadProgress = 0;
                 elp->downloadSpeedBps = 0;
                 elp->mediaUrl = qFromUtf8(e->mxcUrl);
-                if (isCurrent) { chatWidget->updateElement(e->msgIndex); }
+                if (isCurrent) { chatWidget->updateElement(realIdx); }
             }
         }
         return;
@@ -845,8 +866,10 @@ void MainWindow::customEvent(CustomEventBase* event) {
     if (event->type() == MediaDownloadProgressType) {
         MediaDownloadProgressEvent* e = static_cast<MediaDownloadProgressEvent*>(event);
         ChatHistory* target = m_chatbuf.ptr(e->chatId, e->chatType);
-        if (target && e->msgIndex >= 0 && e->msgIndex < target->size()) {
-            ChatElement& el = (*target)[e->msgIndex];
+        int realIdx = -1;
+        ChatElement* elp = resolveMediaElement(target, e->mxcUrl, e->msgIndex, &realIdx);
+        if (elp) {
+            ChatElement& el = *elp;
             int pct = -1;   // -1=未知长度，UI 显示不确定进度
             if (e->total > 0) {
                 long long p = e->received * 100LL / e->total;
@@ -859,7 +882,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
             el.downloadSpeedBps = (int)e->speedBps;
             if (currentChatId == e->chatId
                 && currentChatType == qFromUtf8(e->chatType)) {
-                chatWidget->repaintMessageElement(e->msgIndex);
+                chatWidget->repaintMessageElement(realIdx);
             }
         }
         return;
@@ -3139,7 +3162,14 @@ void MainWindow::onRetryClicked(int msgIndex, const QString& mediaUrl, const QSt
     if (msgIndex < 0 || msgIndex >= chatWidget->messageCount()) { return; }
     if (currentChatId < 0) { return; }
 
-    ChatElement& el = chatWidget->mutableMessageAt(msgIndex);
+    std::string mxc = std::string(qToUtf8(mediaUrl).data());
+    std::string typeStr = std::string(qToUtf8(currentChatType).data());
+    int realIdx = -1;
+    ChatElement* elp = resolveMediaElement(m_chatbuf.ptr(currentChatId, typeStr),
+                                           mxc, msgIndex, &realIdx);
+    if (!elp) { return; }
+    if (realIdx != msgIndex) { msgIndex = realIdx; }
+    ChatElement& el = *elp;
     if (el.downloadState == ChatElement::InProgress) { return; }   // 已在下载，防重复
     QByteArray rawBytes = MediaShmemCache::inst().getThumb(mediaUrl);
     if (!rawBytes.isEmpty()) {

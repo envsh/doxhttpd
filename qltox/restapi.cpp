@@ -420,6 +420,7 @@ void ToxAPI::mediaProgressCb(long long received, long long total,
     ev->chatId   = ctx->id;
     ev->chatType = ctx->str1;
     ev->msgIndex = ctx->n1;
+    ev->mxcUrl   = ctx->str2;
     ev->received = received;
     ev->total    = total;
     ev->speedBps = speedBps;
