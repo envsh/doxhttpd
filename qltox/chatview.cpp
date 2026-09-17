@@ -15,6 +15,8 @@
 #include <qimage.h>
 #include <qtimer.h>
 #include "translator.h"
+#include "restapi.h"
+#include "toastwidget.h"
 
 // ── Media display sizing ──
 static const int kMaxMediaDim = 260;
@@ -3386,6 +3388,19 @@ void ChatView::mouseDoubleClickEvent(QMouseEvent* event) {
     QWidget::mouseDoubleClickEvent(event);
 }
 
+static void openSearchInBrowser(QWidget* parent, bool ok, const QString& sel, const QString& baseUrl) {
+    if (!ok) {
+        ToastWidget::show(parent, _("search.invalid_selection"), 2500);
+        return;
+    }
+    #ifdef QT3_BUILD
+    std::string enc = ToxAPI::urlEncode(std::string(qToUtf8(sel).data()));
+#else
+    std::string enc = ToxAPI::urlEncode(std::string(qToUtf8(sel).constData()));
+#endif
+    qOpenUrl(baseUrl + qFromUtf8(enc.c_str()));
+}
+
 void ChatView::contextMenuEvent(QContextMenuEvent* event) {
     int msgIndex = findMessageAtY(event->y());
     // 检测是否在名字区域上
@@ -3416,6 +3431,12 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
                       && !(*m_history)[msgIndex].messageId.isEmpty());
     // TEMP(临时): 所有消息均显示"撤回"。回滚时删除下面这行即可恢复原检测。
     canRedact = true;
+#ifdef QT3_BUILD
+    QString searchSel = selectedText().stripWhiteSpace();
+#else
+    QString searchSel = selectedText().trimmed();
+#endif
+    bool searchOk = (searchSel.length() >= 3 && searchSel.length() <= 60);
     // Copy full message
 #ifdef QT3_BUILD
     // Qt3 QMenuData::insertItem() 自动生成的 ID 是负数（-1, -2, ...），
@@ -3446,6 +3467,12 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         hasForward = true;
         forwardMsgId = menu.insertItem(qFromUtf8("转发"));
     }
+    QPopupMenu searchSubMenu(this);
+    int searchGoogleId = searchSubMenu.insertItem("Google");
+    int searchBingId = searchSubMenu.insertItem("Bing");
+    int searchDuckId = searchSubMenu.insertItem("DuckDuckGo");
+    int searchYandexId = searchSubMenu.insertItem("Yandex");
+    menu.insertItem(_("context.search_selected"), &searchSubMenu);
     bool hasNick = onName;
     int copyNickId = 0, mentionId = 0;
     if (hasNick) {
@@ -3484,6 +3511,11 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         favMsgAction = menu.addAction(favLabel);
         forwardMsgAction = menu.addAction(qFromUtf8("转发"));
     }
+    QMenu* searchSubMenu = menu.addMenu(_("context.search_selected"));
+    QAction* searchGoogleAction = searchSubMenu->addAction("Google");
+    QAction* searchBingAction = searchSubMenu->addAction("Bing");
+    QAction* searchDuckAction = searchSubMenu->addAction("DuckDuckGo");
+    QAction* searchYandexAction = searchSubMenu->addAction("Yandex");
     QAction* copyNickAction = nullptr;
     QAction* mentionAction = nullptr;
     if (onName) {
@@ -3540,6 +3572,14 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         emit deleteRequested(msgIndex);
     } else if (canRedact && choice == redactMsgId) {
         emit redactRequested(msgIndex);
+    } else if (choice == searchGoogleId) {
+        openSearchInBrowser(this, searchOk, searchSel, "https://www.google.com/search?q=");
+    } else if (choice == searchBingId) {
+        openSearchInBrowser(this, searchOk, searchSel, "https://www.bing.com/search?q=");
+    } else if (choice == searchDuckId) {
+        openSearchInBrowser(this, searchOk, searchSel, "https://duckduckgo.com/?q=");
+    } else if (choice == searchYandexId) {
+        openSearchInBrowser(this, searchOk, searchSel, "https://yandex.com/search/?text=");
     }
 #else
     QAction* chosen = menu.exec(event->globalPos());
@@ -3576,6 +3616,14 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         emit deleteRequested(msgIndex);
     } else if (redactMsgAction && chosen == redactMsgAction) {
         emit redactRequested(msgIndex);
+    } else if (chosen == searchGoogleAction) {
+        openSearchInBrowser(this, searchOk, searchSel, "https://www.google.com/search?q=");
+    } else if (chosen == searchBingAction) {
+        openSearchInBrowser(this, searchOk, searchSel, "https://www.bing.com/search?q=");
+    } else if (chosen == searchDuckAction) {
+        openSearchInBrowser(this, searchOk, searchSel, "https://duckduckgo.com/?q=");
+    } else if (chosen == searchYandexAction) {
+        openSearchInBrowser(this, searchOk, searchSel, "https://yandex.com/search/?text=");
     }
 #endif
 }

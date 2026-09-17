@@ -147,7 +147,11 @@
         "edit_message": "编辑消息",
         "delete_message": "删除消息",
         "redact_message": "撤回消息",
-        "msg_redacted": "消息已撤回"
+        "msg_redacted": "消息已撤回",
+        "search_selected": "搜索选中"
+    },
+    "search": {
+        "invalid_selection": "请选择要搜索的文本（3-60 个字符）"
     },
     "context_menu": {
         "view_info": "查看信息",

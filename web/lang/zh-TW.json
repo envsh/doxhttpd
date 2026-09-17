@@ -216,7 +216,11 @@
         "edit_message": "編輯訊息",
         "delete_message": "刪除訊息",
         "redact_message": "撤回訊息",
-        "msg_redacted": "訊息已撤回"
+        "msg_redacted": "訊息已撤回",
+        "search_selected": "搜尋選中"
+    },
+    "search": {
+        "invalid_selection": "請選擇要搜尋的文字（3-60 個字元）"
     },
     "rename": {
         "title": "修改群組暱稱",

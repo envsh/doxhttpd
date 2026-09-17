@@ -206,7 +206,11 @@
         "edit_message": "Edit message",
         "delete_message": "Delete message",
         "redact_message": "Redact message",
-        "msg_redacted": "Message redacted"
+        "msg_redacted": "Message redacted",
+        "search_selected": "Search Selection"
+    },
+    "search": {
+        "invalid_selection": "Select 3-60 characters of text to search"
     },
     "rename": {
         "title": "Change Group Nick",
