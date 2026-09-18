@@ -96,7 +96,7 @@ struct Event {
 
 struct PeerInfo {
     int peerNumber;
-    std::string name;
+    std::string userName;
     std::string nickname;
     int status = 0;
     std::string statusStr;

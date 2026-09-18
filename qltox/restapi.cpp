@@ -627,7 +627,7 @@ bool ToxAPI::syncRequest(const std::string& endpoint,
 FriendInfo friendInfoFromPeer(const PeerInfo& peer, int id) {
     FriendInfo info;
     info.id = id;
-    info.name = peer.name;
+    info.name = peer.userName;
     info.statusStr = peer.statusStr;
     info.statusText = peer.statusText;
     info.userStatus = peer.userStatus;
@@ -714,7 +714,7 @@ static std::vector<PeerInfo> parseMembersResponse(const std::string& body) {
             cJSON* v;
             v = cJSON_GetObjectItem(item, "peerNumber");
             if (v) { info.peerNumber = v->valueint; }
-            info.name = jsonStr(cJSON_GetObjectItem(item, "name"));
+            info.userName = jsonStr(cJSON_GetObjectItem(item, "name"));
             v = cJSON_GetObjectItem(item, "status");
             if (v) { info.status = v->valueint; }
             info.statusStr = jsonStr(cJSON_GetObjectItem(item, "statusStr"));
@@ -1159,7 +1159,7 @@ void ToxAPI::dispatchResult(ApiCtx* ctx, const HttpResponse& resp) {
                 cJSON* v;
                 v = cJSON_GetObjectItem(item, "peerNumber");
                 if (v) { info.peerNumber = v->valueint; }
-                info.name = jsonStr(cJSON_GetObjectItem(item, "name"));
+                info.userName = jsonStr(cJSON_GetObjectItem(item, "name"));
                 v = cJSON_GetObjectItem(item, "status");
                 if (v) { info.status = v->valueint; }
                 info.statusStr = jsonStr(cJSON_GetObjectItem(item, "statusStr"));

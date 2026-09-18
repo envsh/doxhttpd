@@ -63,7 +63,7 @@ static void parseGomuksEvents(cJSON* roomObj, const std::string& roomId, ParseRe
                 peers.push_back({});
                 pi = &peers.back();
                 pi->publicKey  = sender;
-                pi->name       = sender;
+                pi->userName       = sender;
                 pi->peerNumber = (int)peers.size() - 1;
             }
             if (!dn.empty()) pi->nickname = dn;
@@ -201,7 +201,7 @@ static void parseGomuksEvents(cJSON* roomObj, const std::string& roomId, ParseRe
         if (!found) {
             PeerInfo pi;
             pi.publicKey  = hm.sender_pubkey;
-            pi.name       = hm.sender_pubkey;
+            pi.userName       = hm.sender_pubkey;
             pi.peerNumber = (int)ret.peers.size();
             ret.peers.push_back(pi);
         }
@@ -305,7 +305,7 @@ static bool tryParseToxMessage(const std::string& rawStr, ParseResult& ret) {
             if (!hm.sender_pubkey.empty()) {
                 PeerInfo pi;
                 pi.publicKey  = hm.sender_pubkey;
-                pi.name       = hm.sender_pubkey;
+                pi.userName       = hm.sender_pubkey;
                 pi.peerNumber = (int)hm.sender_number;
                 std::string peerName = jsonGetString(inner, "peer_name");
                 if (!peerName.empty())
@@ -435,7 +435,7 @@ static bool tryParseImapMessage(const std::string& rawStr, ParseResult& ret) {
     // 加入 sender peer 供 ChatView 查找显示名称
     PeerInfo pi;
     pi.publicKey  = from;
-    pi.name       = from;
+    pi.userName       = from;
     pi.peerNumber = 0;
     ret.peers.push_back(pi);
 
@@ -655,7 +655,7 @@ static bool tryParseMisskeyNote(const std::string& rawStr, ParseResult& ret) {
 
     PeerInfo pi;
     pi.publicKey  = peerId;
-    pi.name       = displayName;
+    pi.userName       = displayName;
     pi.peerNumber = 0;
     if (!avatarUrl.empty()) pi.iconUrl = avatarUrl;
     ret.peers.push_back(pi);
@@ -755,7 +755,7 @@ static bool tryParseToutiaoNews(const std::string& rawStr, ParseResult& ret) {
 
     PeerInfo pi;
     pi.publicKey  = "fedone";
-    pi.name       = "fedone";
+    pi.userName       = "fedone";
     pi.peerNumber = 0;
     ret.peers.push_back(pi);
 
@@ -833,7 +833,7 @@ static bool tryParseZhihuNotify(const std::string& rawStr, ParseResult& ret) {
 
     PeerInfo pi;
     pi.publicKey  = author;
-    pi.name       = author;
+    pi.userName       = author;
     pi.peerNumber = 0;
     ret.peers.push_back(pi);
 
@@ -913,7 +913,7 @@ static bool tryParseZhihuHotnews(const std::string& rawStr, ParseResult& ret) {
 
     PeerInfo pi;
     pi.publicKey  = "fedone";
-    pi.name       = "fedone";
+    pi.userName       = "fedone";
     pi.peerNumber = 0;
     ret.peers.push_back(pi);
 
@@ -1002,7 +1002,7 @@ static bool tryParseBiliNotify(const std::string& rawStr, ParseResult& ret) {
 
     PeerInfo pi;
     pi.publicKey  = userid;
-    pi.name       = userid;
+    pi.userName       = userid;
     pi.nickname   = author;
     pi.peerNumber = 0;
     ret.peers.push_back(pi);

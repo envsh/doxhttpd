@@ -63,7 +63,7 @@ void MemberListDialog::setMembers(const std::vector<PeerInfo>& members) {
         QString pk = qFromUtf8(peer.publicKey).left(16);
         QString line = QString("%1 | %2 | %3 | %4 | %5 | %6")
             .arg(QString::number(peer.peerNumber), -3)
-            .arg(qFromUtf8(peer.name), -19)
+            .arg(qFromUtf8(peer.userName), -19)
             .arg(role, -9)
             .arg(conn, -5)
             .arg(ip, -16)
@@ -91,7 +91,7 @@ void MemberListDialog::setMembers(const std::vector<PeerInfo>& members) {
         QString pk = qFromUtf8(peer.publicKey).left(16);
         QString line = QString("%1 | %2 | %3 | %4 | %5 | %6")
             .arg(QString::number(peer.peerNumber), -3)
-            .arg(qFromUtf8(peer.name), -19)
+            .arg(qFromUtf8(peer.userName), -19)
             .arg(role, -9)
             .arg(conn, -5)
             .arg(ip, -16)
