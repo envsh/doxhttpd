@@ -1287,9 +1287,15 @@ void ToxAPI::dispatchResult(ApiCtx* ctx, const HttpResponse& resp) {
         ev->msgIndex = ctx->n1;
         if (resp.httpCode != 200 || resp.body.empty() || !resp.curlErrStr.empty()) {
             ev->success = false;
-            ev->errorInfo = resp.curlErrStr.empty()
+            std::string err = resp.curlErrStr.empty()
                 ? "HTTP " + std::to_string(resp.httpCode)
                 : resp.curlErrStr;
+            if (!resp.body.empty()) {
+                std::string b = resp.body;
+                if (b.size() > 200) b.resize(200);
+                err += " : " + b;
+            }
+            ev->errorInfo = err;
             QApplication::postEvent(s_target, ev);
             break;
         }

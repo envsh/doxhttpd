@@ -845,6 +845,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                     elp->downloadProgress = 0;
                     elp->downloadSpeedBps = 0;
                     elp->mediaUrl = qFromUtf8(e->mxcUrl);
+                    elp->mediaErrorMsg = qFromUtf8("数据校验失败（大小不匹配/解码失败）");
                 }
                 if (isCurrent) { chatWidget->updateElement(realIdx); }
             }
@@ -856,6 +857,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 elp->downloadProgress = 0;
                 elp->downloadSpeedBps = 0;
                 elp->mediaUrl = qFromUtf8(e->mxcUrl);
+                elp->mediaErrorMsg = qFromUtf8(e->errorInfo);
                 if (isCurrent) { chatWidget->updateElement(realIdx); }
             }
         }

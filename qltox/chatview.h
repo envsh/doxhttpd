@@ -105,6 +105,7 @@ struct ChatElement {
     int64_t dbRowid = 0;      // SQLite rowid，由 DB 加载时填充
     QString messageId;        // 服务端消息 ID（暂未填充）
     QString sendErrorMsg;
+    QString mediaErrorMsg;   // 媒体下载失败原因（仅 Failed 时展示，tooltip 用）
     QRect resendIconRect;
     QStringList relatesTos;
     QStringList mentions;

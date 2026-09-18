@@ -3249,6 +3249,19 @@ void ChatView::mouseMoveEvent(QMouseEvent* event) {
             }
         }
 
+        // Media download error tooltip
+        {
+            const auto& item = (*m_history)[msgIndex];
+            if (item.downloadState == ChatElement::Failed
+                && !item.mediaErrorMsg.isEmpty()
+                && !item.retryBtnRect.isNull()
+                && item.retryBtnRect.contains(event->pos())) {
+                QString tip = qFromUtf8("媒体下载错误：") + item.mediaErrorMsg
+                            + qFromUtf8("（点击重试）");
+                showTempTooltip(this, item.retryBtnRect, tip);
+            }
+        }
+
             // Resend icon cursor
             {
                 const auto& item = (*m_history)[msgIndex];

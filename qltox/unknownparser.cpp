@@ -749,7 +749,15 @@ static bool tryParseToutiaoNews(const std::string& rawStr, ParseResult& ret) {
         hm.mediaUrl = "";
     } else {
         hm.msgtype  = "image";
+        hm.mediaMime = "image/jpeg";
         hm.mediaUrl = image;
+        // 哨兵值（订阅流不提供真实尺寸/大小）：1×1 + fileSize=1 使现有两条触发路径
+        // （mainwindow.cpp:2379 接收时当前 chat、chatview.cpp:3714 事后打开 autopaint）
+        // 在不改动任何触发判断的前提下均满足 fileSize>0 而自动下载；
+        // 仅当 mediaUrl（image）非空才进入本分支，纯文本消息不受影响。
+        hm.mediaWidth  = 1;
+        hm.mediaHeight = 1;
+        hm.fileSize    = 1;
     }
     ret.messages.push_back(hm);
 
@@ -1005,6 +1013,16 @@ static bool tryParseBiliNotify(const std::string& rawStr, ParseResult& ret) {
     pi.userName       = userid;
     pi.nickname   = author;
     pi.peerNumber = 0;
+    if (authorMid > 0) {
+        // 为什么用第三方域名 unavatar.io：
+        // B 站真实头像（i*.hdslb.com/bfs/face/<hash>.jpg）是随机 hash 路径，无法由 mid 推导；
+        // B 站域内可由 mid 确定的只有 JSON 接口（x/web-interface/card），非图片 URL，
+        // 直接拼会造成下载到 JSON、pixmap 解码失败。
+        // unavatar.io/bilibili/<mid> 是统一头像聚合服务（Microlink 开源项目，MIT），
+        // 实测返回真实头像图片（image/jpeg）；无效 mid 回退默认占位图。
+        // 仅字符串拼接，无网络请求、无缓存；客户端 AvatarManager 按 URL 去重缓存。
+        pi.iconUrl = "https://unavatar.io/bilibili/" + std::to_string(authorMid);
+    }
     ret.peers.push_back(pi);
 
     ret.senderName  = qFromUtf8(userid);
