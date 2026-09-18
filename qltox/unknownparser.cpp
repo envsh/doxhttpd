@@ -766,6 +766,84 @@ static bool tryParseToutiaoNews(const std::string& rawStr, ParseResult& ret) {
     return true;
 }
 
+// ── 知乎通知订阅流解析 ──
+// 识别: Value.data 为 zhihu_collection 收藏动态 JSON（kind==zhihu_collection + title/url 非空）
+//   纯文本类型（无 image），消息 = 标题 + 链接 + 全文摘录 + 元信息
+
+static bool tryParseZhihuNotify(const std::string& rawStr, ParseResult& ret) {
+    cJSON* root = cJSON_Parse(rawStr.c_str());
+    if (!root) return false;
+
+    std::string kind  = jsonGetString(root, "kind");
+    std::string title = jsonGetString(root, "title");
+    std::string url   = jsonGetString(root, "url");
+    if (kind != "zhihu_collection" || title.empty() || url.empty()) {
+        cJSON_Delete(root);
+        return false;
+    }
+
+    std::string author      = jsonGetString(root, "author");
+    std::string excerpt     = jsonGetString(root, "excerpt");
+    std::string contentType = jsonGetString(root, "content_type");
+    int64_t publishedAt     = jsonGetInt64(root, "published_at");
+
+    ContactData cd;
+    cd.id          = kZhihuNotifyId;
+    cd.name        = "知乎通知";
+    cd.type        = kZhihuNotifyType;
+    cd.chatId      = kZhihuNotifyType;
+    cd.status      = "online";
+    cd.isConnected = true;
+    ret.contacts.push_back(cd);
+
+    std::string message = title + "\n" + url;
+    if (!excerpt.empty()) {
+        message += "\n" + excerpt;
+    }
+    std::string meta = "作者 " + author + " · " + contentType;
+    if (publishedAt > 0) {
+        char tbuf[32] = {0};
+        time_t sec = (time_t)publishedAt;
+        struct tm tmv;
+        localtime_r(&sec, &tmv);
+        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
+        meta += " · " + std::string(tbuf);
+    }
+    message += "\n" + meta;
+
+    HistoryMessage hm;
+    hm.message       = message;
+    hm.sender_pubkey = author;
+    hm.sender_number = 0;
+    hm.direction     = "received";
+    hm.created_at    = "";
+    if (publishedAt > 0) {
+        char tbuf[32] = {0};
+        time_t sec = (time_t)publishedAt;
+        struct tm tmv;
+        localtime_r(&sec, &tmv);
+        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
+        hm.created_at = tbuf;
+    }
+    hm.roomId   = kZhihuNotifyType;
+    hm.eventId  = std::to_string(jsonGetInt64(root, "content_id"));
+    hm.msgtype  = "";
+    hm.mediaUrl = "";
+    ret.messages.push_back(hm);
+
+    PeerInfo pi;
+    pi.publicKey  = author;
+    pi.name       = author;
+    pi.peerNumber = 0;
+    ret.peers.push_back(pi);
+
+    ret.senderName  = qFromUtf8(author);
+    ret.handled     = true;
+
+    cJSON_Delete(root);
+    return true;
+}
+
 // ── 旧逻辑：纯文本降级 ──
 
 static void extractSender(cJSON* valueItem, ParseResult& ret) {
@@ -886,6 +964,8 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
             if (tryParseMisskeyNote(dataStr, ret))
                 goto done;
             if (tryParseToutiaoNews(dataStr, ret))
+                goto done;
+            if (tryParseZhihuNotify(dataStr, ret))
                 goto done;
         }
         fallbackAsPlainText(valueItem, ret);
