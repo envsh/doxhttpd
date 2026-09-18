@@ -924,6 +924,93 @@ static bool tryParseZhihuHotnews(const std::string& rawStr, ParseResult& ret) {
     return true;
 }
 
+// ── 哔喱关注动态订阅流解析 ──
+// 识别: Value.data 为 bilibili 关注动态 JSON（kind==follow_feed + url/author 非空）；纯文本类型
+
+static std::string biliTypeLabel(const std::string& type) {
+    if (type == "DYNAMIC_TYPE_AV")      return "视频";
+    if (type == "DYNAMIC_TYPE_DRAW")    return "图文";
+    if (type == "DYNAMIC_TYPE_FORWARD") return "转发";
+    if (type == "DYNAMIC_TYPE_ORIGINAL") return "原创";
+    if (type == "DYNAMIC_TYPE_REPOST")  return "转发";
+    if (type == "DYNAMIC_TYPE_WORD")    return "文字";
+    return type;
+}
+
+static bool tryParseBiliNotify(const std::string& rawStr, ParseResult& ret) {
+    cJSON* root = cJSON_Parse(rawStr.c_str());
+    if (!root) return false;
+
+    std::string kind   = jsonGetString(root, "kind");
+    std::string url    = jsonGetString(root, "url");
+    std::string author = jsonGetString(root, "author");
+    if (kind != "follow_feed" || url.empty() || author.empty()) {
+        cJSON_Delete(root);
+        return false;
+    }
+
+    std::string text = jsonGetString(root, "text");
+    std::string type = jsonGetString(root, "type");
+    int64_t publishedAt = jsonGetInt64(root, "published_at");
+
+    ContactData cd;
+    cd.id          = kBiliNotifyId;
+    cd.name        = "哔喱通知";
+    cd.type        = kBiliNotifyType;
+    cd.chatId      = kBiliNotifyType;
+    cd.status      = "online";
+    cd.isConnected = true;
+    ret.contacts.push_back(cd);
+
+    // message = text\nurl\nmeta；text 为空时 url 作为消息内容首行（不产生空行）
+    std::string message;
+    if (!text.empty()) {
+        message += text + "\n";
+    }
+    message += url;
+
+    std::string label = biliTypeLabel(type);
+    std::string meta;
+    if (!label.empty()) {
+        meta += "[" + label + "] ";
+    }
+    meta += "作者 " + author;
+
+    HistoryMessage hm;
+    hm.created_at = "";
+    if (publishedAt > 0) {
+        char tbuf[32] = {0};
+        time_t sec = (time_t)publishedAt;
+        struct tm tmv;
+        localtime_r(&sec, &tmv);
+        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
+        meta += " · " + std::string(tbuf);
+        hm.created_at = tbuf;
+    }
+
+    hm.message       = message + "\n" + meta;
+    hm.sender_pubkey = author;
+    hm.sender_number = 0;
+    hm.direction     = "received";
+    hm.roomId        = kBiliNotifyType;
+    hm.eventId       = jsonGetString(root, "id");
+    hm.msgtype       = "";
+    hm.mediaUrl      = "";
+    ret.messages.push_back(hm);
+
+    PeerInfo pi;
+    pi.publicKey  = author;
+    pi.name       = author;
+    pi.peerNumber = 0;
+    ret.peers.push_back(pi);
+
+    ret.senderName  = qFromUtf8(author);
+    ret.handled     = true;
+
+    cJSON_Delete(root);
+    return true;
+}
+
 // ── 旧逻辑：纯文本降级 ──
 
 static void extractSender(cJSON* valueItem, ParseResult& ret) {
@@ -1048,6 +1135,8 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
             if (tryParseZhihuNotify(dataStr, ret))
                 goto done;
             if (tryParseZhihuHotnews(dataStr, ret))
+                goto done;
+            if (tryParseBiliNotify(dataStr, ret))
                 goto done;
         }
         fallbackAsPlainText(valueItem, ret);

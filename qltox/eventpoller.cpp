@@ -22,6 +22,8 @@ const char* const kZhihuNotifyType = "zhihu_notify";
 const int kZhihuNotifyId = -108;
 const char* const kZhihuHotnewsType = "zhihu_hotnews";
 const int kZhihuHotnewsId = -109;
+const char* const kBiliNotifyType = "bili_notify";
+const int kBiliNotifyId = -110;
 #include <unistd.h>
 
 EventPoller* EventPoller::s_instance = nullptr;

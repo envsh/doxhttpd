@@ -34,6 +34,8 @@ extern const char* const kZhihuNotifyType;      // 知乎通知订阅流（type 
 extern const int kZhihuNotifyId;                // 知乎通知保留 id（-108，固定不 hash）
 extern const char* const kZhihuHotnewsType;     // 知乎热闻订阅流（type == chatId）
 extern const int kZhihuHotnewsId;               // 知乎热闻保留 id（-109，固定不 hash）
+extern const char* const kBiliNotifyType;       // 哔喱关注动态订阅流（type == chatId）
+extern const int kBiliNotifyId;                 // 哔喱通知保留 id（-110，固定不 hash）
 
 // ── 事件类型常量 ──
 const EventType34 EventListReadyType = toEventType34(QEvent::User + 100);
