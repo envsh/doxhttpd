@@ -11,8 +11,10 @@
 #include <qlayout.h>
 #include <qpushbutton.h>
 #include <qlabel.h>
+#include <qthread.h>
 #include <sys/stat.h>
 #include <cstdio>
+#include <atomic>
 #include <string>
 #include <vector>
 
@@ -23,6 +25,16 @@ int64_t fileSize(const std::string& path) {
     if (::stat(path.c_str(), &st) != 0) { return -1; }
     return (int64_t)st.st_size;
 }
+
+const EventType34 StatsResultReadyType = toEventType34(QEvent::User + 108);
+
+class StatsResultEvent : public CustomEventBase {
+public:
+    int index;
+    int64_t value;
+    StatsResultEvent(int i, int64_t v)
+        : CustomEventBase(StatsResultReadyType), index(i), value(v) {}
+};
 
 std::string groupNum(int64_t v) {
     char buf[32];
@@ -110,9 +122,64 @@ ScrollArea* makeScrollArea(QWidget* page, QWidget*& inner) {
 
 }  // namespace
 
+class StatsWorker : public QThread {
+public:
+    StatsWorker(QObject* target, const std::string& dir)
+        : m_target(target), m_dir(dir) {}
+    void requestStop() { m_stop = true; }
+protected:
+    void run() override;
+private:
+    QObject* m_target;
+    std::string m_dir;
+    std::atomic<bool> m_stop{false};
+};
+
+void StatsWorker::run() {
+    TimePoint tStart = timeNow();
+    auto post = [&](int idx, int64_t val) {
+        QApplication::postEvent(m_target, new StatsResultEvent(idx, val));
+    };
+    auto compute = [&]() -> bool {
+        std::string dir = m_dir;
+        if (dir.empty()) { return false; }
+        post(0, fileSize(dir + "/message.db"));
+        if (m_stop) { return true; }
+        post(1, fileSize(dir + "/cache.db"));
+        if (m_stop) { return true; }
+        if (MessageDbSyncInterface* db = Storage::instance().messageDb()) {
+            post(2, db->countMessages());   if (m_stop) { return true; }
+            post(3, db->countReactions());  if (m_stop) { return true; }
+            post(4, db->countTranslations()); if (m_stop) { return true; }
+            post(5, db->countBookmarks());  if (m_stop) { return true; }
+        }
+        if (ChannelDbSyncInterface* db = Storage::instance().channelDb()) {
+            post(6, db->countChannels());   if (m_stop) { return true; }
+            post(7, db->countPeers());      if (m_stop) { return true; }
+            post(8, db->totalUnread());     if (m_stop) { return true; }
+        }
+        if (PendingDbSyncInterface* db = Storage::instance().pendingDb()) {
+            post(9, db->countPending());    if (m_stop) { return true; }
+        }
+        if (StickerDbSyncInterface* db = Storage::instance().stickerDb()) {
+            post(10, db->countPacks());     if (m_stop) { return true; }
+            post(11, db->count_stickers(nullptr)); if (m_stop) { return true; }
+        }
+        if (CacheDbSyncInterface* db = Storage::instance().cacheDb()) {
+            post(12, db->countCache());     if (m_stop) { return true; }
+            post(13, db->countFileRefs());  if (m_stop) { return true; }
+        }
+        return false;
+    };
+    bool canceled = compute();
+    QApplication::postEvent(m_target,
+        new StatsResultEvent(-1, canceled ? -1LL : elapsedMs(tStart)));
+}
+
 StatisticsDialog::StatisticsDialog(QWidget* parent) : QDialog(parent) {
     qSetWindowTitle(this, qFromUtf8("统计"));
     resize(560, 480);
+    m_vals.assign(14, -1);
 
     QVBoxLayout* root = new QVBoxLayout(this);
 
@@ -186,10 +253,14 @@ void StatisticsDialog::buildOverviewPage(QWidget* inner) {
     btnRow->addWidget(copyBtn);
     btnRow->addStretch(1);
     lay->addLayout(btnRow);
+    m_calcBtn = calcBtn;
 
     m_resultBox = new QWidget(inner);
     buildResultGrid(m_resultBox);
     lay->addWidget(m_resultBox, 1);
+
+    m_progressLabel = new QLabel(inner);
+    lay->addWidget(m_progressLabel);
 
     m_dirLabel->setText(wrapText(dataDirText(), 90));
 }
@@ -275,6 +346,52 @@ void StatisticsDialog::onTabClicked() {
 }
 
 void StatisticsDialog::refreshStats() {
+    if (m_worker) { return; }
+    std::fill(m_vals.begin(), m_vals.end(), -1);
+    std::string dir = Storage::instance().dataDir();
+    for (size_t i = 0; i < m_valueLabels.size(); ++i) {
+        m_valueLabels[i]->setText(dir.empty() ? QString("-") : statValue((int)i, m_vals));
+    }
+    m_progressLabel->setText(qFromUtf8("正在统计 0/14"));
+    if (m_calcBtn) { m_calcBtn->setEnabled(false); }
+    m_statStart = timeNow();
+    m_worker = new StatsWorker(this, dir);
+    m_worker->start();
+}
+
+void StatisticsDialog::customEvent(CustomEventBase* event) {
+    if (event->type() != StatsResultReadyType) {
+        QDialog::customEvent(event);
+        return;
+    }
+    StatsResultEvent* e = static_cast<StatsResultEvent*>(event);
+    if (e->index < 0) {
+        if (e->value < 0) {
+            m_progressLabel->setText(qFromUtf8("已取消"));
+        } else {
+            rebuildResultText();
+            m_progressLabel->setText(qFromUtf8("统计完成（用时 ")
+                + qFromUtf8(timeSince(m_statStart).c_str()) + qFromUtf8("）"));
+        }
+        if (m_calcBtn) { m_calcBtn->setEnabled(true); }
+        if (m_worker) {
+            m_worker->wait(1000);
+            delete m_worker;
+            m_worker = nullptr;
+        }
+        return;
+    }
+    if (e->index >= 0 && e->index < (int)m_vals.size()) {
+        m_vals[e->index] = e->value;
+        if ((size_t)e->index < m_valueLabels.size()) {
+            m_valueLabels[e->index]->setText(statValue(e->index, m_vals));
+        }
+        m_progressLabel->setText(qFromUtf8("正在统计 ")
+                                 + QString::number(e->index + 1) + qFromUtf8("/14"));
+    }
+}
+
+void StatisticsDialog::rebuildResultText() {
     QString names[14];
     names[0] = qFromUtf8("message.db");
     names[1] = qFromUtf8("cache.db");
@@ -291,55 +408,35 @@ void StatisticsDialog::refreshStats() {
     names[12] = qFromUtf8("cache");
     names[13] = qFromUtf8("file_refs");
 
-    std::vector<int64_t> vals(14, -1);
-    std::string dir = Storage::instance().dataDir();
-
-    if (!dir.empty()) {
-        vals[0] = fileSize(dir + "/message.db");
-        vals[1] = fileSize(dir + "/cache.db");
-        if (MessageDbSyncInterface* db = Storage::instance().messageDb()) {
-            vals[2] = db->countMessages();
-            vals[3] = db->countReactions();
-            vals[4] = db->countTranslations();
-            vals[5] = db->countBookmarks();
-        }
-        if (ChannelDbSyncInterface* db = Storage::instance().channelDb()) {
-            vals[6] = db->countChannels();
-            vals[7] = db->countPeers();
-            vals[8] = db->totalUnread();
-        }
-        if (PendingDbSyncInterface* db = Storage::instance().pendingDb()) {
-            vals[9] = db->countPending();
-        }
-        if (StickerDbSyncInterface* db = Storage::instance().stickerDb()) {
-            vals[10] = db->countPacks();
-            vals[11] = db->count_stickers(nullptr);
-        }
-        if (CacheDbSyncInterface* db = Storage::instance().cacheDb()) {
-            vals[12] = db->countCache();
-            vals[13] = db->countFileRefs();
-        }
-    }
-
     QString t;
-    if (dir.empty()) {
+    if (Storage::instance().dataDir().empty()) {
         t = qFromUtf8("(Storage 未初始化)");
     } else {
         t += qFromUtf8("文件大小:\n");
-        t += itemLine(names[0], statValue(0, vals)) + "\n";
-        t += itemLine(names[1], statValue(1, vals)) + "\n";
+        t += itemLine(names[0], statValue(0, m_vals)) + "\n";
+        t += itemLine(names[1], statValue(1, m_vals)) + "\n";
         t += qFromUtf8("\n各表记录数 (message.db):\n");
         for (int i = 2; i < 12; ++i) {
-            t += itemLine(names[i], statValue(i, vals)) + "\n";
+            t += itemLine(names[i], statValue(i, m_vals)) + "\n";
         }
         t += qFromUtf8("\n各表记录数 (cache.db):\n");
         for (int i = 12; i < 14; ++i) {
-            t += itemLine(names[i], statValue(i, vals)) + "\n";
+            t += itemLine(names[i], statValue(i, m_vals)) + "\n";
         }
     }
     m_resultText = t;
+}
 
-    for (int i = 0; i < 14; ++i) {
-        m_valueLabels[i]->setText(dir.empty() ? QString("-") : statValue(i, vals));
+StatisticsDialog::~StatisticsDialog() {
+    if (m_worker) {
+        m_worker->requestStop();
+        m_worker->wait(3000);
+        delete m_worker;
+        m_worker = nullptr;
     }
+}
+
+void StatisticsDialog::closeEvent(QCloseEvent* e) {
+    if (m_worker) { m_worker->requestStop(); }
+    QDialog::closeEvent(e);
 }
