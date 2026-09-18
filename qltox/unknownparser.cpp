@@ -844,6 +844,86 @@ static bool tryParseZhihuNotify(const std::string& rawStr, ParseResult& ret) {
     return true;
 }
 
+// ── 知乎热闻订阅流解析 ──
+// 识别: Value.data 为 zhihu 热榜 JSON（kind==hotlist + card_id/feed_id 非空 + target 对象且 title/url 非空）
+//   与 toutiao hotlist 同 kind，但顶层 title/url 为空（在 target 内），以此区分；纯文本类型
+
+static bool tryParseZhihuHotnews(const std::string& rawStr, ParseResult& ret) {
+    cJSON* root = cJSON_Parse(rawStr.c_str());
+    if (!root) return false;
+
+    std::string kind    = jsonGetString(root, "kind");
+    std::string cardId  = jsonGetString(root, "card_id");
+    std::string feedId  = jsonGetString(root, "feed_id");
+    std::string title   = jsonGetString(root, "target.title");
+    std::string url     = jsonGetString(root, "target.url");
+    if (kind != "hotlist" || cardId.empty() || feedId.empty() ||
+        title.empty() || url.empty()) {
+        cJSON_Delete(root);
+        return false;
+    }
+
+    std::string meta;
+    int64_t rank = jsonGetInt64(root, "rank");
+    if (rank > 0) {
+        meta += "第 " + std::to_string(rank) + " 名";
+    }
+    int64_t count = jsonGetInt64(root, "count");
+    if (count > 0) {
+        if (!meta.empty()) meta += " · ";
+        meta += std::to_string(count);
+    }
+    std::string detail = jsonGetString(root, "detail");
+    if (!detail.empty()) {
+        if (!meta.empty()) meta += " · ";
+        meta += detail;
+    }
+
+    ContactData cd;
+    cd.id          = kZhihuHotnewsId;
+    cd.name        = "知乎热闻";
+    cd.type        = kZhihuHotnewsType;
+    cd.chatId      = kZhihuHotnewsType;
+    cd.status      = "online";
+    cd.isConnected = true;
+    ret.contacts.push_back(cd);
+
+    HistoryMessage hm;
+    hm.created_at = "";
+    int64_t publishedAt = jsonGetInt64(root, "published_at");
+    if (publishedAt > 0) {
+        char tbuf[32] = {0};
+        time_t sec = (time_t)publishedAt;
+        struct tm tmv;
+        localtime_r(&sec, &tmv);
+        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
+        if (!meta.empty()) meta += " · ";
+        meta += tbuf;
+        hm.created_at = tbuf;
+    }
+    hm.message       = title + "\n" + url + "\n" + meta;
+    hm.sender_pubkey = "fedone";
+    hm.sender_number = 0;
+    hm.direction     = "received";
+    hm.roomId        = kZhihuHotnewsType;
+    hm.eventId       = jsonGetString(root, "content_id");
+    hm.msgtype       = "";
+    hm.mediaUrl      = "";
+    ret.messages.push_back(hm);
+
+    PeerInfo pi;
+    pi.publicKey  = "fedone";
+    pi.name       = "fedone";
+    pi.peerNumber = 0;
+    ret.peers.push_back(pi);
+
+    ret.senderName  = qFromUtf8("fedone");
+    ret.handled     = true;
+
+    cJSON_Delete(root);
+    return true;
+}
+
 // ── 旧逻辑：纯文本降级 ──
 
 static void extractSender(cJSON* valueItem, ParseResult& ret) {
@@ -966,6 +1046,8 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
             if (tryParseToutiaoNews(dataStr, ret))
                 goto done;
             if (tryParseZhihuNotify(dataStr, ret))
+                goto done;
+            if (tryParseZhihuHotnews(dataStr, ret))
                 goto done;
         }
         fallbackAsPlainText(valueItem, ret);

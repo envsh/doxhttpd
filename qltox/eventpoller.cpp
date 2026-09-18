@@ -20,6 +20,8 @@ const char* const kToutiaoHotnewsType = "toutiao_hotnews";
 const int kToutiaoHotnewsId = -107;
 const char* const kZhihuNotifyType = "zhihu_notify";
 const int kZhihuNotifyId = -108;
+const char* const kZhihuHotnewsType = "zhihu_hotnews";
+const int kZhihuHotnewsId = -109;
 #include <unistd.h>
 
 EventPoller* EventPoller::s_instance = nullptr;
