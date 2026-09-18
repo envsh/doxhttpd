@@ -20,6 +20,7 @@ bool ToxAPI::s_loadingAllData = false;
 bool ToxAPI::s_reloadPending = false;
 static bool s_useNdjson = true; // true=auto s/ Content-Type 分派; false=强制旧 JSON 数组
 static const char* kEventTopic = "topic=reddit,hacknews,twitter,universal-connectivity";
+static const int kPollStallSec = 60;   // boottime 看门狗：无收发 60s（含休眠）即杀僵尸长轮询
 static SeenUnknown s_seenUnknown;
 
 // ── Helpers ──
@@ -235,10 +236,11 @@ void ToxAPI::stopPollEvent() {
 }
 
 void ToxAPI::pollEvents() {
-    EventPoller::addRequest(
-        {buildUrl("/api/events?after=" + std::to_string(s_lastEventId) + "&" + kEventTopic),
-         "GET", "", 35, {{"Accept", "application/x-ndjson"}}},
-        onHttpDone, new ApiCtx(ApiPollEvents));
+    HttpRequest req(buildUrl("/api/events?after=" + std::to_string(s_lastEventId) + "&" + kEventTopic),
+                    "GET", "", 35, {{"Accept", "application/x-ndjson"}}, kPollStallSec);
+    req.lowSpeedLimit = 999;   // <999B/s 持续 45s → curl 原生中止
+    req.lowSpeedTime  = 45;
+    EventPoller::addRequest(req, onHttpDone, new ApiCtx(ApiPollEvents));
 }
 
 void ToxAPI::loadAllData() {
@@ -902,10 +904,11 @@ void ToxAPI::dispatchResult(ApiCtx* ctx, const HttpResponse& resp) {
             ALOG_WARN("Event poll error:", resp.curlErrStr);
             if (s_pollRunning) {
                 qSleepMs(2000);
-                EventPoller::addRequest(
-                    {buildUrl("/api/events?after=" + std::to_string(s_lastEventId) + "&" + kEventTopic),
-                     "GET", "", 35, {{"Accept", "application/x-ndjson"}}},
-                    onHttpDone, new ApiCtx(ApiPollEvents));
+                HttpRequest req(buildUrl("/api/events?after=" + std::to_string(s_lastEventId) + "&" + kEventTopic),
+                                "GET", "", 35, {{"Accept", "application/x-ndjson"}}, kPollStallSec);
+                req.lowSpeedLimit = 999;
+                req.lowSpeedTime  = 45;
+                EventPoller::addRequest(req, onHttpDone, new ApiCtx(ApiPollEvents));
             }
             break;
         }
@@ -914,10 +917,11 @@ void ToxAPI::dispatchResult(ApiCtx* ctx, const HttpResponse& resp) {
             ALOG_WARN("!! event poll non-200:", resp.httpCode);
             if (s_pollRunning) {
                 qSleepMs(2000);
-                EventPoller::addRequest(
-                    {buildUrl("/api/events?after=" + std::to_string(s_lastEventId) + "&" + kEventTopic),
-                     "GET", "", 35, {{"Accept", "application/x-ndjson"}}},
-                    onHttpDone, new ApiCtx(ApiPollEvents));
+                HttpRequest req(buildUrl("/api/events?after=" + std::to_string(s_lastEventId) + "&" + kEventTopic),
+                                "GET", "", 35, {{"Accept", "application/x-ndjson"}}, kPollStallSec);
+                req.lowSpeedLimit = 999;
+                req.lowSpeedTime  = 45;
+                EventPoller::addRequest(req, onHttpDone, new ApiCtx(ApiPollEvents));
             }
             break;
         }

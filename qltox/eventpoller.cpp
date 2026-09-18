@@ -58,7 +58,7 @@ static int xferinfoCb(void* clientp, curl_off_t dltotal, curl_off_t dlnow,
         ctx->lastEmitBytes = (long long)dlnow;
         ctx->lastEmitTp = timeNow();
         // 看门狗"活动"只看真实字节推进：零字节发射（zombie 连接/挂起上游）不得重置停滞计时
-        if (dByt > 0) { ctx->lastActiveTp = timeNow(); }
+        if (dByt > 0) { ctx->lastActiveTp = timeNowBoot(); }
         // 零字节且未完成时不发进度事件（避免无效重绘）；done 仍照发
         if (done || dByt > 0) {
             ctx->progress((long long)dlnow, (long long)dltotal, speed, ctx->udata);
@@ -114,7 +114,7 @@ void EventPoller::addRequest(const HttpRequest& req,
     auto* ctx = new HttpCtx{req.url, req.data,
                              std::string(), std::map<std::string, std::string>(),
                              nullptr, done, udata, req.progress,
-                             timeNow(), timeNow(), 0, 0, timeNow(), req.stallSec};
+                             timeNow(), timeNow(), 0, 0, timeNowBoot(), req.stallSec};
 
     curl_easy_setopt(easy, CURLOPT_URL, ctx->urlStr.c_str());
     curl_easy_setopt(easy, CURLOPT_PRIVATE, ctx);
@@ -128,6 +128,11 @@ void EventPoller::addRequest(const HttpRequest& req,
     curl_easy_setopt(easy, CURLOPT_FORBID_REUSE, 1L);
     curl_easy_setopt(easy, CURLOPT_FRESH_CONNECT, 1L);
     curl_easy_setopt(easy, CURLOPT_SSL_SESSIONID_CACHE, 0L);
+
+    if (req.lowSpeedLimit > 0 && req.lowSpeedTime > 0) {
+        curl_easy_setopt(easy, CURLOPT_LOW_SPEED_LIMIT, req.lowSpeedLimit);
+        curl_easy_setopt(easy, CURLOPT_LOW_SPEED_TIME, req.lowSpeedTime);
+    }
 
     // 下载进度：≥100ms 或传输完成才转发一次，避免高频重绘刷新
     if (req.progress) {
@@ -180,14 +185,15 @@ void EventPoller::run() {
         int stillRunning = 0;
         curl_multi_perform(multi, &stillRunning);
 
-        // 3.5) 停滞看门狗：带 progress 的请求连续无收发活动 → 取证真实网络状态后中断
+        // 3.5) 停滞看门狗：任意设置 stallSec 的请求（含 event poll）连续无收发活动
+        //      （boottime 时钟，休眠时间照算）→ 取证真实网络状态后中断
         {
             std::vector<HttpCtx*> stalled;
             for (size_t i = 0; i < activeHandles.size(); ++i) {
                 HttpCtx* c = nullptr;
                 curl_easy_getinfo(activeHandles[i], CURLINFO_PRIVATE, &c);
-                if (!c || c->stallSec <= 0 || !c->progress) { continue; }
-                if (elapsedMs(c->lastActiveTp) <= (long long)c->stallSec * 1000) { continue; }
+                if (!c || c->stallSec <= 0) { continue; }
+                if (elapsedMsBoot(c->lastActiveTp) <= (long long)c->stallSec * 1000) { continue; }
                 stalled.push_back(c);
             }
             for (HttpCtx* c : stalled) {

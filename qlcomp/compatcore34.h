@@ -107,6 +107,28 @@ inline long long elapsedMs(const TimePoint& start) {
          + (now.tv_nsec - start.tv_nsec) / 1000000LL;
 }
 
+// boottime 时钟：CLOCK_BOOTTIME 含系统休眠时间，用于看门狗（休眠恢复后立即判停滞）
+inline TimePoint timeNowBoot() {
+    TimePoint tp;
+#ifndef CLOCK_BOOTTIME
+    clock_gettime(CLOCK_MONOTONIC, &tp);   // 非 Linux：回退，行为同现状
+#else
+    clock_gettime(CLOCK_BOOTTIME, &tp);    // Linux：含休眠时间
+#endif
+    return tp;
+}
+
+inline long long elapsedMsBoot(const TimePoint& start) {
+    TimePoint now;
+#ifndef CLOCK_BOOTTIME
+    clock_gettime(CLOCK_MONOTONIC, &now);
+#else
+    clock_gettime(CLOCK_BOOTTIME, &now);
+#endif
+    return (now.tv_sec - start.tv_sec) * 1000LL
+         + (now.tv_nsec - start.tv_nsec) / 1000000LL;
+}
+
 inline std::string timeSince(const TimePoint& start) {
     TimePoint now;
     clock_gettime(CLOCK_MONOTONIC, &now);

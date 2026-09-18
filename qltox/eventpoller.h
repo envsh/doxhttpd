@@ -344,6 +344,8 @@ struct HttpRequest {
     std::string data;
     int timeoutSec;
     int stallSec;      // 无进展停滞超时（秒）；0=禁用；仅对带 progress 的下载生效
+    long lowSpeedLimit = 0;   // curl 原生低速中止（B/s）；0=禁用
+    long lowSpeedTime  = 0;   // 低于 lowSpeedLimit 持续 lowSpeedTime 秒 → CURLE_OPERATION_TIMEDOUT
     std::map<std::string, std::string> extraHeaders;
     // 下载进度回调（poller 线程触发；100ms 节流在 xferinfoCb 内处理）
     void (*progress)(long long received, long long total,
@@ -373,7 +375,7 @@ struct HttpCtx {
     TimePoint startTp;      // 请求发出时刻（看门狗/诊断用）
     long long lastEmitBytes;   // 上次节流发射时的已收字节（算速度用）
     long long lastSpeedBps;    // 上次节流实测速率（B/s）
-    TimePoint lastActiveTp;    // 最近一次收发活动时刻（看门狗用）
+    TimePoint lastActiveTp;    // 最近一次收发活动时刻（boottime 时钟，看门狗用；含休眠）
     int stallSec;              // 无进展超时（秒）；0=禁用
 };
 
