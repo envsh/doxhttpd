@@ -668,6 +668,104 @@ static bool tryParseMisskeyNote(const std::string& rawStr, ParseResult& ret) {
     return true;
 }
 
+// ── 头条热闻订阅流解析 ──
+// 识别: Value.data 为 toutiao 新闻/热点 JSON（kind∈{news,hotlist} + title/url 非空）
+//   news    → 带图文章（image 嵌入缩略图，msgtype=image）
+//   hotlist → 热点榜纯文本（无 image，msgtype 为空 = 普通文本）
+
+static bool tryParseToutiaoNews(const std::string& rawStr, ParseResult& ret) {
+    cJSON* root = cJSON_Parse(rawStr.c_str());
+    if (!root) return false;
+
+    std::string kind  = jsonGetString(root, "kind");
+    std::string title = jsonGetString(root, "title");
+    std::string url   = jsonGetString(root, "url");
+    if (kind != "news" && kind != "hotlist") {
+        cJSON_Delete(root);
+        return false;
+    }
+    if (title.empty() || url.empty()) {
+        cJSON_Delete(root);
+        return false;
+    }
+    std::string image = jsonGetString(root, "image");
+
+    std::string tag      = jsonGetString(root, "tag");
+    std::string comments = jsonGetString(root, "comments");
+    int64_t publishedAt  = jsonGetInt64(root, "published_at");
+    if (publishedAt <= 0) {
+        publishedAt = jsonGetInt64(root, "published");
+    }
+
+    ContactData cd;
+    cd.id          = kToutiaoHotnewsId;
+    cd.name        = "头条热闻";
+    cd.type        = kToutiaoHotnewsType;
+    cd.chatId      = kToutiaoHotnewsType;
+    cd.status      = "online";
+    cd.isConnected = true;
+    ret.contacts.push_back(cd);
+
+    std::string meta;
+    if (kind == "news") {
+        if (!tag.empty()) {
+            meta += "[" + tag + "]";
+        }
+        meta += " 评论 " + (comments.empty() ? "0" : comments);
+    } else {
+        std::string hot = jsonGetString(root, "hot");
+        if (hot.empty()) {
+            hot = jsonGetString(root, "detail");
+        }
+        if (!hot.empty()) {
+            meta += "热度 " + hot;
+        } else {
+            int64_t rank = jsonGetInt64(root, "rank");
+            if (rank > 0) {
+                meta += "第 " + std::to_string(rank) + " 位";
+            }
+        }
+    }
+
+    HistoryMessage hm;
+    hm.created_at = "";
+    if (publishedAt > 0) {
+        char tbuf[32] = {0};
+        time_t sec = (time_t)publishedAt;
+        struct tm tmv;
+        localtime_r(&sec, &tmv);
+        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
+        meta += " · " + std::string(tbuf);
+        hm.created_at = tbuf;
+    }
+    hm.message        = title + "\n" + url + "\n" + meta;
+    hm.sender_pubkey  = "fedone";
+    hm.sender_number  = 0;
+    hm.direction      = "received";
+    hm.roomId         = kToutiaoHotnewsType;
+    hm.eventId        = jsonGetString(root, "id");
+    if (image.empty()) {
+        hm.msgtype = "";
+        hm.mediaUrl = "";
+    } else {
+        hm.msgtype  = "image";
+        hm.mediaUrl = image;
+    }
+    ret.messages.push_back(hm);
+
+    PeerInfo pi;
+    pi.publicKey  = "fedone";
+    pi.name       = "fedone";
+    pi.peerNumber = 0;
+    ret.peers.push_back(pi);
+
+    ret.senderName  = qFromUtf8("fedone");
+    ret.handled     = true;
+
+    cJSON_Delete(root);
+    return true;
+}
+
 // ── 旧逻辑：纯文本降级 ──
 
 static void extractSender(cJSON* valueItem, ParseResult& ret) {
@@ -786,6 +884,8 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
             if (tryParseClipboardEvent(dataStr, ret))
                 goto done;
             if (tryParseMisskeyNote(dataStr, ret))
+                goto done;
+            if (tryParseToutiaoNews(dataStr, ret))
                 goto done;
         }
         fallbackAsPlainText(valueItem, ret);

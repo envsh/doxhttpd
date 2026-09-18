@@ -16,6 +16,8 @@ const char* const kAichatType         = "aichat";
 const char* const kPastebinType       = "pastebin";
 const char* const kTranslateType      = "translate";
 const char* const kMisskeyType        = "misskey_note";
+const char* const kToutiaoHotnewsType = "toutiao_hotnews";
+const int kToutiaoHotnewsId = -107;
 #include <unistd.h>
 
 EventPoller* EventPoller::s_instance = nullptr;

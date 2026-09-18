@@ -2376,7 +2376,7 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
                                     el.downloadState = ChatElement::Completed;
                                     el.downloadProgress = 100;
                                 } else {
-                                    if (hm.fileSize > 0 && hm.fileSize < 1048576) {
+                                    if (hm.fileSize <= 0 || (hm.fileSize > 0 && hm.fileSize < 1048576)) {
                                         el.downloadState = ChatElement::InProgress;
                                         el.downloadProgress = 0;
                                         ToxAPI::downloadMedia(chatId, chatType, newIdx, hm.mediaUrl, hm.fileSize);
