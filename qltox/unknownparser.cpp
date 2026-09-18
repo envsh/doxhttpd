@@ -952,6 +952,8 @@ static bool tryParseBiliNotify(const std::string& rawStr, ParseResult& ret) {
     std::string text = jsonGetString(root, "text");
     std::string type = jsonGetString(root, "type");
     int64_t publishedAt = jsonGetInt64(root, "published_at");
+    int64_t authorMid = jsonGetInt64(root, "author_mid");
+    std::string userid = authorMid > 0 ? std::to_string(authorMid) : author;
 
     ContactData cd;
     cd.id          = kBiliNotifyId;
@@ -989,7 +991,7 @@ static bool tryParseBiliNotify(const std::string& rawStr, ParseResult& ret) {
     }
 
     hm.message       = message + "\n" + meta;
-    hm.sender_pubkey = author;
+    hm.sender_pubkey = userid;
     hm.sender_number = 0;
     hm.direction     = "received";
     hm.roomId        = kBiliNotifyType;
@@ -999,12 +1001,13 @@ static bool tryParseBiliNotify(const std::string& rawStr, ParseResult& ret) {
     ret.messages.push_back(hm);
 
     PeerInfo pi;
-    pi.publicKey  = author;
-    pi.name       = author;
+    pi.publicKey  = userid;
+    pi.name       = userid;
+    pi.nickname   = author;
     pi.peerNumber = 0;
     ret.peers.push_back(pi);
 
-    ret.senderName  = qFromUtf8(author);
+    ret.senderName  = qFromUtf8(userid);
     ret.handled     = true;
 
     cJSON_Delete(root);
