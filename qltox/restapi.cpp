@@ -236,10 +236,17 @@ void ToxAPI::stopPollEvent() {
 }
 
 void ToxAPI::pollEvents() {
+    schedulePoll(0);
+}
+
+// events 长轮询调度：delayMs>0 走 EventPoller 非阻塞延迟队列（不阻塞 pump 线程，
+// 无 qSleepMs）；retry 时用当前 s_lastEventId 重新构造 URL
+void ToxAPI::schedulePoll(int delayMs) {
     HttpRequest req(buildUrl("/api/events?after=" + std::to_string(s_lastEventId) + "&" + kEventTopic),
                     "GET", "", 35, {{"Accept", "application/x-ndjson"}}, kPollStallSec);
     req.lowSpeedLimit = 999;   // <999B/s 持续 45s → curl 原生中止
     req.lowSpeedTime  = 45;
+    req.delayMs = delayMs;
     EventPoller::addRequest(req, onHttpDone, new ApiCtx(ApiPollEvents));
 }
 
@@ -903,12 +910,7 @@ void ToxAPI::dispatchResult(ApiCtx* ctx, const HttpResponse& resp) {
         if (resp.httpCode == 0 && !resp.curlErrStr.empty()) {
             ALOG_WARN("Event poll error:", resp.curlErrStr);
             if (s_pollRunning) {
-                qSleepMs(2000);
-                HttpRequest req(buildUrl("/api/events?after=" + std::to_string(s_lastEventId) + "&" + kEventTopic),
-                                "GET", "", 35, {{"Accept", "application/x-ndjson"}}, kPollStallSec);
-                req.lowSpeedLimit = 999;
-                req.lowSpeedTime  = 45;
-                EventPoller::addRequest(req, onHttpDone, new ApiCtx(ApiPollEvents));
+                schedulePoll(2000);
             }
             break;
         }
@@ -916,12 +918,7 @@ void ToxAPI::dispatchResult(ApiCtx* ctx, const HttpResponse& resp) {
         if (resp.httpCode != 200) {
             ALOG_WARN("!! event poll non-200:", resp.httpCode);
             if (s_pollRunning) {
-                qSleepMs(2000);
-                HttpRequest req(buildUrl("/api/events?after=" + std::to_string(s_lastEventId) + "&" + kEventTopic),
-                                "GET", "", 35, {{"Accept", "application/x-ndjson"}}, kPollStallSec);
-                req.lowSpeedLimit = 999;
-                req.lowSpeedTime  = 45;
-                EventPoller::addRequest(req, onHttpDone, new ApiCtx(ApiPollEvents));
+                schedulePoll(2000);
             }
             break;
         }

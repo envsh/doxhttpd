@@ -129,6 +129,15 @@ inline long long elapsedMsBoot(const TimePoint& start) {
          + (now.tv_nsec - start.tv_nsec) / 1000000LL;
 }
 
+// boottime 时钟上的"从现在起 delayMs 后"时刻（非阻塞延迟调度用）
+inline TimePoint timeFromNowBoot(int delayMs) {
+    TimePoint tp = timeNowBoot();
+    tp.tv_sec += delayMs / 1000;
+    tp.tv_nsec += (long)(delayMs % 1000) * 1000000L;
+    if (tp.tv_nsec >= 1000000000L) { tp.tv_sec += 1; tp.tv_nsec -= 1000000000L; }
+    return tp;
+}
+
 inline std::string timeSince(const TimePoint& start) {
     TimePoint now;
     clock_gettime(CLOCK_MONOTONIC, &now);

@@ -85,6 +85,11 @@ void EventPoller::stop() {
     if (!s_instance) { return; }
     s_instance->running = false;
     s_instance->wait();
+    {
+        QMutexLocker lock(&s_instance->pendingMutex);
+        s_instance->pendingHandles.clear();
+        s_instance->delayedReqs.clear();
+    }
     if (s_instance->multi) {
         curl_multi_cleanup(s_instance->multi);
         s_instance->multi = nullptr;
@@ -103,12 +108,34 @@ void EventPoller::addRequest(const HttpRequest& req,
 
     ALOG_INFO(">>", req.method, req.url);
 
+    QMutexLocker lock(&s_instance->pendingMutex);
+
+    // 非阻塞延迟调度：仅入队，pump 线程到点后才真正发出（不阻塞任何线程）
+    if (req.delayMs > 0) {
+        DelayedReq d;
+        d.req = req;
+        d.done = done;
+        d.udata = udata;
+        d.readyAt = timeFromNowBoot(req.delayMs);
+        s_instance->delayedReqs.push_back(d);
+        ALOG_INFO("delayed", req.delayMs, "ms");
+        return;
+    }
+
+    CURL* easy = buildHandle(req, done, udata);
+    if (easy) { s_instance->pendingHandles.push_back(easy); }
+}
+
+// 构造 curl easy + HttpCtx（全程不碰 multi，可在 GUI/泵线程安全调用）
+CURL* EventPoller::buildHandle(const HttpRequest& req,
+                                void (*done)(const HttpResponse& resp, void* udata),
+                                void* udata) {
     auto t0 = timeNow();
 
     CURL* easy = curl_easy_init();
     if (!easy) {
         ALOG_WARN("addRequest dropped: curl_easy_init failed", req.method, req.url);
-        return;
+        return nullptr;
     }
 
     auto* ctx = new HttpCtx{req.url, req.data,
@@ -154,19 +181,23 @@ void EventPoller::addRequest(const HttpRequest& req,
         curl_easy_setopt(easy, CURLOPT_HTTPHEADER, ctx->requestHeaders);
     }
 
-    s_instance->pendingMutex.lock();
-    s_instance->pendingHandles.push_back(easy);
-    s_instance->pendingMutex.unlock();
-
     ALOG_INFO("addRequest setup took", timeSince(t0), "for", ctx->urlStr);
+    return easy;
 }
 
 void EventPoller::run() {
     while (running) {
         // 1) 泵线程内统一 add_handle —— libcurl multi 非线程安全，
         //    所有 multi 操作只能在泵线程发生，GUI 线程只入挂起队列。
+        //    先处理到点的非阻塞延迟重发（HttpRequest.delayMs）
         {
             QMutexLocker lock(&pendingMutex);
+            while (!delayedReqs.empty() && elapsedMsBoot(delayedReqs.front().readyAt) >= 0) {
+                DelayedReq d = delayedReqs.front();
+                delayedReqs.pop_front();
+                CURL* easy = buildHandle(d.req, d.done, d.udata);
+                if (easy) { pendingHandles.push_back(easy); }
+            }
             while (!pendingHandles.empty()) {
                 CURL* easy = pendingHandles.front();
                 curl_multi_add_handle(multi, easy);

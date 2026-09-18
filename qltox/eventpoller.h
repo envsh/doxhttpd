@@ -339,23 +339,27 @@ struct HttpResponse {
 };
 
 struct HttpRequest {
+    // 停滞看门狗默认值：所有请求默认启用 150s（boottime，含休眠）兜底；
+    // 更敏感的场景用构造参数显式覆盖（事件 poll 60 / 媒体下载 25）
+    static const int kDefaultStallSec = 150;
     std::string url;
     std::string method;
     std::string data;
     int timeoutSec;
-    int stallSec;      // 无进展停滞超时（秒）；0=禁用；仅对带 progress 的下载生效
+    int stallSec;      // 无进展停滞超时（秒）；0=禁用；默认 kDefaultStallSec；看门狗 boottime
     long lowSpeedLimit = 0;   // curl 原生低速中止（B/s）；0=禁用
     long lowSpeedTime  = 0;   // 低于 lowSpeedLimit 持续 lowSpeedTime 秒 → CURLE_OPERATION_TIMEDOUT
+    int delayMs = 0;          // 延迟调度毫秒；>0 时 delayMs 后才真正发出（非阻塞，pump 照常运转）
     std::map<std::string, std::string> extraHeaders;
     // 下载进度回调（poller 线程触发；100ms 节流在 xferinfoCb 内处理）
     void (*progress)(long long received, long long total,
                      long long speedBps, void* udata) = nullptr;
 
-    HttpRequest() : method("GET"), timeoutSec(35), stallSec(0) {}
+    HttpRequest() : method("GET"), timeoutSec(35), stallSec(kDefaultStallSec) {}
     HttpRequest(std::string url, std::string method = "GET",
                 std::string data = "", int timeoutSec = 35,
                 std::map<std::string, std::string> extraHeaders = {},
-                int stallSec = 0)
+                int stallSec = kDefaultStallSec)
         : url(std::move(url)), method(std::move(method)),
           data(std::move(data)), timeoutSec(timeoutSec),
           extraHeaders(std::move(extraHeaders)), stallSec(stallSec) {}
@@ -390,12 +394,25 @@ public:
 private:
     EventPoller();
     void run();
+    // 构造 curl easy + HttpCtx，失败返回 nullptr（调用方负责不推进 udata 生命周期）
+    static CURL* buildHandle(const HttpRequest& req,
+                             void (*done)(const HttpResponse& resp, void* udata),
+                             void* udata);
     static EventPoller* s_instance;
     bool running;
     CURLM* multi;
-    QMutex pendingMutex;            // 仅保护 pendingHandles（GUI↔泵线程交接）
+    QMutex pendingMutex;            // 保护 pendingHandles + delayedReqs（GUI↔泵线程交接）
     std::deque<CURL*> pendingHandles;
     std::vector<CURL*> activeHandles;   // 泵线程私有：在跑句柄（看门狗用）
+
+    // 非阻塞延迟重发（boottime 时刻到点后由泵线程放入 pendingHandles）
+    struct DelayedReq {
+        HttpRequest req;
+        void (*done)(const HttpResponse& resp, void* udata);
+        void* udata;
+        TimePoint readyAt;          // boottime
+    };
+    std::deque<DelayedReq> delayedReqs;
 };
 
 #endif

@@ -152,6 +152,7 @@ private:
     static void dispatchResult(ApiCtx* ctx, const HttpResponse& resp);
     static std::string buildUrl(const std::string& endpoint);
     static void pollEvents();
+    static void schedulePoll(int delayMs);   // 发起/延迟重发 events 长轮询（delayMs>0 非阻塞）
     static void request(ApiRequestType type, const HttpRequest& req);
     static void request(const HttpRequest& req, ApiCtx* ctx);
     static bool syncRequest(const std::string& endpoint,
