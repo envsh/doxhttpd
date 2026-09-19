@@ -238,7 +238,7 @@ static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRe
         p.setPen(Qt::NoPen);
         p.setBrush(QColor(70, 70, 70));          // 轨道底色
         p.drawRect(track);
-        if (!unknown && pct > 0) {
+        if (!unknown && pct >= 0) {
             QRect fillRect(track.x(), track.y(),
                            static_cast<int>((long long)track.width() * pct / 100), track.height());
             p.setBrush(pal.accent);
@@ -246,7 +246,7 @@ static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRe
         }
 
         int labelY = barTop + barH + 2;   // 条下方 2px
-        if (!unknown && pct > 0) {
+        if (!unknown && pct >= 0) {
             p.setPen(pal.accent);
             p.setFont(bf);
             p.drawText(labelX, labelY, labelW, btnH,
@@ -286,10 +286,13 @@ static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRe
     }
 
     QString dlText = qFromUtf8("⬇ 下载");
+    QString sz;
     if (fileSize > 0) {
-        QString sz = formatFileSize(fileSize);
-        if (!sz.isEmpty()) { dlText += qFromUtf8(" ") + sz; }
+        sz = formatFileSize(fileSize);
+    } else if (fileSize == UnkSize) {
+        sz = qFromUtf8("0B");
     }
+    if (!sz.isEmpty()) { dlText += qFromUtf8(" ") + sz; }
 
     QString errText;
     QString retryText;

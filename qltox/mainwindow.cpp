@@ -3162,7 +3162,7 @@ void MainWindow::onTranslateForSendRequested(const QString& text, const QString&
 
 void MainWindow::onRetryClicked(int msgIndex, const QString& mediaUrl, const QString& /*source*/) {
     if (msgIndex < 0 || msgIndex >= chatWidget->messageCount()) { return; }
-    if (currentChatId < 0) { return; }
+    if (currentChatId == 0 || currentChatId < -10000) { return; }
 
     std::string mxc = std::string(qToUtf8(mediaUrl).data());
     std::string typeStr = std::string(qToUtf8(currentChatType).data());
