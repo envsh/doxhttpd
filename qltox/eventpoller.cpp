@@ -18,6 +18,7 @@ const char* const kTranslateType      = "translate";
 const char* const kMisskeyType        = "misskey_note";
 const char* const kToutiaoHotnewsType = "toutiao_hotnews";
 const int kToutiaoHotnewsId = -107;
+const int UnkSize = 0;
 const char* const kZhihuNotifyType = "zhihu_notify";
 const int kZhihuNotifyId = -108;
 const char* const kZhihuHotnewsType = "zhihu_hotnews";

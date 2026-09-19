@@ -756,9 +756,9 @@ static bool tryParseToutiaoNews(const std::string& rawStr, ParseResult& ret) {
         hm.msgtype      = "image";
         hm.mediaMime    = "image/jpeg";
         hm.mediaUrl     = image;
-        hm.mediaWidth   = 1;
-        hm.mediaHeight  = 1;
-        hm.fileSize     = 1;
+        hm.mediaWidth   = UnkSize;
+        hm.mediaHeight  = UnkSize;
+        hm.fileSize     = UnkSize;
     } else {
         hm.msgtype  = "";
         hm.mediaUrl = "";
@@ -845,9 +845,9 @@ static bool tryParseToutiaoHotlist(const std::string& rawStr, ParseResult& ret) 
         hm.msgtype      = "image";
         hm.mediaMime    = "image/jpeg";
         hm.mediaUrl     = image;
-        hm.mediaWidth   = (imgW > 0) ? (int)imgW : 1;
-        hm.mediaHeight  = (imgH > 0) ? (int)imgH : 1;
-        hm.fileSize     = 1;
+        hm.mediaWidth   = (imgW > 0) ? (int)imgW : UnkSize;
+        hm.mediaHeight  = (imgH > 0) ? (int)imgH : UnkSize;
+        hm.fileSize     = UnkSize;
     } else {
         hm.msgtype  = "";
         hm.mediaUrl = "";
@@ -1036,9 +1036,9 @@ static bool tryParseZhihuHotnews(const std::string& rawStr, ParseResult& ret) {
     if (!thumb.empty()) {
         hm.msgtype     = "image";
         hm.mediaUrl    = thumb;
-        hm.fileSize    = 1;
-        hm.mediaWidth  = 1;
-        hm.mediaHeight = 1;
+        hm.fileSize    = UnkSize;
+        hm.mediaWidth  = UnkSize;
+        hm.mediaHeight = UnkSize;
     } else {
         hm.msgtype  = "";
         hm.mediaUrl = "";

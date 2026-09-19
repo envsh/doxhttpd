@@ -16,6 +16,7 @@
 #include <qtimer.h>
 #include "translator.h"
 #include "restapi.h"
+#include "eventpoller.h"
 #include "toastwidget.h"
 
 // ── Media display sizing ──
@@ -3793,7 +3794,7 @@ void ChatView::paintEvent(QPaintEvent* event) {
                 && !el.mediaUrl.isEmpty()
                 && (el.etype == ChatElement::Image || el.etype == ChatElement::Gif
                     || el.etype == ChatElement::Video)
-                && el.fileSize > 0 && el.fileSize < 1048576)
+                && el.fileSize >= UnkSize && el.fileSize < 1048576)
             {
                 emit retryClicked((int)i, el.mediaUrl, qFromUtf8("autopaint"));
             }
