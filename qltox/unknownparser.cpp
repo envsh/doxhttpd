@@ -689,9 +689,14 @@ static bool tryParseToutiaoNews(const std::string& rawStr, ParseResult& ret) {
         return false;
     }
     std::string image = jsonGetString(root, "image");
+    // 字节旧版图片 CDN（p*.pstatp.com）已整体下线，全球 DNS 均不可解析（NXDOMAIN）；
+    // 命中即忽略图片、仅保留文本，不发起媒体下载也不显示失败占位。
+    const bool deadImage = image.find("pstatp.com/") != std::string::npos;
 
     std::string tag      = jsonGetString(root, "tag");
     std::string comments = jsonGetString(root, "comments");
+    // source：头条发布者名称，作为消息发送者显示（userName 与 nickname 同一值）
+    std::string source   = jsonGetString(root, "source");
     int64_t publishedAt  = jsonGetInt64(root, "published_at");
     if (publishedAt <= 0) {
         publishedAt = jsonGetInt64(root, "published");
@@ -744,10 +749,17 @@ static bool tryParseToutiaoNews(const std::string& rawStr, ParseResult& ret) {
     hm.direction      = "received";
     hm.roomId         = kToutiaoHotnewsType;
     hm.eventId        = jsonGetString(root, "id");
-    if (image.empty()) {
+    if (image.empty() || deadImage) {
         hm.msgtype = "";
         hm.mediaUrl = "";
     } else {
+        // p<N>-sign.toutiaoimg.com/ 为带签名参数的主机，直连大概率 403；
+        // 仅对通过检测、保留的图片执行：去掉 "-sign" 落回普通 CDN 主机 p<N>.toutiaoimg.com/。
+        const std::string kSignTail = "-sign.toutiaoimg.com/";
+        size_t signPos = image.find(kSignTail);
+        if (signPos != std::string::npos) {
+            image.replace(signPos, kSignTail.size(), ".toutiaoimg.com/");
+        }
         hm.msgtype  = "image";
         hm.mediaMime = "image/jpeg";
         hm.mediaUrl = image;
@@ -759,15 +771,18 @@ static bool tryParseToutiaoNews(const std::string& rawStr, ParseResult& ret) {
         hm.mediaHeight = 1;
         hm.fileSize    = 1;
     }
-    ret.messages.push_back(hm);
+ret.messages.push_back(hm);
+
+    std::string sourceName = source.empty() ? "fedone" : source;
 
     PeerInfo pi;
     pi.publicKey  = "fedone";
-    pi.userName       = "fedone";
+    pi.userName   = sourceName;
+    pi.nickname   = sourceName;
     pi.peerNumber = 0;
     ret.peers.push_back(pi);
 
-    ret.senderName  = qFromUtf8("fedone");
+    ret.senderName  = qFromUtf8(sourceName);
     ret.handled     = true;
 
     cJSON_Delete(root);
@@ -837,15 +852,15 @@ static bool tryParseZhihuNotify(const std::string& rawStr, ParseResult& ret) {
     hm.eventId  = std::to_string(jsonGetInt64(root, "content_id"));
     hm.msgtype  = "";
     hm.mediaUrl = "";
-    ret.messages.push_back(hm);
+ret.messages.push_back(hm);
 
     PeerInfo pi;
-    pi.publicKey  = author;
-    pi.userName       = author;
+    pi.publicKey  = "fedone";
+    pi.userName   = "fedone";
     pi.peerNumber = 0;
     ret.peers.push_back(pi);
 
-    ret.senderName  = qFromUtf8(author);
+    ret.senderName  = qFromUtf8("fedone");
     ret.handled     = true;
 
     cJSON_Delete(root);
@@ -870,6 +885,14 @@ static bool tryParseZhihuHotnews(const std::string& rawStr, ParseResult& ret) {
         cJSON_Delete(root);
         return false;
     }
+
+    // 知乎热榜数据现含 author 对象（规划变动）：
+    //   username ← author.name；usernick ← author.headline（不回退）；iconurl ← author.avatar_url。
+    //   url_token 为个人主页 slug，不作昵称使用。
+    std::string authorName     = jsonGetString(root, "author.name");
+    std::string authorHeadline = jsonGetString(root, "author.headline");
+    std::string authorAvatar   = jsonGetString(root, "author.avatar_url");
+    std::string peerName       = authorName.empty() ? "fedone" : authorName;
 
     std::string meta;
     int64_t rank = jsonGetInt64(root, "rank");
@@ -921,11 +944,13 @@ static bool tryParseZhihuHotnews(const std::string& rawStr, ParseResult& ret) {
 
     PeerInfo pi;
     pi.publicKey  = "fedone";
-    pi.userName       = "fedone";
+    pi.userName   = peerName;
+    pi.nickname   = authorHeadline;
+    pi.iconUrl    = authorAvatar;
     pi.peerNumber = 0;
     ret.peers.push_back(pi);
 
-    ret.senderName  = qFromUtf8("fedone");
+    ret.senderName  = qFromUtf8(peerName);
     ret.handled     = true;
 
     cJSON_Delete(root);
