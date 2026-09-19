@@ -670,38 +670,47 @@ static bool tryParseMisskeyNote(const std::string& rawStr, ParseResult& ret) {
 }
 
 // ── 头条热闻订阅流解析 ──
-// 识别: Value.data 为 toutiao 新闻/热点 JSON（kind∈{news,hotlist} + title/url 非空）
-//   news    → 带图文章（image 嵌入缩略图，msgtype=image）
-//   hotlist → 热点榜纯文本（无 image，msgtype 为空 = 普通文本）
+// 识别: Value.data 为 toutiao 新闻 JSON（proto_type==news + title 非空 + source_url/group_id 可构 URL）
+//   proto_type 与知乎 hotlist 共用字段但取值互斥（toutiao=news, zhihu=hotlist）；
+//   图片取 middle_image（p3.toutiaoimg.com 存活），image_url 为 p*.pstatp.com 死域则忽略；
+//   URL 由 source_url 补域名（自动检测 http(s):// 与 // 前缀）；
+//   无稳定用户头像字段（media_avatar_url 为签名过期 URL），pi.iconUrl 保持默认空
 
 static bool tryParseToutiaoNews(const std::string& rawStr, ParseResult& ret) {
     cJSON* root = cJSON_Parse(rawStr.c_str());
     if (!root) return false;
 
-    std::string kind  = jsonGetString(root, "kind");
-    std::string title = jsonGetString(root, "title");
-    std::string url   = jsonGetString(root, "url");
-    if (kind != "news" && kind != "hotlist") {
+    std::string protoType = jsonGetString(root, "proto_type");
+    std::string title     = jsonGetString(root, "title");
+    std::string groupId   = jsonGetString(root, "group_id");
+    std::string url       = jsonGetString(root, "source_url");
+    if (protoType != "news" || title.empty() ||
+        (url.empty() && groupId.empty())) {
         cJSON_Delete(root);
         return false;
     }
-    if (title.empty() || url.empty()) {
-        cJSON_Delete(root);
-        return false;
+    // URL 构造：已带 http(s):// 原样用；// 开头补 https:；否则前缀主域名
+    if (url.empty()) {
+        url = "https://www.toutiao.com/group/" + groupId + "/";
+    } else if (url.compare(0, 4, "http") != 0) {
+        if (url.compare(0, 2, "//") == 0) {
+            url = "https:" + url;
+        } else {
+            url = "https://www.toutiao.com" + url;
+        }
     }
-    std::string image = jsonGetString(root, "image");
-    // 字节旧版图片 CDN（p*.pstatp.com）已整体下线，全球 DNS 均不可解析（NXDOMAIN）；
-    // 命中即忽略图片、仅保留文本，不发起媒体下载也不显示失败占位。
-    const bool deadImage = image.find("pstatp.com/") != std::string::npos;
 
-    std::string tag      = jsonGetString(root, "tag");
-    std::string comments = jsonGetString(root, "comments");
-    // source：头条发布者名称，作为消息发送者显示（userName 与 nickname 同一值）
-    std::string source   = jsonGetString(root, "source");
-    int64_t publishedAt  = jsonGetInt64(root, "published_at");
-    if (publishedAt <= 0) {
-        publishedAt = jsonGetInt64(root, "published");
+    // 只接纳 middle_image（p3.toutiaoimg.com 等存活主机）；
+    // image_url 多为 p*.pstatp.com 旧版死域（DNS 已下线/NXDOMAIN），命中即忽略、仅保留文本。
+    std::string image = jsonGetString(root, "middle_image");
+    if (image.find("pstatp.com/") != std::string::npos) {
+        image.clear();
     }
+
+    std::string tag    = jsonGetString(root, "chinese_tag");
+    std::string durStr = jsonGetString(root, "video_duration_str");
+    std::string source = jsonGetString(root, "source");
+    int64_t behotTime = jsonGetInt64(root, "behot_time");
 
     ContactData cd;
     cd.id          = kToutiaoHotnewsId;
@@ -713,66 +722,48 @@ static bool tryParseToutiaoNews(const std::string& rawStr, ParseResult& ret) {
     ret.contacts.push_back(cd);
 
     std::string meta;
-    if (kind == "news") {
-        if (!tag.empty()) {
-            meta += "[" + tag + "]";
-        }
-        meta += " 评论 " + (comments.empty() ? "0" : comments);
-    } else {
-        std::string hot = jsonGetString(root, "hot");
-        if (hot.empty()) {
-            hot = jsonGetString(root, "detail");
-        }
-        if (!hot.empty()) {
-            meta += "热度 " + hot;
-        } else {
-            int64_t rank = jsonGetInt64(root, "rank");
-            if (rank > 0) {
-                meta += "第 " + std::to_string(rank) + " 位";
-            }
-        }
-    }
-
-    HistoryMessage hm;
-    hm.created_at = "";
-    if (publishedAt > 0) {
+    std::string timeStr;
+    if (behotTime > 0) {
         char tbuf[32] = {0};
-        time_t sec = (time_t)publishedAt;
+        time_t sec = (time_t)behotTime;
         struct tm tmv;
         localtime_r(&sec, &tmv);
         strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
-        meta += " · " + std::string(tbuf);
-        hm.created_at = tbuf;
+        timeStr = tbuf;
     }
-    hm.message        = title + "\n" + url + "\n" + meta;
-    hm.sender_pubkey  = "fedone";
-    hm.sender_number  = 0;
-    hm.direction      = "received";
-    hm.roomId         = kToutiaoHotnewsType;
-    hm.eventId        = jsonGetString(root, "id");
-    if (image.empty() || deadImage) {
-        hm.msgtype = "";
-        hm.mediaUrl = "";
+    if (!tag.empty()) {
+        meta += "[" + tag + "]";
+    }
+    if (!durStr.empty()) {
+        if (!meta.empty()) meta += " · ";
+        meta += "时长 " + durStr;
+    }
+    if (!timeStr.empty()) {
+        if (!meta.empty()) meta += " · ";
+        meta += timeStr;
+    }
+
+    HistoryMessage hm;
+    hm.created_at    = timeStr;
+    hm.message       = title + "\n" + url + (meta.empty() ? "" : "\n" + meta);
+    hm.sender_pubkey = "fedone";
+    hm.sender_number = 0;
+    hm.direction     = "received";
+    hm.roomId        = kToutiaoHotnewsType;
+    std::string eventId = groupId.empty() ? jsonGetString(root, "item_id") : groupId;
+    hm.eventId       = eventId;
+    if (!image.empty()) {
+        hm.msgtype      = "image";
+        hm.mediaMime    = "image/jpeg";
+        hm.mediaUrl     = image;
+        hm.mediaWidth   = 1;
+        hm.mediaHeight  = 1;
+        hm.fileSize     = 1;
     } else {
-        // p<N>-sign.toutiaoimg.com/ 为带签名参数的主机，直连大概率 403；
-        // 仅对通过检测、保留的图片执行：去掉 "-sign" 落回普通 CDN 主机 p<N>.toutiaoimg.com/。
-        const std::string kSignTail = "-sign.toutiaoimg.com/";
-        size_t signPos = image.find(kSignTail);
-        if (signPos != std::string::npos) {
-            image.replace(signPos, kSignTail.size(), ".toutiaoimg.com/");
-        }
-        hm.msgtype  = "image";
-        hm.mediaMime = "image/jpeg";
-        hm.mediaUrl = image;
-        // 哨兵值（订阅流不提供真实尺寸/大小）：1×1 + fileSize=1 使现有两条触发路径
-        // （mainwindow.cpp:2379 接收时当前 chat、chatview.cpp:3714 事后打开 autopaint）
-        // 在不改动任何触发判断的前提下均满足 fileSize>0 而自动下载；
-        // 仅当 mediaUrl（image）非空才进入本分支，纯文本消息不受影响。
-        hm.mediaWidth  = 1;
-        hm.mediaHeight = 1;
-        hm.fileSize    = 1;
+        hm.msgtype  = "";
+        hm.mediaUrl = "";
     }
-ret.messages.push_back(hm);
+    ret.messages.push_back(hm);
 
     std::string sourceName = source.empty() ? "fedone" : source;
 
@@ -784,6 +775,92 @@ ret.messages.push_back(hm);
     ret.peers.push_back(pi);
 
     ret.senderName  = qFromUtf8(sourceName);
+    ret.handled     = true;
+
+    cJSON_Delete(root);
+    return true;
+}
+
+// ── 头条热榜热搜话题卡片解析 ──
+// 识别: Value.data 为 toutiao 热榜话题 JSON（proto_type==hotlist + 顶层 Title/Url 非空 + ClusterId 非空）
+//   proto_type==hotlist 与知乎热榜卡片取值相同，靠 schema 形状互斥：
+//   知乎卡片要求 card_id/id(=rank_秒.微秒)/target.*，本变体无这些字段（Title/Url/Image 在顶层）。
+//   配图取 Image.url（p3-sign.toutiaoimg.com 存活域），尺寸取 Image.width/height（真实尺寸）；
+//   fileSize 沿用哨兵 1（与 news/hotlist 一致，图片显示受 mainwindow sizeOk 校验约束）。
+
+static bool tryParseToutiaoHotlist(const std::string& rawStr, ParseResult& ret) {
+    cJSON* root = cJSON_Parse(rawStr.c_str());
+    if (!root) return false;
+
+    std::string protoType  = jsonGetString(root, "proto_type");
+    std::string title      = jsonGetString(root, "Title");
+    std::string url        = jsonGetString(root, "Url");
+    std::string clusterStr = jsonGetString(root, "ClusterIdStr");
+    if (protoType != "hotlist" || title.empty() || url.empty()) {
+        cJSON_Delete(root);
+        return false;
+    }
+    if (clusterStr.empty()) {
+        int64_t clusterId = jsonGetInt64(root, "ClusterId");
+        if (clusterId <= 0) {
+            cJSON_Delete(root);
+            return false;
+        }
+        clusterStr = std::to_string(clusterId);
+    }
+
+    std::string image = jsonGetString(root, "Image.url");
+    int64_t imgW = jsonGetInt64(root, "Image.width");
+    int64_t imgH = jsonGetInt64(root, "Image.height");
+
+    std::string labelDesc = jsonGetString(root, "LabelDesc");
+    int64_t cycleCount = jsonGetInt64(root, "cycle_count");
+
+    ContactData cd;
+    cd.id          = kToutiaoHotnewsId;
+    cd.name        = "头条热闻";
+    cd.type        = kToutiaoHotnewsType;
+    cd.chatId      = kToutiaoHotnewsType;
+    cd.status      = "online";
+    cd.isConnected = true;
+    ret.contacts.push_back(cd);
+
+    std::string meta;
+    if (!labelDesc.empty()) {
+        meta += "[" + labelDesc + "]";
+    }
+    if (cycleCount > 0) {
+        if (!meta.empty()) meta += " · ";
+        meta += std::to_string(cycleCount) + " 轮";
+    }
+
+    HistoryMessage hm;
+    hm.message       = title + "\n" + url + (meta.empty() ? "" : "\n" + meta);
+    hm.sender_pubkey = "fedone";
+    hm.sender_number = 0;
+    hm.direction     = "received";
+    hm.roomId        = kToutiaoHotnewsType;
+    hm.eventId       = clusterStr;
+    if (!image.empty()) {
+        hm.msgtype      = "image";
+        hm.mediaMime    = "image/jpeg";
+        hm.mediaUrl     = image;
+        hm.mediaWidth   = (imgW > 0) ? (int)imgW : 1;
+        hm.mediaHeight  = (imgH > 0) ? (int)imgH : 1;
+        hm.fileSize     = 1;
+    } else {
+        hm.msgtype  = "";
+        hm.mediaUrl = "";
+    }
+    ret.messages.push_back(hm);
+
+    PeerInfo pi;
+    pi.publicKey  = "fedone";
+    pi.userName   = "fedone";
+    pi.peerNumber = 0;
+    ret.peers.push_back(pi);
+
+    ret.senderName  = qFromUtf8("fedone");
     ret.handled     = true;
 
     cJSON_Delete(root);
@@ -1203,6 +1280,8 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
             if (tryParseMisskeyNote(dataStr, ret))
                 goto done;
             if (tryParseToutiaoNews(dataStr, ret))
+                goto done;
+            if (tryParseToutiaoHotlist(dataStr, ret))
                 goto done;
             if (tryParseZhihuNotify(dataStr, ret))
                 goto done;
