@@ -1663,7 +1663,7 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
     // ── 统一发送 API ──
     // 注释掉下面这行可切回旧的三条独立端点
 #define USE_UNIFIED_SEND_API
-    qWarning("onMessageSending: id=%d type=%s msg=[%.60s]",
+    qWarning("onMessageSending: id=%d type=%s msg=[%.8192s]",
              currentChatId, qToUtf8(currentChatType).data(), qToUtf8(message).data());
     if (currentChatId == -1 || currentChatType.isEmpty()) {
         QMessageBox::warning(this, _("select_chat_first"), _("select_chat_first"));

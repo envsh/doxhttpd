@@ -1108,7 +1108,7 @@ static void fallbackAsPlainText(cJSON* valueItem, ParseResult& ret) {
 // ── 主流程 ──
 
 ParseResult UnknownParser::parse(const std::string& eventType, const std::string& jsonData) {
-    qWarning("UnknownParser::parse: type=[%s] data=[%.980s]", eventType.c_str(), jsonData.c_str());
+    qWarning("UnknownParser::parse: type=[%s] data=[%.8192s]", eventType.c_str(), jsonData.c_str());
 
     if (eventType != "pubsub" && eventType != "unknown") {
         return {false, QString(), QString(), QString()};

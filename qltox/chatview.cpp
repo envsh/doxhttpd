@@ -3744,7 +3744,7 @@ void ChatView::paintEvent(QPaintEvent* event) {
                 }
                 if (el.needsTranslateResult) {
                     el.transState = TransState::Scheduled;
-                    qWarning("ChatView: auto-trigger translate msgIndex=%d lang=%s text=[%.60s]",
+                    qWarning("ChatView: auto-trigger translate msgIndex=%d lang=%s text=[%.8192s]",
                              (int)i, qToUtf8(Config::value("translate_tolang")).data(),
                              qToUtf8(el.messageText).data());
                     emit autoTranslateRequested((int)i, el.messageText, Config::value("translate_tolang"));

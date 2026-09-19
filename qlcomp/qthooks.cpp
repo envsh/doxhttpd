@@ -52,7 +52,7 @@ static const char* callerRetaddr() {
 #define USE_RETADDR
 
 static void __attribute__((noinline)) logWithCaller(const char* label, const char* fmt, va_list ap) {
-    char buf[4096];
+    char buf[12288];
     int n = vsnprintf(buf, sizeof(buf), fmt, ap);
 
     if ((size_t)n >= sizeof(buf)) {

@@ -233,12 +233,12 @@ bool isNeedTranslateToChinese(const QString& text) {
         }
     }
     if (need == 0 && noneed == 0) {
-        qWarning("isNeedTranslateToChinese: need=%d noneed=%d result=NO_NEED(no text) text=[%.200s]",
+        qWarning("isNeedTranslateToChinese: need=%d noneed=%d result=NO_NEED(no text) text=[%.8192s]",
                  need, noneed, qToUtf8(text).data());
         return false;
     }
     float ratio = (float)noneed / (noneed + need);
-    qWarning("isNeedTranslateToChinese: need=%d noneed=%d ratio=%.4f result=%s text=[%.200s]",
+    qWarning("isNeedTranslateToChinese: need=%d noneed=%d ratio=%.4f result=%s text=[%.8192s]",
              need, noneed, ratio,
              ratio < 0.27f ? "NEED" : "NO_NEED",
              qToUtf8(text).data());

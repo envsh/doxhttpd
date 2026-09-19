@@ -536,7 +536,7 @@ void ChatWidget::onAutoTranslateRequested(int msgIndex, const QString& text, con
     // 翻译缓存命中：直接显示，不发网络请求
     if (applyCachedTranslation(msgIndex, toLang)) { return; }
 
-    qWarning("ChatWidget: auto-translate request msgIndex=%d toLang=%s text=[%.80s]",
+    qWarning("ChatWidget: auto-translate request msgIndex=%d toLang=%s text=[%.8192s]",
              msgIndex, qToUtf8(toLang).data(), qToUtf8(text).data());
     msg.translateError = QString();
     msg.transState = TransState::InFlight;
