@@ -448,6 +448,9 @@ static bool hasGifLiveMovie(const ChatElement& el) {
     return el.etype == ChatElement::Video && !el.gifPath.isEmpty();
 }
 
+static int wrappedLineCount(const QString& text, int maxW,
+                            const QFontMetrics& fm, int emojiW);
+
 static void paintMediaContent(QPainter& p, const QRect& bubbleRect,
     ChatElement::ElementType etype, bool gifLikeVideo,
     const QPixmap& fullImage, const QString& caption,
@@ -553,12 +556,20 @@ static void paintMediaContent(QPainter& p, const QRect& bubbleRect,
 
     // Caption
     if (!caption.isEmpty()) {
+        int capW = bubbleRect.width() - 2*kBubbleHPad;
+        if (capW < 20) { capW = 20; }
+        QFont cf = baseFont; cf.setPointSize(10);
+        QFontMetrics cfm(cf);
+        int nLines = wrappedLineCount(caption, capW, cfm, emojiW);
         int captionY = imgRect.y() + imgDispH + kPad/2;
         p.setPen(pal.textMuted);
-        QFont cf = baseFont; cf.setPointSize(10); p.setFont(cf);
-        p.drawText(bubbleRect.x() + kBubbleHPad, captionY,
-                   bubbleRect.width() - 2*kBubbleHPad, fm.lineSpacing(),
-                   Qt::AlignLeft | Qt::AlignVCenter, caption);
+        p.setFont(cf);
+        QRect capRect(bubbleRect.x() + kBubbleHPad, captionY, capW, nLines * cfm.lineSpacing());
+#ifdef QT3_BUILD
+        p.drawText(capRect, Qt::WordBreak | Qt::AlignLeft | Qt::AlignTop, caption);
+#else
+        p.drawText(capRect, Qt::TextWordWrap | Qt::AlignLeft | Qt::AlignTop, caption);
+#endif
         p.setFont(baseFont);
     }
 }
@@ -692,6 +703,54 @@ static QString formatAdaptiveMessageTime(const QString& timeStr) {
     }
     if (msgDate.year() == today.year()) { return dt.toString("M月d日"); }
     return dt.toString("yyyy年M月d日");
+}
+
+// 按显示宽度对文本软/硬换行计数（含 emoji 宽度），空串返回 0，非空至少 1 行。
+static int wrappedLineCount(const QString& text, int maxW,
+                            const QFontMetrics& fm, int emojiW) {
+    if (text.isEmpty()) { return 0; }
+    int lineCount = 0;
+#ifdef EMOJI_RENDER_QT34
+    auto cps = toCodepoints(text);
+    int tLen = (int)cps.size();
+    int pos = 0;
+    while (pos < tLen) {
+        if (cps[pos] == '\n') { lineCount++; pos++; continue; }
+        int lineWidth = 0, lastSpace = -1, end = pos;
+        while (end < tLen && cps[end] != '\n') {
+            int cw = isEmojiChar(cps[end]) ? emojiW : fm.width(QChar(cps[end]));
+            lineWidth += cw;
+            if (cps[end] == ' ') { lastSpace = end; }
+            if (lineWidth >= maxW) {
+                if (lastSpace > pos && end - pos > 10) { end = lastSpace + 1; }
+                break;
+            }
+            end++;
+        }
+        lineCount++;
+        pos = end;
+    }
+#else
+    int tLen = text.length();
+    int pos = 0;
+    while (pos < tLen) {
+        if (text[pos] == '\n') { lineCount++; pos++; continue; }
+        int lineWidth = 0, lastSpace = -1, end = pos;
+        while (end < tLen && text[end] != '\n') {
+            lineWidth += fm.width(text[end]);
+            if (text[end].isSpace()) { lastSpace = end; }
+            if (lineWidth >= maxW) {
+                if (lastSpace > pos && end - pos > 10) { end = lastSpace + 1; }
+                break;
+            }
+            end++;
+        }
+        lineCount++;
+        pos = end;
+    }
+#endif
+    if (lineCount < 1) { lineCount = 1; }
+    return lineCount;
 }
 
 // ───── ChatElement methods ─────
@@ -849,7 +908,12 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
             imgDispW = std::min(imgMaxW, kMaxMediaDim);
             imgDispH = 200;
         }
-        int captionH = caption.isEmpty() ? 0 : fm.lineSpacing() + kPad/2;
+        QFont cfnt = baseFont; cfnt.setPointSize(10);
+        QFontMetrics cfm(cfnt);
+        int capW = bubbleW - 2 * kBubbleHPad;
+        if (capW < 20) { capW = 20; }
+        int captionH = caption.isEmpty() ? 0
+            : wrappedLineCount(caption, capW, cfm, emojiW) * cfm.lineSpacing() + kPad/2;
         int kDLBtnH = 30;
         int bubbleH = 2 * kBubbleVPad + imgDispH + captionH + kDLBtnH;
         if (!firstInGroup) {
