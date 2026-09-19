@@ -814,6 +814,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                     elp->mediaWidth, elp->mediaHeight, chatWidget->width() * 70 / 100);
                 if (sizeOk && (!isImgLike || !thumb.isNull())) {
                     elp->scaledDisplay = thumb;
+                    elp->cachedWidth = -1;
 
                     // Cache raw bytes (JPEG/WebP), not QPixmap
                     MediaShmemCache::inst().putThumb(qFromUtf8(e->mxcUrl), (const char*)e->rawData.data(), e->rawData.size());
@@ -847,7 +848,9 @@ void MainWindow::customEvent(CustomEventBase* event) {
                     elp->mediaUrl = qFromUtf8(e->mxcUrl);
                     elp->mediaErrorMsg = qFromUtf8("数据校验失败（大小不匹配/解码失败）");
                 }
-                if (isCurrent) { chatWidget->updateElement(realIdx); }
+                if (isCurrent) {
+                    chatWidget->updateElement(realIdx);
+                }
             }
         } else {
             qWarning("Media download failed: chat=%d/%s idx=%d err=%s",
@@ -2368,6 +2371,8 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
                                     el.mediaWidth, el.mediaHeight, chatWidget->width() * 70 / 100);
                                 el.downloadState = ChatElement::Completed;
                                 el.downloadProgress = 100;
+                                el.cachedWidth = -1;
+                                chatWidget->updateElement(newIdx);
                             } else {
                                 auto dbData = Storage::instance().cacheDb()->loadMedia(
                                     mediaCacheKey("file", mxc).c_str());
@@ -2377,6 +2382,8 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
                                         el.mediaWidth, el.mediaHeight, chatWidget->width() * 70 / 100);
                                     el.downloadState = ChatElement::Completed;
                                     el.downloadProgress = 100;
+                                    el.cachedWidth = -1;
+                                    chatWidget->updateElement(newIdx);
                                 } else {
                                     if (hm.fileSize <= 0 || (hm.fileSize > 0 && hm.fileSize < 1048576)) {
                                         el.downloadState = ChatElement::InProgress;
@@ -3179,6 +3186,7 @@ void MainWindow::onRetryClicked(int msgIndex, const QString& mediaUrl, const QSt
             el.mediaWidth, el.mediaHeight, chatWidget->width() * 70 / 100);
         el.downloadState = ChatElement::Completed;
         el.downloadProgress = 100;
+        el.cachedWidth = -1;
         chatWidget->updateElement(msgIndex);
         if (el.pendingPlay) { scheduleMediaPlayback(msgIndex, true); }
         return;
@@ -3191,6 +3199,7 @@ void MainWindow::onRetryClicked(int msgIndex, const QString& mediaUrl, const QSt
             el.mediaWidth, el.mediaHeight, chatWidget->width() * 70 / 100);
         el.downloadState = ChatElement::Completed;
         el.downloadProgress = 100;
+        el.cachedWidth = -1;
         chatWidget->updateElement(msgIndex);
         if (el.pendingPlay) { scheduleMediaPlayback(msgIndex, true); }
         return;
@@ -3456,13 +3465,16 @@ void MainWindow::handleMediaPostproc(MediaDownloadEvent* e) {
                 (const char*)thumb.data(), (int)thumb.size());
             el.scaledDisplay = decodeRawToThumb((const char*)thumb.data(), (int)thumb.size(),
                 el.mediaWidth, el.mediaHeight, chatWidget->width() * 70 / 100);
+            el.cachedWidth = -1;
         }
         removeCacheFile(e->thumbFile);
     }
     if (!el.mediaUrl.isEmpty()) {
         db_writeMessage(e->chatId, e->chatType, el);
     }
-    if (isCurrent) { chatWidget->updateElement(e->msgIndex); }
+    if (isCurrent) {
+        chatWidget->updateElement(e->msgIndex);
+    }
 
     if (e->pendingPlay) {
         el.pendingPlay = false;

@@ -43,7 +43,7 @@ QPixmap makeScaledThumb(const QPixmap& src, int mediaW, int mediaH, int maxConta
     }
 #ifdef QT3_BUILD
     QImage img = src.convertToImage();
-    QImage scaledImg = img.smoothScale(dw, dh, QImage::ScaleMax);
+    QImage scaledImg = img.smoothScale(dw, dh, QImage::ScaleMin);
     QPixmap out;
     out.convertFromImage(scaledImg);
     return out;
@@ -397,26 +397,26 @@ static int paintThumbnail(QPainter& p, const QRect& imgRect,
     if (!thumb.isNull()) {
         if (thumb.width() == dw && thumb.height() == dh) {
             int ox = imgRect.x() + (maxW - dw) / 2;
-            int oy = imgRect.y() + (maxH - dh) / 2;
+            int oy = imgRect.y();
             p.drawPixmap(ox, oy, thumb);
         } else {
 #ifdef QT3_BUILD
         QImage img = thumb.convertToImage();
-        QImage scaledImg = img.scale(dw, dh, QImage::ScaleMax);
+        QImage scaledImg = img.scale(dw, dh, QImage::ScaleMin);
         QPixmap scaled;
         scaled.convertFromImage(scaledImg);
 #else
         QPixmap scaled = thumb.scaled(dw, dh, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 #endif
         int ox = imgRect.x() + (maxW - scaled.width()) / 2;
-        int oy = imgRect.y() + (maxH - scaled.height()) / 2;
+        int oy = imgRect.y();
         p.drawPixmap(ox, oy, scaled);
         }
     } else {
         p.setBrush(pal.hoverBg);
         p.setPen(Qt::NoPen);
         int px = imgRect.x() + (maxW - dw) / 2;
-        int py = imgRect.y() + (maxH - dh) / 2;
+        int py = imgRect.y();
         QRect pr(px, py, dw, dh);
 #ifdef QT3_BUILD
         p.drawRoundRect(pr, 4, 4);
@@ -467,8 +467,21 @@ static void paintMediaContent(QPainter& p, const QRect& bubbleRect,
     int fileSize = 0, int progressPct = -1, int speedBps = 0)
 {
     const int kBubbleHPad = 12, kBubbleVPad = 8, kPad = 8;
-    QRect imgRect(bubbleRect.x() + kBubbleHPad, bubbleRect.y() + kBubbleVPad,
-                  bubbleRect.width() - 2*kBubbleHPad, bubbleRect.height() - 2*kBubbleVPad);
+
+    // ── 顶部文字区（标题）──
+    int capW = bubbleRect.width() - 2*kBubbleHPad;
+    if (capW < 20) { capW = 20; }
+    QFont cf = baseFont; cf.setPointSize(10);
+    QFontMetrics cfm(cf);
+    int nLines = caption.isEmpty() ? 0 : wrappedLineCount(caption, capW, cfm, emojiW);
+    int captionH = nLines * cfm.lineSpacing();
+
+    // ── 图片区：位于文字块下方，不与被文字占用 ──
+    QRect imgRect(bubbleRect.x() + kBubbleHPad,
+                  bubbleRect.y() + kBubbleVPad + captionH,
+                  bubbleRect.width() - 2*kBubbleHPad,
+                  bubbleRect.height() - 2*kBubbleVPad - captionH);
+    if (imgRect.height() < 1) { imgRect.setHeight(1); }
 
     // Thumbnail / GIF frame
     QPixmap frame;
@@ -479,7 +492,7 @@ static void paintMediaContent(QPainter& p, const QRect& bubbleRect,
 #endif
     }
     const QPixmap& src = !frame.isNull() ? frame : fullImage;
-    int imgDispH = paintThumbnail(p, imgRect, src, mediaWidth, mediaHeight, baseFont, fm, pal, state, downloadBtnOut, retryBtnOut, fileSize, progressPct, speedBps);
+    paintThumbnail(p, imgRect, src, mediaWidth, mediaHeight, baseFont, fm, pal, state, downloadBtnOut, retryBtnOut, fileSize, progressPct, speedBps);
 
     // GIF badge
     if (etype == ChatElement::Gif || gifLikeVideo) {
@@ -558,17 +571,26 @@ static void paintMediaContent(QPainter& p, const QRect& bubbleRect,
         }
     }
 
-    // Caption
-    if (!caption.isEmpty()) {
-        int capW = bubbleRect.width() - 2*kBubbleHPad;
-        if (capW < 20) { capW = 20; }
-        QFont cf = baseFont; cf.setPointSize(10);
-        QFontMetrics cfm(cf);
-        int nLines = wrappedLineCount(caption, capW, cfm, emojiW);
-        int captionY = imgRect.y() + imgDispH + kPad/2;
-        p.setPen(pal.textMuted);
+    // Caption（消息顶部，0.9 不透明度，接近普通文本消息）
+    if (nLines > 0) {
+        QColor capCol;
+#ifdef QT3_BUILD
+        // Qt3 QColor 无 alpha，向气泡底色混合 10% 实现 0.9 不透明度观感
+        {
+            QColor fg = pal.textPrimary, bg = pal.baseBg;
+            capCol = QColor((fg.red()*230 + bg.red()*25) / 255,
+                            (fg.green()*230 + bg.green()*25) / 255,
+                            (fg.blue()*230 + bg.blue()*25) / 255);
+        }
+#endif
+#ifndef QT3_BUILD
+        capCol = pal.textPrimary;
+        capCol.setAlpha(230);
+#endif
+        p.setPen(capCol);
         p.setFont(cf);
-        QRect capRect(bubbleRect.x() + kBubbleHPad, captionY, capW, nLines * cfm.lineSpacing());
+        QRect capRect(bubbleRect.x() + kBubbleHPad, bubbleRect.y() + kBubbleVPad,
+                      capW, captionH);
 #ifdef QT3_BUILD
         p.drawText(capRect, Qt::WordBreak | Qt::AlignLeft | Qt::AlignTop, caption);
 #else
@@ -917,7 +939,7 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
         int capW = bubbleW - 2 * kBubbleHPad;
         if (capW < 20) { capW = 20; }
         int captionH = caption.isEmpty() ? 0
-            : wrappedLineCount(caption, capW, cfm, emojiW) * cfm.lineSpacing() + kPad/2;
+            : wrappedLineCount(caption, capW, cfm, emojiW) * cfm.lineSpacing();
         int kDLBtnH = 30;
         int bubbleH = 2 * kBubbleVPad + imgDispH + captionH + kDLBtnH;
         if (!firstInGroup) {
@@ -2746,14 +2768,22 @@ int ChatView::findMessageAtY(int y) const {
 int ChatView::charPosAt(int msgIndex, int localX, int localY) {
     if (msgIndex < 0 || msgIndex >= (int)m_history->size()) return -1;
     const ChatElement& msg = (*m_history)[msgIndex];
-    const QString& text = msg.messageText;
+    // 带图片预览：文本在气泡顶部的 caption（10pt），几何与 paintMediaContent 一致
+    bool mediaTop = (msg.etype == ChatElement::Image ||
+                     msg.etype == ChatElement::Gif ||
+                     msg.etype == ChatElement::Video) && !msg.caption.isEmpty();
+    const QString& text = mediaTop ? msg.caption : msg.messageText;
     int textLen = text.length();
     if (textLen == 0) { return 0; }
 
-    QFont f = font();
-    QFontMetrics fm(f);
+    QFont mf = font();
+    QFontMetrics fm(mf);
+    int headerH = fontMetrics().lineSpacing();
     int viewW = contentWidth();
-    int headerH = fm.lineSpacing();
+    if (mediaTop) {
+        mf.setPointSize(10);
+        fm = QFontMetrics(mf);
+    }
 
     // Compute bubble text width (same as calcMessageHeight)
     int contentW = viewW - 3 * kPad - kAvatarSize;
@@ -2778,11 +2808,12 @@ int ChatView::charPosAt(int msgIndex, int localX, int localY) {
         if (bubbleW3 < 100) { bubbleW3 = contentW2; }
         areaX = contentX + kBubbleHPad;
     }
-    areaY = kPad + headerH + kPad + kBubbleVPad;
+    areaY = (msg.firstInGroup ? kPad + headerH + kPad : kPad / 2) + kBubbleVPad;
 
     localX -= areaX;
     localY -= areaY;
     if (localX < 0) { localX = 0; }
+    if (localX >= bubbleTextWidth) { return -1; }
     if (localY < 0) { return -1; }
 
     // Compute line breaks
@@ -2812,6 +2843,7 @@ int ChatView::charPosAt(int msgIndex, int localX, int localY) {
     }
 
     int lineHeight = fm.lineSpacing();
+    if (localY >= (int)lineStarts.size() * lineHeight) { return -1; }
     int lineIndex = localY / lineHeight;
     if (lineIndex >= (int)lineStarts.size())
         lineIndex = (int)lineStarts.size() - 1;
@@ -3180,13 +3212,20 @@ void ChatView::mousePressEvent(QMouseEvent* event) {
                 m_clickTime = now;
 
                 // Check if clicked on a URL
-                auto links = extractLinks((*m_history)[msgIndex].messageText);
-                for (const LinkSpan& link : links) {
-                    qWarning("  PRESS link [%d,%d): %s",
-                             link.start, link.end, qToUtf8(link.url).data());
-                    if (charPos >= link.start && charPos < link.end) {
-                        qOpenUrl(link.url);
-                        return;
+                {
+                    const ChatElement& cel = (*m_history)[msgIndex];
+                    const QString& linkSrc = (cel.etype == ChatElement::Image ||
+                                              cel.etype == ChatElement::Gif ||
+                                              cel.etype == ChatElement::Video)
+                                          ? cel.caption : cel.messageText;
+                    auto links = extractLinks(linkSrc);
+                    for (const LinkSpan& link : links) {
+                        qWarning("  PRESS link [%d,%d): %s",
+                                 link.start, link.end, qToUtf8(link.url).data());
+                        if (charPos >= link.start && charPos < link.end) {
+                            qOpenUrl(link.url);
+                            return;
+                        }
                     }
                 }
                 // Start selection
@@ -3347,14 +3386,15 @@ void ChatView::mouseMoveEvent(QMouseEvent* event) {
         int localX = event->x();
         int charPos = charPosAt(msgIndex, localX, localY);
         if (charPos >= 0) {
-            auto links = extractLinks((*m_history)[msgIndex].messageText);
+            const ChatElement& cel = (*m_history)[msgIndex];
+            const QString& linkSrc = (cel.etype == ChatElement::Image ||
+                                      cel.etype == ChatElement::Gif ||
+                                      cel.etype == ChatElement::Video)
+                                  ? cel.caption : cel.messageText;
+            auto links = extractLinks(linkSrc);
             for (const LinkSpan& link : links) {
                 if (charPos >= link.start && charPos < link.end) {
-#ifdef QT3_BUILD
                     setCursor(QCursor(Qt::PointingHandCursor));
-#else
-                    setCursor(QCursor(Qt::PointingHandCursor));
-#endif
                     QWidget::mouseMoveEvent(event);
                     return;
                 }
