@@ -3,6 +3,7 @@
 #include "compatcore34.h"
 #include <dlfcn.h>
 #include <ctime>
+#include <cstdlib>
 
 // ── JSON 路径导航 ──
 
@@ -868,46 +869,73 @@ ret.messages.push_back(hm);
 }
 
 // ── 知乎热闻订阅流解析 ──
-// 识别: Value.data 为 zhihu 热榜 JSON（kind==hotlist + card_id/feed_id 非空 + target 对象且 title/url 非空）
-//   与 toutiao hotlist 同 kind，但顶层 title/url 为空（在 target 内），以此区分；纯文本类型
+// 识别: Value.data 为 zhihu 热榜 JSON（proto_type==hotlist + card_id/id 非空 + target 对象且 title/url 非空）
+//   id 格式 "{rank}_{unix秒}.{微秒}"（前缀=热榜名次，中段=推送时间，微秒忽略）；
+//   识别走 proto_type，与 toutiao 的 kind 天然互斥；有条件附带热榜缩略图
 
 static bool tryParseZhihuHotnews(const std::string& rawStr, ParseResult& ret) {
     cJSON* root = cJSON_Parse(rawStr.c_str());
     if (!root) return false;
 
-    std::string kind    = jsonGetString(root, "kind");
-    std::string cardId  = jsonGetString(root, "card_id");
-    std::string feedId  = jsonGetString(root, "feed_id");
-    std::string title   = jsonGetString(root, "target.title");
-    std::string url     = jsonGetString(root, "target.url");
-    if (kind != "hotlist" || cardId.empty() || feedId.empty() ||
+    std::string protoType = jsonGetString(root, "proto_type");
+    std::string cardId    = jsonGetString(root, "card_id");
+    std::string feedId    = jsonGetString(root, "id");
+    std::string title     = jsonGetString(root, "target.title");
+    std::string url       = jsonGetString(root, "target.url");
+    if (protoType != "hotlist" || cardId.empty() || feedId.empty() ||
         title.empty() || url.empty()) {
         cJSON_Delete(root);
         return false;
     }
 
-    // 知乎热榜数据现含 author 对象（规划变动）：
-    //   username ← author.name；usernick ← author.headline（不回退）；iconurl ← author.avatar_url。
-    //   url_token 为个人主页 slug，不作昵称使用。
-    std::string authorName     = jsonGetString(root, "author.name");
-    std::string authorHeadline = jsonGetString(root, "author.headline");
-    std::string authorAvatar   = jsonGetString(root, "author.avatar_url");
+    // 知乎热榜 author 对象（新 schema 位于 target.author）：
+    //   username ← author.name（空回退 fedone）；usernick ← author.headline（不回退）；
+    //   iconurl ← author.avatar_url。url_token 为个人主页 slug，不作昵称使用。
+    std::string authorName     = jsonGetString(root, "target.author.name");
+    std::string authorHeadline = jsonGetString(root, "target.author.headline");
+    std::string authorAvatar   = jsonGetString(root, "target.author.avatar_url");
     std::string peerName       = authorName.empty() ? "fedone" : authorName;
 
     std::string meta;
-    int64_t rank = jsonGetInt64(root, "rank");
+    std::string feedTime;
+    int64_t rank = 0;
+    size_t usPos = feedId.find('_');
+    if (usPos != std::string::npos && usPos > 0) {
+        std::string rankStr = feedId.substr(0, usPos);
+        if (isDigits(rankStr)) {
+            rank = std::atoll(rankStr.c_str());
+        }
+        size_t dotPos = feedId.find('.', usPos + 1);
+        size_t endPos = (dotPos == std::string::npos) ? feedId.size() : dotPos;
+        std::string tstr = feedId.substr(usPos + 1, endPos - (usPos + 1));
+        if (!tstr.empty()) {
+            int64_t sec = std::atoll(tstr.c_str());
+            if (sec > 0) {
+                char tbuf[32] = {0};
+                time_t tt = (time_t)sec;
+                struct tm tmv;
+                localtime_r(&tt, &tmv);
+                strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
+                feedTime = tbuf;
+            }
+        }
+    }
     if (rank > 0) {
         meta += "第 " + std::to_string(rank) + " 名";
     }
-    int64_t count = jsonGetInt64(root, "count");
-    if (count > 0) {
+    int64_t cycleCount = jsonGetInt64(root, "cycle_count");
+    if (cycleCount > 0) {
         if (!meta.empty()) meta += " · ";
-        meta += std::to_string(count);
+        meta += std::to_string(cycleCount);
     }
-    std::string detail = jsonGetString(root, "detail");
-    if (!detail.empty()) {
+    std::string detailText = jsonGetString(root, "detail_text");
+    if (!detailText.empty()) {
         if (!meta.empty()) meta += " · ";
-        meta += detail;
+        meta += detailText;
+    }
+    if (!feedTime.empty()) {
+        if (!meta.empty()) meta += " · ";
+        meta += feedTime;
     }
 
     ContactData cd;
@@ -920,26 +948,24 @@ static bool tryParseZhihuHotnews(const std::string& rawStr, ParseResult& ret) {
     ret.contacts.push_back(cd);
 
     HistoryMessage hm;
-    hm.created_at = "";
-    int64_t publishedAt = jsonGetInt64(root, "published_at");
-    if (publishedAt > 0) {
-        char tbuf[32] = {0};
-        time_t sec = (time_t)publishedAt;
-        struct tm tmv;
-        localtime_r(&sec, &tmv);
-        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
-        if (!meta.empty()) meta += " · ";
-        meta += tbuf;
-        hm.created_at = tbuf;
-    }
-    hm.message       = title + "\n" + url + "\n" + meta;
+    hm.created_at    = feedTime;
+    hm.message       = title + "\n" + url + (meta.empty() ? "" : "\n" + meta);
     hm.sender_pubkey = "fedone";
     hm.sender_number = 0;
     hm.direction     = "received";
     hm.roomId        = kZhihuHotnewsType;
-    hm.eventId       = jsonGetString(root, "content_id");
-    hm.msgtype       = "";
-    hm.mediaUrl      = "";
+    hm.eventId       = std::to_string(jsonGetInt64(root, "target.id"));
+    std::string thumb = jsonGetString(root, "children.0.thumbnail");
+    if (!thumb.empty()) {
+        hm.msgtype     = "image";
+        hm.mediaUrl    = thumb;
+        hm.fileSize    = 1;
+        hm.mediaWidth  = 1;
+        hm.mediaHeight = 1;
+    } else {
+        hm.msgtype  = "";
+        hm.mediaUrl = "";
+    }
     ret.messages.push_back(hm);
 
     PeerInfo pi;
