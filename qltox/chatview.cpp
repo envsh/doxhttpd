@@ -18,6 +18,13 @@
 #include "restapi.h"
 #include "eventpoller.h"
 #include "toastwidget.h"
+#ifdef QT3_BUILD
+#include <qpushbutton.h>
+#include <qlayout.h>
+#else
+#include <QPushButton>
+#include <QHBoxLayout>
+#endif
 
 // ── Media display sizing ──
 static const int kMaxMediaDim = 260;
@@ -3015,9 +3022,8 @@ void ChatView::copyFullMessage(int msgIndex) {
     }
 }
 
-void ChatView::showRawData(int msgIndex) {
-    if (msgIndex < 0 || msgIndex >= (int)m_history->size()) return;
-    const ChatElement& el = (*m_history)[msgIndex];
+// ── 原始数据 dump：把元素字段转成对齐文本（"查看原始数据"窗口用）──
+static QString buildRawDataText(const ChatElement& el) {
     QString etypeStr;
     switch (el.etype) {
         case ChatElement::Text:   etypeStr = "Text";   break;
@@ -3061,29 +3067,57 @@ void ChatView::showRawData(int msgIndex) {
     text += QString("translateError: %1\n").arg(el.translateError);
     text += QString("showTranslation:%1\n").arg(el.showTranslation);
     text += QString("firstInGroup:   %1\n").arg(el.firstInGroup);
+    return text;
+}
+
+// Qt3/4 QTextEdit 显示纯文本统一入口
+static void setTePlain(QTextEdit* te, const QString& t) {
+#ifdef QT3_BUILD
+    te->setText(t);
+#else
+    te->setPlainText(t);
+#endif
+}
+
+void ChatView::showRawData(int msgIndex) {
+    if (msgIndex < 0 || msgIndex >= (int)m_history->size()) return;
 #ifdef QT3_BUILD
     QDialog dlg(this, "rawdata", true);
-    dlg.setCaption(qFromUtf8("原始数据"));
-    QVBoxLayout* lay = new QVBoxLayout(&dlg);
-    lay->setMargin(0);
-    QTextEdit* te = new QTextEdit(&dlg);
-    te->setText(text);
-    te->setReadOnly(true);
-    lay->addWidget(te);
-    dlg.resize(600, 480);
-    dlg.exec();
 #else
     QDialog dlg(this);
-    dlg.setWindowTitle(qFromUtf8("原始数据"));
+#endif
+    qSetWindowTitle(&dlg, qFromUtf8("原始数据"));
     QVBoxLayout* lay = new QVBoxLayout(&dlg);
     lay->setMargin(0);
     QTextEdit* te = new QTextEdit(&dlg);
-    te->setPlainText(text);
     te->setReadOnly(true);
     lay->addWidget(te);
+
+    QHBoxLayout* btns = new QHBoxLayout;
+    btns->addStretch(1);
+    QPushButton* updateBtn = new QPushButton(qFromUtf8("更新"), &dlg);
+    QPushButton* copyBtn   = new QPushButton(qFromUtf8("拷贝"), &dlg);
+    btns->addWidget(updateBtn);
+    btns->addWidget(copyBtn);
+    btns->addStretch(1);
+    lay->addLayout(btns);
+
+    setTePlain(te, buildRawDataText((*m_history)[msgIndex]));
+    auto* updSlot = new LambdaSlot(updateBtn, [this, te, msgIndex]() {
+        if (msgIndex < 0 || msgIndex >= (int)m_history->size()) { return; }
+        setTePlain(te, buildRawDataText((*m_history)[msgIndex]));
+    });
+    connect(updateBtn, SIGNAL(clicked()), updSlot, SLOT(call()));
+    auto* copySlot = new LambdaSlot(copyBtn, [te]() {
+#ifdef QT3_BUILD
+        QApplication::clipboard()->setText(te->text());
+#else
+        QApplication::clipboard()->setText(te->toPlainText());
+#endif
+    });
+    connect(copyBtn, SIGNAL(clicked()), copySlot, SLOT(call()));
     dlg.resize(600, 480);
     dlg.exec();
-#endif
 }
 
 void ChatView::wheelEvent(QWheelEvent* event) {
