@@ -3521,7 +3521,8 @@ void ChatView::mouseDoubleClickEvent(QMouseEvent* event) {
             QRect avatarRectForMsg = avatarRectFor(msgIndex);
             if (!avatarRectForMsg.isNull() && avatarRectForMsg.contains(event->pos())) {
                 emit peerInfoRequested((*m_history)[msgIndex].peerNumber,
-                                       (*m_history)[msgIndex].senderName);
+                                       (*m_history)[msgIndex].senderName,
+                                       (*m_history)[msgIndex].senderPubkey);
                 return;
             }
             // 双击缩略图：
@@ -3739,7 +3740,8 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         emit mentionClicked((*m_history)[msgIndex].senderName, displayName);
     } else if (hasNick && choice == viewInfoId) {
         emit peerInfoRequested((*m_history)[msgIndex].peerNumber,
-                               (*m_history)[msgIndex].senderName);
+                               (*m_history)[msgIndex].senderName,
+                               (*m_history)[msgIndex].senderPubkey);
     } else if (hasMsgActions && choice == replyMsgId) {
         emit replyRequested(msgIndex);
     } else if (hasMsgActions && choice == editMsgId) {
@@ -3786,7 +3788,8 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         emit mentionClicked((*m_history)[msgIndex].senderName, displayName);
     } else if (chosen == viewInfoAction) {
         emit peerInfoRequested((*m_history)[msgIndex].peerNumber,
-                               (*m_history)[msgIndex].senderName);
+                               (*m_history)[msgIndex].senderName,
+                               (*m_history)[msgIndex].senderPubkey);
     } else if (replyMsgAction && chosen == replyMsgAction) {
         emit replyRequested(msgIndex);
     } else if (editMsgAction && chosen == editMsgAction) {

@@ -150,7 +150,8 @@ void FriendInfoDialog::setInfo(int id, const QString& name, const QString& type,
     idLabel->setText(QString::number(id));
     nameLabel->setText(name.isEmpty() ? _("no_name") : name);
     typeLabel->setText(type == "friend" ? _("friend") : 
-                      type == "conference" ? _("conference_item") : _("group"));
+                      type == "conference" ? _("conference_item") :
+                      type == "group" ? _("group") : type);
     statusLabel->setText(status.isEmpty() ? _("no_status") : status);
     if (userStatus == "1") {
         userStatusLabel->setText(_("statuses.away"));
@@ -169,6 +170,7 @@ void FriendInfoDialog::setInfo(int id, const QString& name, const QString& type,
     }
     
     pkLabel->setText(publicKey.isEmpty() ? _("no_status") : publicKey);
+    setLastSeen(_("never_online"));
 }
 
 void FriendInfoDialog::setInfo(const FriendInfo& info) {

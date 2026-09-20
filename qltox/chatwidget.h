@@ -69,7 +69,7 @@ signals:
     void requestRedactMessage(int msgIndex);
     void favoriteClicked(int msgIndex);
     void screenshotRequested();
-    void peerInfoRequested(int peerNumber, const QString& senderName);
+    void peerInfoRequested(int peerNumber, const QString& senderName, const QString& pubkey);
 
 private slots:
     void onSendClicked();

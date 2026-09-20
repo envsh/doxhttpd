@@ -585,8 +585,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(chatWidget, SIGNAL(openMediaPlayer(int)),
             this, SLOT(onOpenMediaPlayer(int)));
     connect(chatWidget, SIGNAL(favoriteClicked(int)), this, SLOT(onFavoriteClicked(int)));
-    connect(chatWidget, SIGNAL(peerInfoRequested(int, const QString&)),
-            this, SLOT(onChatPeerInfoRequested(int, const QString&)));
+    connect(chatWidget, SIGNAL(peerInfoRequested(int,const QString&,const QString&)),
+            this, SLOT(onChatPeerInfoRequested(int,const QString&,const QString&)));
     connect(chatWidget, SIGNAL(screenshotRequested()), this, SLOT(onChatScreenshotRequested()));
     connect(chatWidget, SIGNAL(fileSendRequested(const QString&, const QString&)),
             this, SLOT(onFileSendRequested(const QString&, const QString&)));
@@ -2576,22 +2576,23 @@ void MainWindow::onViewInfoRequested(int id, const QString& type) {
     dialog.exec();
 }
 
-void MainWindow::onChatPeerInfoRequested(int peerNumber, const QString& senderName) {
-    if (currentChatType != "friend" && currentChatType != "conference"
-        && currentChatType != "group") {
-        return;
-    }
+void MainWindow::onChatPeerInfoRequested(int peerNumber, const QString& senderName,
+                                         const QString& senderPubkey) {
     FriendInfoDialog dialog(this);
     std::string key;
     if (currentChatType == "friend") {
         key = "friend_" + std::to_string(peerNumber);
+    } else if (currentChatType == "unknown") {
+        if (!senderPubkey.isEmpty()) {
+            key = "unknown_" + std::string(qToUtf8(senderPubkey).data());
+        }
     } else {
         key = std::string(qToUtf8(currentChatType).data())
             + "_" + std::to_string(currentChatId)
             + "_" + std::to_string(peerNumber);
     }
     auto it = peerInfoMap.find(key);
-    if (it == peerInfoMap.end()) {
+    if (it == peerInfoMap.end() && !key.empty()) {
         PeerKey pk = parsePeerKey(key);
         if (pk.valid) {
             auto row = Storage::instance().channelDb()->get_chan_peer(
@@ -2606,8 +2607,10 @@ void MainWindow::onChatPeerInfoRequested(int peerNumber, const QString& senderNa
         dialog.setTitle(title);
         dialog.setInfo(friendInfoFromPeer(it->second, peerNumber));
     } else {
+        dialog.setTitle(senderName.isEmpty() ? _("no_name") : senderName);
         dialog.setInfo(peerNumber,
-                       senderName.isEmpty() ? _("no_name") : senderName, "friend");
+                       senderName.isEmpty() ? _("no_name") : senderName,
+                       currentChatType.isEmpty() ? QString("friend") : currentChatType);
     }
     dialog.exec();
 }
@@ -3149,6 +3152,7 @@ void MainWindow::renderHistoryMessages(const std::vector<HistoryMessage>& messag
         el.senderName     = senderLabel;
         el.senderNickname = senderNickname;
         el.peerNumber     = isSelf ? -1 : (currentChatType == "friend" ? currentChatId : (int)msg.sender_number);
+        el.senderPubkey   = qFromUtf8(msg.sender_pubkey);
         el.time           = timeStr;
         el.avatarUrl      = avatarUrl;
         el.ipAddress      = ipAddress;

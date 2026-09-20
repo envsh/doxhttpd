@@ -58,7 +58,7 @@ protected slots:
     void retranslateUi();
     void handleEvents(const EventList& events);
     void onViewInfoRequested(int id, const QString& type);
-    void onChatPeerInfoRequested(int peerNumber, const QString& senderName);
+    void onChatPeerInfoRequested(int peerNumber, const QString& senderName, const QString& senderPubkey);
     void onDeleteOrLeaveRequested(int id, const QString& type);
     void onInviteToConferenceRequested(int friendId);
     void onInviteToGroupRequested(int friendId);

@@ -53,6 +53,7 @@ struct ChatElement {
     QString avatarUrl;
     QString time;
     QString ipAddress;
+    QString senderPubkey;         // 发送者公钥（unknown 会话的 peer 键为 unknown_{pubkey}）
 
     // Text only
     QString messageText;
@@ -215,7 +216,7 @@ signals:
     void redactRequested(int msgIndex);
     void favoriteClicked(int msgIndex);
     void forwardClicked(int msgIndex);
-    void peerInfoRequested(int peerNumber, const QString& senderName);
+    void peerInfoRequested(int peerNumber, const QString& senderName, const QString& pubkey);
 
 private slots:
     void onScrollChanged(int value);
