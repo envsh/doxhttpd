@@ -28,6 +28,9 @@
 using std::min;
 using std::max;
 
+// 放大上限：100 倍（m_scale == 100.0 即 10000%）
+static const double kMaxZoomScale = 100.0;
+
 static QString humanBytes(int n) {
     if (n < 1024) {
         return QString::number(n) + " B";
@@ -184,6 +187,7 @@ void PhotoCanvas::zoomIn() {
     m_fitMode = false;
     m_scale = m_scale * 1.25;
     if (m_scale < 0.05) { m_scale = 0.05; }
+    if (m_scale > kMaxZoomScale) { m_scale = kMaxZoomScale; }
     rebuildCache();
     update();
     emit viewChanged();
@@ -345,6 +349,7 @@ void PhotoCanvas::wheelEvent(QWheelEvent* event) {
     double factor = pow(1.25, steps);
     double oldScale = m_scale;
     double newScale = max(0.05, m_scale * factor);
+    if (newScale > kMaxZoomScale) { newScale = kMaxZoomScale; }
 
     double cx = (double)event->x() - m_offX;
     double cy = (double)event->y() - m_offY;
