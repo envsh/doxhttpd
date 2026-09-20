@@ -1522,6 +1522,7 @@ void MainWindow::onContactSelected(int id, const QString& type, const QString& n
     qWarning("onContactSelected: id=%d, type=%s", id, qToUtf8(type).data());
     currentChatId = id;
     currentChatType = type;
+    chatWidget->setAttrForChat(type, id);
     int prevUnread = contactListWidget->unreadCount(id, type);
     contactListWidget->resetUnread(id, type);
     
@@ -2826,6 +2827,7 @@ void MainWindow::onDeleteOrLeaveRequested(int id, const QString& type) {
             if (id == currentChatId && type == currentChatType) {
                 currentChatId = -1;
                 currentChatType = "";
+                chatWidget->setAttrForChat(QString(), -1);
                 chatWidget->resetPendingContext();
                 chatWidget->setHeaderText(_("select_chat_object"));
                 chatWidget->setBuffer(nullptr);
@@ -3050,6 +3052,7 @@ void MainWindow::onSwitchAccount() {
     // 清空 UI 状态
     currentChatId = -1;
     currentChatType = "";
+    chatWidget->setAttrForChat(QString(), -1);
     selfPubkey.clear();
     contactListWidget->clear();
     m_chatbuf = ChatBuffer();

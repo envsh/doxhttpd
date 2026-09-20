@@ -19,7 +19,7 @@ SOURCES = main.cpp mainwindow.cpp storage.cpp restapi.cpp eventpoller.cpp \
              chatwidget.cpp chatview.cpp chatbuffer.cpp contactlist.cpp selfinfo.cpp \
              cJSON.c editinfodialog.cpp conferenceinvitedialog.cpp groupinvitedialog.cpp \
              friendinfodialog.cpp memberlistdialog.cpp logindialog.cpp \
-             imageinputconfirm.cpp messageinput.cpp sound.c loadingbar.cpp \
+             imageinputconfirm.cpp messageinput.cpp messageattribbar.cpp sound.c loadingbar.cpp \
               unknownparser.cpp photoviewer.cpp avatar_manager.cpp \
                media_shmem_cache.cpp \
                channel_db.cpp message_db.cpp \
@@ -40,7 +40,7 @@ HEADERS = mainwindow.h storage.h restapi.h eventpoller.h \
              chatwidget.h chatview.h chatbuffer.h contactlist.h selfinfo.h \
              editinfodialog.h conferenceinvitedialog.h groupinvitedialog.h \
              friendinfodialog.h memberlistdialog.h logindialog.h \
-              imageinputconfirm.h messageinput.h sound.h loadingbar.h \
+              imageinputconfirm.h messageinput.h messageattribbar.h sound.h loadingbar.h \
                unknownparser.h photoviewer.h avatar_manager.h \
                media_shmem_cache.h \
                channel_db.h message_db.h \

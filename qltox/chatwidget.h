@@ -23,6 +23,7 @@ typedef QList<QWidget*> ChipWidgetList;        // Qt4：存 QWidget*
 #include <qcheckbox.h>
 #include "chatview.h"
 #include "messageinput.h"
+#include "messageattribbar.h"
 #include "emojiwidgets.h"
 #include "emoji_picker.h"
 #include "StyleParams.h"
@@ -51,6 +52,7 @@ public:
     void showUnreadBanner(int count);
     void setAutoTranslateEnabled(bool enabled) { m_autoTranslateEnabled = enabled; }
     void resetPendingContext();                       // 会话切换/发送后清空待发扩展上下文
+    void setAttrForChat(const QString& type, int id); // 切换联系人时重建底部属性条
     void setFavRowids(const std::vector<int64_t>& favRowids) { messageArea->setFavRowids(favRowids); }
     bool isFavRowid(int64_t rowid) const { return messageArea->isFavRowid(rowid); }
     void setFavRowid(int64_t rowid, bool fav) { messageArea->setFavRowid(rowid, fav); }
@@ -115,6 +117,9 @@ private:
     QCheckBox* themeCheckBox;
     ChatView* messageArea;
     MessageInput* inputEdit;
+    MessageAttribBar* m_attrBar;
+    QMap<QString, QMap<QString,QString> > m_attrMemory;   // key = type_id
+    QString m_attrKey;
     EmojiPushButton* emojiBtn;
     EmojiPushButton* fileBtn;
     EmojiPushButton* stickerBtn;

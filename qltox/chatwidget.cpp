@@ -63,7 +63,7 @@ QStringList quickReplies() {
 
 }  // namespace
 
-ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent) {
+ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     if (s_autoTranslateArg) { m_autoTranslateEnabled = true; }
     QBoxLayout* mainLayout = qNewBoxLayout(this, QBoxLayout::TopToBottom, 0, 0);
     mainLayout->setSpacing(0);
@@ -316,6 +316,11 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent) {
     connect(inputEdit, SIGNAL(filePasteRequested(const QString&, const QString&)), this, SLOT(onFilePaste(const QString&, const QString&)));
     
     mainLayout->addLayout(inputGrid);
+
+    // 属性组件条(输入区下方,随联系人类型动态切换;占位阶段仅承载 UI,暂不附加发送)
+    m_attrBar = new MessageAttribBar(this);
+    m_attrBar->clear();
+    mainLayout->addWidget(m_attrBar);
 }
 
 void ChatWidget::setHeaderText(const QString& text) {
@@ -852,6 +857,37 @@ void ChatWidget::resetPendingContext() {
     m_replyRow->hide();
     clearChipRow(m_chipRow, m_chipWidgets);
     m_ctxBar->hide();
+}
+
+void ChatWidget::setAttrForChat(const QString& type, int id) {
+    if (!m_attrKey.isEmpty()) {
+        m_attrMemory.insert(m_attrKey, m_attrBar->values());
+    }
+    if (type.isEmpty()) {
+        m_attrKey = QString();
+        m_attrBar->clear();
+        return;
+    }
+    m_attrKey = type + "_" + QString::number(id);
+    MessageAttrDefList defs = messageAttribBarDefsForType(type);
+    if (defs.isEmpty()) {
+        m_attrBar->clear();
+        return;
+    }
+    m_attrBar->setTypeLabel(type);
+    m_attrBar->setDefs(defs);
+    QMap<QString,QString> saved;
+#ifdef QT3_BUILD
+    {
+        QMap<QString, QMap<QString,QString> >::ConstIterator it = m_attrMemory.find(m_attrKey);
+        if (it != m_attrMemory.end()) { saved = it.data(); }
+    }
+#else
+    saved = m_attrMemory.value(m_attrKey);
+#endif
+    if (!saved.isEmpty()) {
+        m_attrBar->setValues(saved);
+    }
 }
 
 void ChatWidget::onEditRequested(int msgIndex) {
