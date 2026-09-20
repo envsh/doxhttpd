@@ -2231,6 +2231,17 @@ int ChatView::msgAbsY(int msgIndex) const {
     return absY;
 }
 
+QRect ChatView::avatarRectFor(int msgIndex) const {
+    if (msgIndex < 0 || msgIndex >= (int)m_history->size()) { return QRect(); }
+    const ChatElement& el = (*m_history)[msgIndex];
+    // 头像仅在组首消息绘制（与 paint 一致，self 靠右/其他靠左）
+    if (!el.firstInGroup) { return QRect(); }
+    int ax = (el.category == "self")
+        ? (width() - kPad - kAvatarSize) : kPad;
+    int ay = msgAbsY(msgIndex) - m_scrollPos + kPad;
+    return QRect(ax, ay, kAvatarSize, kAvatarSize);
+}
+
 int ChatView::findByAbsY(int absY) const {
     if (m_blocks.empty()) { return -1; }
     if (absY < kPad) { return 0; }
@@ -3362,11 +3373,8 @@ void ChatView::mouseMoveEvent(QMouseEvent* event) {
         // Debug: hover avatar to see identicon seed info
         {
             const auto& item = (*m_history)[msgIndex];
-            int msgY = msgAbsY(msgIndex) - m_scrollPos;
-            int ax = (item.category == "self")
-                ? (width() - kPad - kAvatarSize) : kPad;
-            QRect avatarRect(ax, msgY + kPad, kAvatarSize, kAvatarSize);
-            if (avatarRect.contains(event->pos())) {
+            QRect avatarRect = avatarRectFor(msgIndex);
+            if (!avatarRect.isNull() && avatarRect.contains(event->pos())) {
                 QString s = item.senderName.isEmpty()
                     ? QString::number(item.peerNumber)
                     : QString::number(item.peerNumber) + "|" + item.senderName;
@@ -3509,6 +3517,13 @@ void ChatView::mouseDoubleClickEvent(QMouseEvent* event) {
                 (*m_history)[msgIndex].retryBtnRect.contains(event->pos())) {
                 return;
             }
+            // 双击头像：查看该发送者的好友信息（self 也发放，由上层显示或退化）
+            QRect avatarRectForMsg = avatarRectFor(msgIndex);
+            if (!avatarRectForMsg.isNull() && avatarRectForMsg.contains(event->pos())) {
+                emit peerInfoRequested((*m_history)[msgIndex].peerNumber,
+                                       (*m_history)[msgIndex].senderName);
+                return;
+            }
             // 双击缩略图：
             //   Image/Gif → 原图查看器；Video/Audio → 本机播放器
             if (((*m_history)[msgIndex].etype == ChatElement::Image ||
@@ -3629,10 +3644,11 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
     int searchYandexId = searchSubMenu.insertItem("Yandex");
     menu.insertItem(_("context.search_selected"), &searchSubMenu);
     bool hasNick = onName;
-    int copyNickId = 0, mentionId = 0;
+    int copyNickId = 0, mentionId = 0, viewInfoId = 0;
     if (hasNick) {
         copyNickId = menu.insertItem(qFromUtf8("复制昵称"));
         mentionId = menu.insertItem(qFromUtf8("@ TA"));
+        viewInfoId = menu.insertItem(qFromUtf8("查看好友信息"));
     }
     bool hasMsgActions = (msgIndex >= 0 && msgIndex < (int)m_history->size());
     int replyMsgId = 0, editMsgId = 0, deleteMsgId = 0, redactMsgId = 0;
@@ -3673,9 +3689,11 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
     QAction* searchYandexAction = searchSubMenu->addAction("Yandex");
     QAction* copyNickAction = nullptr;
     QAction* mentionAction = nullptr;
+    QAction* viewInfoAction = nullptr;
     if (onName) {
         copyNickAction = menu.addAction(qFromUtf8("复制昵称"));
         mentionAction = menu.addAction(qFromUtf8("@ TA"));
+        viewInfoAction = menu.addAction(qFromUtf8("查看好友信息"));
     }
     QAction* replyMsgAction = nullptr;
     QAction* editMsgAction = nullptr;
@@ -3719,6 +3737,9 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         QApplication::clipboard()->setText(displayName);
     } else if (hasNick && choice == mentionId) {
         emit mentionClicked((*m_history)[msgIndex].senderName, displayName);
+    } else if (hasNick && choice == viewInfoId) {
+        emit peerInfoRequested((*m_history)[msgIndex].peerNumber,
+                               (*m_history)[msgIndex].senderName);
     } else if (hasMsgActions && choice == replyMsgId) {
         emit replyRequested(msgIndex);
     } else if (hasMsgActions && choice == editMsgId) {
@@ -3763,6 +3784,9 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         QApplication::clipboard()->setText(displayName);
     } else if (chosen == mentionAction) {
         emit mentionClicked((*m_history)[msgIndex].senderName, displayName);
+    } else if (chosen == viewInfoAction) {
+        emit peerInfoRequested((*m_history)[msgIndex].peerNumber,
+                               (*m_history)[msgIndex].senderName);
     } else if (replyMsgAction && chosen == replyMsgAction) {
         emit replyRequested(msgIndex);
     } else if (editMsgAction && chosen == editMsgAction) {

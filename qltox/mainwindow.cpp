@@ -585,6 +585,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(chatWidget, SIGNAL(openMediaPlayer(int)),
             this, SLOT(onOpenMediaPlayer(int)));
     connect(chatWidget, SIGNAL(favoriteClicked(int)), this, SLOT(onFavoriteClicked(int)));
+    connect(chatWidget, SIGNAL(peerInfoRequested(int, const QString&)),
+            this, SLOT(onChatPeerInfoRequested(int, const QString&)));
     connect(chatWidget, SIGNAL(screenshotRequested()), this, SLOT(onChatScreenshotRequested()));
     connect(chatWidget, SIGNAL(fileSendRequested(const QString&, const QString&)),
             this, SLOT(onFileSendRequested(const QString&, const QString&)));
@@ -2571,6 +2573,42 @@ void MainWindow::onViewInfoRequested(int id, const QString& type) {
         dialog.setPeerCount(memberCount);
     }
     
+    dialog.exec();
+}
+
+void MainWindow::onChatPeerInfoRequested(int peerNumber, const QString& senderName) {
+    if (currentChatType != "friend" && currentChatType != "conference"
+        && currentChatType != "group") {
+        return;
+    }
+    FriendInfoDialog dialog(this);
+    std::string key;
+    if (currentChatType == "friend") {
+        key = "friend_" + std::to_string(peerNumber);
+    } else {
+        key = std::string(qToUtf8(currentChatType).data())
+            + "_" + std::to_string(currentChatId)
+            + "_" + std::to_string(peerNumber);
+    }
+    auto it = peerInfoMap.find(key);
+    if (it == peerInfoMap.end()) {
+        PeerKey pk = parsePeerKey(key);
+        if (pk.valid) {
+            auto row = Storage::instance().channelDb()->get_chan_peer(
+                pk.chanid.c_str(), pk.peerNum);
+            it = loadRowToMap(peerInfoMap, key, std::move(row));
+        }
+    }
+    if (it != peerInfoMap.end()) {
+        QString title = it->second.nickname.empty()
+            ? qFromUtf8(it->second.userName) : qFromUtf8(it->second.nickname);
+        if (title.isEmpty()) { title = senderName; }
+        dialog.setTitle(title);
+        dialog.setInfo(friendInfoFromPeer(it->second, peerNumber));
+    } else {
+        dialog.setInfo(peerNumber,
+                       senderName.isEmpty() ? _("no_name") : senderName, "friend");
+    }
     dialog.exec();
 }
 

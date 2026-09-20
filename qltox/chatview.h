@@ -215,6 +215,7 @@ signals:
     void redactRequested(int msgIndex);
     void favoriteClicked(int msgIndex);
     void forwardClicked(int msgIndex);
+    void peerInfoRequested(int peerNumber, const QString& senderName);
 
 private slots:
     void onScrollChanged(int value);
@@ -233,6 +234,8 @@ private:
     void resetCanvas();
     int blockForIndex(int msgIndex) const;
     int msgAbsY(int msgIndex) const;
+    /// 头像命中矩形（与 paint 绘制几何一致）；未绘制头像时返回空矩形
+    QRect avatarRectFor(int msgIndex) const;
     int findByAbsY(int absY) const;
     /// 全量刷新：切换上下文、滚动、resetCanvas、relayout、全选等结构变化场景
     void updateFull();

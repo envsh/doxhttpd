@@ -212,6 +212,8 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent) {
     connect(messageArea, SIGNAL(redactRequested(int)), this, SLOT(onRedactRequested(int)));
     connect(messageArea, SIGNAL(favoriteClicked(int)), this, SIGNAL(favoriteClicked(int)));
     connect(messageArea, SIGNAL(forwardClicked(int)), this, SLOT(onForwardRequested(int)));
+    connect(messageArea, SIGNAL(peerInfoRequested(int, const QString&)),
+            this, SIGNAL(peerInfoRequested(int, const QString&)));
     
     // 输入区域 (2行 x 3列)
 #ifdef QT3_BUILD
