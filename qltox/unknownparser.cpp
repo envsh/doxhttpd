@@ -1061,7 +1061,7 @@ static bool tryParseZhihuHotnews(const std::string& rawStr, ParseResult& ret) {
 }
 
 // ── 哔喱关注动态订阅流解析 ──
-// 识别: Value.data 为 bilibili 关注动态 JSON（kind==follow_feed + url/author 非空）；纯文本类型
+// 识别: Value.data 为 B 站原生动态卡片（proto_type==follow_feed + DYNAMIC_TYPE_*）；视频/图文带封面图
 
 static std::string biliTypeLabel(const std::string& type) {
     if (type == "DYNAMIC_TYPE_AV")      return "视频";
@@ -1073,23 +1073,57 @@ static std::string biliTypeLabel(const std::string& type) {
     return type;
 }
 
+static std::string biliNormalizeUrl(const std::string& url) {
+    if (url.rfind("//", 0) == 0) return "https:" + url;
+    if (url.rfind("/", 0) == 0)  return "https://www.bilibili.com" + url;
+    return url;
+}
+
+// 识别: proto_type==follow_feed + DYNAMIC_TYPE_* + module_author.name + id_str
+// 替换旧 kind==follow_feed+url/author 格式；联系人/参与者沿用同一槽位
 static bool tryParseBiliNotify(const std::string& rawStr, ParseResult& ret) {
     cJSON* root = cJSON_Parse(rawStr.c_str());
     if (!root) return false;
 
-    std::string kind   = jsonGetString(root, "kind");
-    std::string url    = jsonGetString(root, "url");
-    std::string author = jsonGetString(root, "author");
-    if (kind != "follow_feed" || url.empty() || author.empty()) {
+    std::string proto  = jsonGetString(root, "proto_type");
+    std::string type   = jsonGetString(root, "type");
+    std::string idStr  = jsonGetString(root, "id_str");
+    std::string author = jsonGetString(root, "modules.module_author.name");
+    if (proto != "follow_feed" || type.rfind("DYNAMIC_TYPE_", 0) != 0
+        || idStr.empty() || author.empty()) {
         cJSON_Delete(root);
         return false;
     }
 
-    std::string text = jsonGetString(root, "text");
-    std::string type = jsonGetString(root, "type");
-    int64_t publishedAt = jsonGetInt64(root, "published_at");
-    int64_t authorMid = jsonGetInt64(root, "author_mid");
+    std::string face    = jsonGetString(root, "modules.module_author.face");
+    std::string action  = jsonGetString(root, "modules.module_author.pub_action");
+    std::string pubTime = jsonGetString(root, "modules.module_author.pub_time");
+    int64_t pubTs     = jsonGetInt64(root, "modules.module_author.pub_ts");
+    int64_t authorMid = jsonGetInt64(root, "modules.module_author.mid");
     std::string userid = authorMid > 0 ? std::to_string(authorMid) : author;
+
+    std::string descText = jsonGetString(root, "modules.module_dynamic.desc.text");
+    std::string arcTitle = jsonGetString(root, "modules.module_dynamic.major.archive.title");
+    std::string arcDesc  = jsonGetString(root, "modules.module_dynamic.major.archive.desc");
+    std::string bvid     = jsonGetString(root, "modules.module_dynamic.major.archive.bvid");
+    std::string jumpUrl  = jsonGetString(root, "modules.module_dynamic.major.archive.jump_url");
+    std::string durText  = jsonGetString(root, "modules.module_dynamic.major.archive.duration_text");
+    std::string cover    = jsonGetString(root, "modules.module_dynamic.major.archive.cover");
+    if (cover.empty())
+        cover = jsonGetString(root, "modules.module_dynamic.major.draw.items.0.src");
+    int64_t play    = jsonGetInt64(root, "modules.module_dynamic.major.archive.stat.play");
+    int64_t like    = jsonGetInt64(root, "modules.module_stat.like.count");
+    int64_t comment = jsonGetInt64(root, "modules.module_stat.comment.count");
+    std::string origAuthor = jsonGetString(root, "orig.modules.module_author.name");
+
+    std::string text = !arcTitle.empty() ? arcTitle : descText;
+    if (text.empty()) text = !action.empty() ? action : author;
+
+    std::string url = biliNormalizeUrl(jumpUrl);
+    if (url.empty() && !bvid.empty())
+        url = "https://www.bilibili.com/video/" + bvid;
+    if (url.empty())
+        url = "https://t.bilibili.com/" + idStr;
 
     ContactData cd;
     cd.id          = kBiliNotifyId;
@@ -1100,12 +1134,12 @@ static bool tryParseBiliNotify(const std::string& rawStr, ParseResult& ret) {
     cd.isConnected = true;
     ret.contacts.push_back(cd);
 
-    // message = text\nurl\nmeta；text 为空时 url 作为消息内容首行（不产生空行）
+    // 首行：转发前缀 + 文本 + url
     std::string message;
-    if (!text.empty()) {
-        message += text + "\n";
+    if (type == "DYNAMIC_TYPE_FORWARD" || type == "DYNAMIC_TYPE_REPOST") {
+        if (!origAuthor.empty()) message += "转发 @" + origAuthor + "\n";
     }
-    message += url;
+    message += text + "\n" + url;
 
     std::string label = biliTypeLabel(type);
     std::string meta;
@@ -1113,27 +1147,53 @@ static bool tryParseBiliNotify(const std::string& rawStr, ParseResult& ret) {
         meta += "[" + label + "] ";
     }
     meta += "作者 " + author;
+    if (!durText.empty()) {
+        meta += " · " + durText;
+    }
 
     HistoryMessage hm;
     hm.created_at = "";
-    if (publishedAt > 0) {
+    if (pubTs > 0) {
         char tbuf[32] = {0};
-        time_t sec = (time_t)publishedAt;
+        time_t sec = (time_t)pubTs;
         struct tm tmv;
         localtime_r(&sec, &tmv);
         strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
         meta += " · " + std::string(tbuf);
         hm.created_at = tbuf;
+    } else if (!pubTime.empty()) {
+        meta += " · " + pubTime;
+    }
+    message += "\n" + meta;
+
+    if (play > 0 || like > 0 || comment > 0) {
+        std::string stats;
+        if (play > 0) stats += "播放" + std::to_string(play);
+        if (like > 0) {
+            if (!stats.empty()) stats += " · ";
+            stats += "赞" + std::to_string(like);
+        }
+        if (comment > 0) {
+            if (!stats.empty()) stats += " · ";
+            stats += "评论" + std::to_string(comment);
+        }
+        message += "\n" + stats;
+    }
+    if (!arcDesc.empty() && arcDesc != arcTitle) {
+        message += "\n" + arcDesc;
     }
 
-    hm.message       = message + "\n" + meta;
+    hm.message       = message;
     hm.sender_pubkey = userid;
     hm.sender_number = 0;
     hm.direction     = "received";
     hm.roomId        = kBiliNotifyType;
-    hm.eventId       = jsonGetString(root, "id");
-    hm.msgtype       = "";
-    hm.mediaUrl      = "";
+    hm.eventId       = idStr;
+    hm.msgtype       = cover.empty() ? "" : "image";
+    hm.mediaUrl      = cover;
+    hm.mediaWidth    = 0;
+    hm.mediaHeight   = 0;
+    hm.fileSize      = 0;
     ret.messages.push_back(hm);
 
     PeerInfo pi;
@@ -1141,15 +1201,9 @@ static bool tryParseBiliNotify(const std::string& rawStr, ParseResult& ret) {
     pi.userName       = userid;
     pi.nickname   = author;
     pi.peerNumber = 0;
-    if (authorMid > 0) {
-        // 为什么用第三方域名 unavatar.io：
-        // B 站真实头像（i*.hdslb.com/bfs/face/<hash>.jpg）是随机 hash 路径，无法由 mid 推导；
-        // B 站域内可由 mid 确定的只有 JSON 接口（x/web-interface/card），非图片 URL，
-        // 直接拼会造成下载到 JSON、pixmap 解码失败。
-        // unavatar.io/bilibili/<mid> 是统一头像聚合服务（Microlink 开源项目，MIT），
-        // 实测返回真实头像图片（image/jpeg）；无效 mid 回退默认占位图。
-        // 仅字符串拼接，无网络请求、无缓存；客户端 AvatarManager 按 URL 去重缓存。
-        pi.iconUrl = "https://unavatar.io/bilibili/" + std::to_string(authorMid);
+    // face 为 B 站真实头像（*.hdslb.com），可直接下载，无需 unavatar
+    if (!face.empty()) {
+        pi.iconUrl = face;
     }
     ret.peers.push_back(pi);
 
