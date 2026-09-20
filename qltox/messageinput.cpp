@@ -1,6 +1,7 @@
 #include "messageinput.h"
 #include "translator.h"
 #include "imageinputconfirm.h"
+#include "limelog.h"
 #include <qmessagebox.h>
 #ifdef QT3_BUILD
 #include <qfile.h>
@@ -72,8 +73,26 @@ static QString srcText(int kind) {
     return _("paste_image.source.share_path");
 }
 
+// click 防抖窗口：release 后过了这么久没有新的 press，才认定为一次完整 click。
+// 必须大于 X11 连发间隔（典型 ~29ms），实测环境按住时收的是 "release+press" 成对事件流。
+static const int kClickDebounceMs = 120;
+
+// kKind 枚举值 0..3 连续，按下标取名称用于日志。
+static const char* const kArrowKindNames[] = {
+    "KeyUp", "KeyDown", "Ctrl+KeyUp", "Ctrl+KeyDown"
+};
+
 MessageInput::MessageInput(QWidget* parent)
     : QTextEdit(parent), m_historyIndex(-1) {
+    m_clickTimer = new QTimer(this);
+#ifndef QT3_BUILD
+    m_clickTimer->setSingleShot(true);
+#endif
+    connect(m_clickTimer, SIGNAL(timeout()), this, SLOT(onClickTimeout()));
+    m_pendingClick = kKindNone;
+    for (int i = 0; i < 4; ++i) {
+        m_held[i] = false;
+    }
 #ifdef QT3_BUILD
     setTextFormat(Qt::PlainText);
     setUndoDepth(32);
@@ -195,7 +214,83 @@ void MessageInput::keyPressEvent(QKeyEvent* e) {
     }
 #endif
 
+    handleArrowKey(e, true);
+
     QTextEdit::keyPressEvent(e);
+}
+
+void MessageInput::handleArrowKey(QKeyEvent* e, bool pressed) {
+    int kind = arrowKind(e);
+    if (kind == kKindNone) { return; }
+
+    if (pressed) {
+        cancelPendingClick();
+        m_held[kind] = true;
+    } else {
+        if (!m_held[kind]) { return; }       // 无对应按下（幻影 release），忽略
+        m_held[kind] = false;
+        m_pendingClick = kind;
+#ifdef QT3_BUILD
+        m_clickTimer->start(kClickDebounceMs, true);   // 单次触发
+#else
+        m_clickTimer->start(kClickDebounceMs);
+#endif
+    }
+}
+
+int MessageInput::arrowKind(QKeyEvent* e) const {
+#ifdef QT3_BUILD
+    uint mod = e->state();
+    uint ctrl = Qt::ControlButton;
+    uint shift = Qt::ShiftButton;
+    uint alt = Qt::AltButton;
+#else
+    Qt::KeyboardModifiers mod = e->modifiers();
+    Qt::KeyboardModifiers ctrl = Qt::ControlModifier;
+    Qt::KeyboardModifiers shift = Qt::ShiftModifier;
+    Qt::KeyboardModifiers alt = Qt::AltModifier;
+#endif
+    bool ctrlHeld = (mod & ctrl) != 0;
+    bool altHeld  = (mod & alt) != 0;
+    bool shiftHeld = (mod & shift) != 0;
+    if (altHeld) { return kKindNone; }             // Alt+↑/↓ 走历史浏览，不参与
+    if (e->key() == Qt::Key_Up) {
+        if (ctrlHeld)              { return kKindCtrlUp; }
+        if (!shiftHeld)            { return kKindRawUp; }
+    } else if (e->key() == Qt::Key_Down) {
+        if (ctrlHeld)              { return kKindCtrlDown; }
+        if (!shiftHeld)            { return kKindRawDown; }
+    }
+    return kKindNone;
+}
+
+void MessageInput::emitClickSignal(int kind) {
+    switch (kind) {
+        case kKindRawUp:    emit rawUpClicked();    break;
+        case kKindRawDown:  emit rawDownClicked();  break;
+        case kKindCtrlUp:   emit ctrlUpClicked();   break;
+        case kKindCtrlDown: emit ctrlDownClicked(); break;
+        default: break;
+    }
+}
+
+void MessageInput::cancelPendingClick() {
+    m_clickTimer->stop();
+    m_pendingClick = kKindNone;
+}
+
+void MessageInput::onClickTimeout() {
+    int kind = m_pendingClick;
+    m_pendingClick = kKindNone;
+    if (kind == kKindNone) { return; }
+    ALOG_INFO("MessageInput click-cycle", "release+click",
+              (kind >= 0 && kind <= 3) ? kArrowKindNames[kind] : "?");
+    emitClickSignal(kind);
+}
+
+void MessageInput::keyReleaseEvent(QKeyEvent* e) {
+    handleArrowKey(e, false);
+    QTextEdit::keyReleaseEvent(e);
 }
 
 void MessageInput::dragEnterEvent(QDragEnterEvent* e) {
