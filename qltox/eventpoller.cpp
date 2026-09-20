@@ -52,6 +52,17 @@ static size_t headerCb(void* contents, size_t size, size_t nmemb, void* userp) {
     return total;
 }
 
+// 统一失败终态：请求无法被调度时立即回调一次，保证 done() 恰好被调用一次
+static void curlFailNow(const char* why,
+                        void (*done)(const HttpResponse& resp, void* udata),
+                        void* udata) {
+    if (!done) { return; }
+    HttpResponse resp;
+    resp.httpCode = 0;
+    resp.curlErrStr = why;
+    done(resp, udata);
+}
+
 // 下载进度回调（curl_multi pump 线程内）：≥100ms 或传输完成才转发一次
 static int xferinfoCb(void* clientp, curl_off_t dltotal, curl_off_t dlnow,
                       curl_off_t ultotal, curl_off_t ulnow) {
@@ -94,10 +105,26 @@ void EventPoller::stop() {
     if (!s_instance) { return; }
     s_instance->running = false;
     s_instance->wait();
+    // 停机时仍未进入 multi 的请求：补一次失败终态，杜绝"受理后无回调"的悬挂
+    std::deque<CURL*> orphanHandles;
+    std::deque<DelayedReq> orphanDelayed;
     {
         QMutexLocker lock(&s_instance->pendingMutex);
-        s_instance->pendingHandles.clear();
-        s_instance->delayedReqs.clear();
+        orphanHandles.swap(s_instance->pendingHandles);
+        orphanDelayed.swap(s_instance->delayedReqs);
+    }
+    for (CURL* easy : orphanHandles) {
+        HttpCtx* c = nullptr;
+        curl_easy_getinfo(easy, CURLINFO_PRIVATE, &c);
+        curl_easy_cleanup(easy);
+        if (c) {
+            if (c->requestHeaders) { curl_slist_free_all(c->requestHeaders); }
+            curlFailNow("poller stopped", c->done, c->udata);
+            delete c;
+        }
+    }
+    for (DelayedReq& d : orphanDelayed) {
+        curlFailNow("poller stopped", d.done, d.udata);
     }
     if (s_instance->multi) {
         curl_multi_cleanup(s_instance->multi);
@@ -112,6 +139,7 @@ void EventPoller::addRequest(const HttpRequest& req,
                               void* udata) {
     if (!s_instance || !s_instance->multi) {
         ALOG_WARN("addRequest dropped: EventPoller not ready", req.method, req.url);
+        curlFailNow("poller not ready", done, udata);
         return;
     }
 
@@ -133,6 +161,7 @@ void EventPoller::addRequest(const HttpRequest& req,
 
     CURL* easy = buildHandle(req, done, udata);
     if (easy) { s_instance->pendingHandles.push_back(easy); }
+    else { curlFailNow("easy handle init failed", done, udata); }
 }
 
 // 构造 curl easy + HttpCtx（全程不碰 multi，可在 GUI/泵线程安全调用）
@@ -206,6 +235,7 @@ void EventPoller::run() {
                 delayedReqs.pop_front();
                 CURL* easy = buildHandle(d.req, d.done, d.udata);
                 if (easy) { pendingHandles.push_back(easy); }
+                else { curlFailNow("easy handle init failed", d.done, d.udata); }
             }
             while (!pendingHandles.empty()) {
                 CURL* easy = pendingHandles.front();
