@@ -55,6 +55,11 @@ public:
     virtual bool delete_stickers_by_pack(const char* pack_id) = 0;
     virtual bool touch_sticker(const char* sticker_id, int64_t now) = 0;
     virtual std::unique_ptr<StickerRow> get_sticker(const char* sticker_id) = 0;
+    // 查询某贴纸行的软删态（id 即内容 sha1，全局主键）：
+    //   -1=无该行   0=存活   1=软删（deleted=1）
+    virtual int sticker_deleted_state(const char* sticker_id) = 0;
+    // 复活被软删的贴纸：UPDATE stickers SET deleted=0（保留 emoji/描述/position/last_used）
+    virtual bool restore_sticker(const char* sticker_id) = 0;
     // orderby 白名单见 StickerDbSync 实现；orderby 未知时回落"rowid DESC"。
     // limit=0 不限；offset 仅当 limit>0 时生效。
     // deleted: 0=仅存活(默认) 1=仅已删 -1=全部；emoji 非空时精确匹配。

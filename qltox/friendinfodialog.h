@@ -21,11 +21,14 @@ public:
     void setTitle(const QString& title);
     void setLastSeen(const QString& text);
     void setPeerCount(int count);
+    void setAvatar(int id, const QString& name, const QString& mxcUrl);
 
 private slots:
     void onClose();
 
 private:
+    QLabel* avatarLabel;
+    QLabel* statusLineLabel;
     QLabel* titleLabel;
     QLabel* idLabel;
     QLabel* nameLabel;

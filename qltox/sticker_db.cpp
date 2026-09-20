@@ -218,6 +218,23 @@ public:
         return row;
     }
 
+    int sticker_deleted_state(const char* sticker_id) override {
+        auto _ = m_conn->get();
+        auto stmt = _->prepare("SELECT deleted FROM stickers WHERE id=?1");
+        if (!stmt.isPrepared()) { return -1; }
+        if (!stmt.bind(1, sticker_id)) { return -1; }
+        if (!stmt.stepRow()) { return -1; }
+        return stmt.columnInt(0);
+    }
+
+    bool restore_sticker(const char* sticker_id) override {
+        auto _ = m_conn->get();
+        auto stmt = _->prepare("UPDATE stickers SET deleted=0 WHERE id=?1");
+        if (!stmt.isPrepared()) { return false; }
+        if (!stmt.bind(1, sticker_id)) { return false; }
+        return stmt.step();
+    }
+
     std::vector<StickerRow> list_stickers(const char* pack_id, const char* orderby,
                                           int limit, int offset,
                                           int deleted, const char* emoji) override {

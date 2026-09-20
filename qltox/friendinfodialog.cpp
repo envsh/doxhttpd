@@ -1,13 +1,32 @@
 #include "friendinfodialog.h"
 #include "translator.h"
 #include "compat34.h"
+#include "avatar_manager.h"
 
 FriendInfoDialog::FriendInfoDialog(QWidget* parent) : QDialog(parent) {
     qSetWindowTitle(this, _("modals.friend_info_title"));
-    resize(400, 250);
-    
-    QBoxLayout* mainLayout = qNewBoxLayout(this, QBoxLayout::TopToBottom, 10, 10);
-    
+    resize(500, 250);
+
+    QBoxLayout* rootLayout = qNewBoxLayout(this, QBoxLayout::LeftToRight, 10, 10);
+
+    // 左列：头像 + 用户状态文本
+    QBoxLayout* leftCol = qNewBoxLayout(nullptr, QBoxLayout::TopToBottom, 0, 4);
+    avatarLabel = new QLabel(this);
+    avatarLabel->setFixedSize(80, 80);
+    leftCol->addWidget(avatarLabel);
+    statusLineLabel = new QLabel(this);
+    QFont sf = statusLineLabel->font();
+    sf.setPointSize(sf.pointSize() - 1);
+    statusLineLabel->setFont(sf);
+    statusLineLabel->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
+    statusLineLabel->setFixedWidth(92);
+    leftCol->addWidget(statusLineLabel);
+    leftCol->addItem(new QSpacerItem(1, 1, QSizePolicy::Minimum, QSizePolicy::Expanding));
+    rootLayout->addLayout(leftCol);
+
+    QBoxLayout* mainLayout = qNewBoxLayout(nullptr, QBoxLayout::TopToBottom, 0, 10);
+    rootLayout->addLayout(mainLayout, 1);
+
     // 标题
     titleLabel = new QLabel(this);
     qSetLabelSelectable(titleLabel);
@@ -171,6 +190,8 @@ void FriendInfoDialog::setInfo(int id, const QString& name, const QString& type,
     
     pkLabel->setText(publicKey.isEmpty() ? _("no_status") : publicKey);
     setLastSeen(_("never_online"));
+    statusLineLabel->setText(status);
+    setAvatar(id, name, QString());
 }
 
 void FriendInfoDialog::setInfo(const FriendInfo& info) {
@@ -186,6 +207,7 @@ void FriendInfoDialog::setInfo(const FriendInfo& info) {
     } else {
         setLastSeen(_("never_online"));
     }
+    setAvatar(info.id, qFromUtf8(info.name), qFromUtf8(info.iconUrl));
 }
 
 void FriendInfoDialog::setLastSeen(const QString& text) {
@@ -194,6 +216,16 @@ void FriendInfoDialog::setLastSeen(const QString& text) {
 
 void FriendInfoDialog::setPeerCount(int count) {
     peerCountLabel->setText(count > 0 ? QString::number(count) : "-");
+}
+
+void FriendInfoDialog::setAvatar(int id, const QString& name, const QString& mxcUrl) {
+    if (!mxcUrl.isEmpty()) {
+        AvatarManager::inst().requestDownload(mxcUrl);
+    }
+    QPixmap av = AvatarManager::inst().get(mxcUrl, name, id, 80);
+    if (!av.isNull()) {
+        avatarLabel->setPixmap(av);
+    }
 }
 
 void FriendInfoDialog::setTitle(const QString& title) {
