@@ -2,6 +2,7 @@
 #include "CustomTitleBar.h"
 #include "restapi.h"
 #include "eventpoller.h"
+#include "pureconsts.hpp"
 #include "unknownparser.h"
 #include "version.h"
 #include "avatar_manager.h"

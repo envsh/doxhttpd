@@ -17,6 +17,7 @@
 #include "translator.h"
 #include "restapi.h"
 #include "eventpoller.h"
+#include "pureconsts.hpp"
 #include "toastwidget.h"
 #ifdef QT3_BUILD
 #include <qpushbutton.h>

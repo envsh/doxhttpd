@@ -1,4 +1,5 @@
 #include "contactlist.h"
+#include "pureconsts.hpp"
 #include "translator.h"
 #include "compat34.h"
 #include "restapi.h"

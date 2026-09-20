@@ -6,6 +6,7 @@
 #include "channel_db.h"
 #include "message_db.h"
 #include "eventpoller.h"
+#include "pureconsts.hpp"
 #include <qlayout.h>
 #include <qlineedit.h>
 #include <qpushbutton.h>

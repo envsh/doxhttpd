@@ -1,4 +1,5 @@
 #include "unknownparser.h"
+#include "pureconsts.hpp"
 #include "cJSON.h"
 #include "compatcore34.h"
 #include <dlfcn.h>

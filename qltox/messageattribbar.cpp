@@ -1,5 +1,5 @@
 #include "messageattribbar.h"
-#include "eventpoller.h"   // 类型常量 kImapMailType / kGomuksRoomType / ...
+#include "pureconsts.hpp"   // 类型常量 kImapMailType / kGomuksRoomType / ...
 #include "lambdaslot.h"
 #include <qframe.h>
 #include <qclipboard.h>

@@ -12,32 +12,6 @@
 #include <qthread.h>
 #include <qmutex.h>
 
-// ── 联系人类型常量 ──
-extern const char* const kImapMailType;
-extern const char* const kGomuksRoomType;
-extern const char* const kUnktoxFriendType;
-extern const char* const kUnktoxConferenceType;
-extern const char* const kUnktoxGroupType;
-extern const char* const kSyseventType;
-extern const char* const kTopicType;
-extern const char* const kFilesyncType;
-extern const char* const kClipboardType;
-extern const char* const kUnknownType;
-extern const char* const kBookmarkType;
-extern const char* const kAichatType;
-extern const char* const kPastebinType;
-extern const char* const kTranslateType;
-extern const char* const kMisskeyType;
-extern const char* const kToutiaoHotnewsType;   // 头条热闻订阅流（type == chatId）
-extern const int kToutiaoHotnewsId;             // 头条热闻保留 id（-107，固定不 hash）
-extern const char* const kZhihuNotifyType;      // 知乎通知订阅流（type == chatId）
-extern const int kZhihuNotifyId;                // 知乎通知保留 id（-108，固定不 hash）
-extern const char* const kZhihuHotnewsType;     // 知乎热闻订阅流（type == chatId）
-extern const int kZhihuHotnewsId;               // 知乎热闻保留 id（-109，固定不 hash）
-extern const char* const kBiliNotifyType;       // 哔喱关注动态订阅流（type == chatId）
-extern const int kBiliNotifyId;                 // 哔喱通知保留 id（-110，固定不 hash）
-extern const int UnkSize;                       // 未知大小/未知尺寸哨兵（0 = 未知）
-
 // ── 事件类型常量 ──
 const EventType34 EventListReadyType = toEventType34(QEvent::User + 100);
 const EventType34 ApiResultReadyType = toEventType34(QEvent::User + 102);

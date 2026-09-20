@@ -1,30 +1,5 @@
 #include "eventpoller.h"
 #include "limelog.h"
-
-const char* const kImapMailType       = "imap_mail";
-const char* const kGomuksRoomType     = "gomuks_room";
-const char* const kUnktoxFriendType   = "unktox_friend";
-const char* const kUnktoxConferenceType = "unktox_conference";
-const char* const kUnktoxGroupType    = "unktox_group";
-const char* const kSyseventType       = "sysevent";
-const char* const kTopicType          = "topic";
-const char* const kFilesyncType       = "filesync";
-const char* const kClipboardType      = "clipboard";
-const char* const kUnknownType        = "unknown";
-const char* const kBookmarkType       = "bookmark";
-const char* const kAichatType         = "aichat";
-const char* const kPastebinType       = "pastebin";
-const char* const kTranslateType      = "translate";
-const char* const kMisskeyType        = "misskey_note";
-const char* const kToutiaoHotnewsType = "toutiao_hotnews";
-const int kToutiaoHotnewsId = -107;
-const int UnkSize = 0;
-const char* const kZhihuNotifyType = "zhihu_notify";
-const int kZhihuNotifyId = -108;
-const char* const kZhihuHotnewsType = "zhihu_hotnews";
-const int kZhihuHotnewsId = -109;
-const char* const kBiliNotifyType = "bili_notify";
-const int kBiliNotifyId = -110;
 #include <unistd.h>
 
 EventPoller* EventPoller::s_instance = nullptr;
