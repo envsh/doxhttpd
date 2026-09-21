@@ -26,6 +26,8 @@ constexpr const char* const kZhihuHotnewsType = "zhihu_hotnews";       // 知乎
 constexpr int kZhihuHotnewsId = -109;                                  // 知乎热闻保留 id（-109，固定不 hash）
 constexpr const char* const kBiliNotifyType = "bili_notify";           // 哔喱关注动态订阅流（type == chatId）
 constexpr int kBiliNotifyId = -110;                                    // 哔喱通知保留 id（-110，固定不 hash）
+constexpr const char* const kWeiboHotnewsType = "weibo_hotnews";       // 微博热闻订阅流（type == chatId == roomId）
+constexpr int kWeiboHotnewsId = -111;                                  // 微博热闻保留 id（-111，固定不 hash）
 constexpr int UnkSize = 0;                                             // 未知大小/未知尺寸哨兵（0 = 未知）
 
 #endif // PURECONSTS_HPP

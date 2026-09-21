@@ -1215,6 +1215,109 @@ static bool tryParseBiliNotify(const std::string& rawStr, ParseResult& ret) {
     return true;
 }
 
+// ── 微博热闻订阅流解析 ──
+// 识别: Value.data 为微博热榜 JSON（proto_type==weibo_hot / weibo_hotlist + 顶层 word 非空）
+//   数据无 URL/作者字段，消息 = 词条 + 自拼接 URL + 备注(与 word 不同时) + meta(第 N 名 / [icon_desc])；
+//   icon 为 24x24 小角标图（如"辟谣"）作为消息图片，尺寸取 icon_width/icon_height
+
+static std::string qUrlEncode(const std::string& s) {
+    static const char hex[] = "0123456789ABCDEF";
+    std::string out;
+    for (unsigned char c : s) {
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+            || (c >= '0' && c <= '9') || c == '-' || c == '_'
+            || c == '.' || c == '~') {
+            out += (char)c;
+        } else {
+            out += '%';
+            out += hex[c >> 4];
+            out += hex[c & 0xF];
+        }
+    }
+    return out;
+}
+
+static bool tryParseWeiboHotnews(const std::string& rawStr, ParseResult& ret) {
+    cJSON* root = cJSON_Parse(rawStr.c_str());
+    if (!root) return false;
+
+    std::string protoType = jsonGetString(root, "proto_type");
+    std::string word      = jsonGetString(root, "word");
+    if ((protoType != "weibo_hot" && protoType != "weibo_hotlist")
+        || word.empty()) {
+        cJSON_Delete(root);
+        return false;
+    }
+
+    std::string note     = jsonGetString(root, "note");
+    std::string iconDesc = jsonGetString(root, "icon_desc");
+    std::string icon     = jsonGetString(root, "icon");
+    int64_t iconW = jsonGetInt64(root, "icon_width");
+    int64_t iconH = jsonGetInt64(root, "icon_height");
+    int64_t rank  = jsonGetInt64(root, "rank");
+    int64_t num   = jsonGetInt64(root, "num");
+
+    ContactData cd;
+    cd.id          = kWeiboHotnewsId;
+    cd.name        = "微博热闻";
+    cd.type        = kWeiboHotnewsType;
+    cd.chatId      = kWeiboHotnewsType;
+    cd.status      = "online";
+    cd.isConnected = true;
+    ret.contacts.push_back(cd);
+
+    std::string url = "https://s.weibo.com/weibo?q=%23"
+                    + qUrlEncode(word) + "%23&Refer=top";
+
+    std::string message = word + "\n" + url;
+    if (!note.empty() && note != word) {
+        message += "\n" + note;
+    }
+    std::string meta;
+    if (rank > 0) {
+        meta += "第 " + std::to_string(rank) + " 名";
+    }
+    if (!iconDesc.empty()) {
+        if (!meta.empty()) meta += " · ";
+        meta += "[" + iconDesc + "]";
+    }
+    if (!meta.empty()) {
+        message += "\n" + meta;
+    }
+
+    HistoryMessage hm;
+    hm.message       = message;
+    hm.sender_pubkey = "fedone";
+    hm.sender_number = 0;
+    hm.direction     = "received";
+    hm.roomId        = kWeiboHotnewsType;
+    hm.eventId       = std::to_string(num);
+    if (!icon.empty()) {
+        hm.msgtype       = "image";
+        hm.mediaMime     = "image/png";
+        hm.mediaUrl      = icon;
+        hm.mediaWidth    = (iconW > 0) ? (int)iconW : UnkSize;
+        hm.mediaHeight   = (iconH > 0) ? (int)iconH : UnkSize;
+        hm.fileSize      = UnkSize;
+    } else {
+        hm.msgtype  = "";
+        hm.mediaUrl = "";
+    }
+    ret.messages.push_back(hm);
+
+    PeerInfo pi;
+    pi.publicKey  = "fedone";
+    pi.userName   = "fedone";
+    pi.peerNumber = 0;
+    ret.peers.push_back(pi);
+
+    ret.senderName  = qFromUtf8("fedone");
+    ret.handled     = true;
+
+    cJSON_Delete(root);
+    return true;
+}
+
 // ── 旧逻辑：纯文本降级 ──
 
 static void extractSender(cJSON* valueItem, ParseResult& ret) {
@@ -1343,6 +1446,8 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
             if (tryParseZhihuHotnews(dataStr, ret))
                 goto done;
             if (tryParseBiliNotify(dataStr, ret))
+                goto done;
+            if (tryParseWeiboHotnews(dataStr, ret))
                 goto done;
         }
         fallbackAsPlainText(valueItem, ret);

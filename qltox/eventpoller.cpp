@@ -252,7 +252,8 @@ void EventPoller::run() {
                     curl_easy_getinfo(*it, CURLINFO_RESPONSE_CODE, &respCode);
                     curl_easy_getinfo(*it, CURLINFO_SIZE_DOWNLOAD_T, &recv);
                     curl_easy_getinfo(*it, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &expect);
-                    curl_easy_getinfo(*it, CURLINFO_SPEED_DOWNLOAD, &speed);
+                    curl_easy_getinfo(*it, CURLINFO_SPEED_DOWNLOAD, &speed); // dep
+                    curl_easy_getinfo(*it, CURLINFO_SPEED_DOWNLOAD_T, &speed);
                     curl_easy_getinfo(*it, CURLINFO_TOTAL_TIME, &totalT);
                     curl_easy_getinfo(*it, CURLINFO_CONNECT_TIME, &connectT);
                     curl_easy_getinfo(*it, CURLINFO_STARTTRANSFER_TIME, &startT);
