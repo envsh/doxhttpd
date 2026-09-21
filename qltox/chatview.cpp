@@ -479,7 +479,7 @@ static void paintMediaContent(QPainter& p, const QRect& bubbleRect,
     // ── 顶部文字区（标题）──
     int capW = bubbleRect.width() - 2*kBubbleHPad;
     if (capW < 20) { capW = 20; }
-    QFont cf = baseFont; cf.setPointSize(10);
+    QFont cf = baseFont; cf.setPointSize(12);
     QFontMetrics cfm(cf);
     int nLines = caption.isEmpty() ? 0 : wrappedLineCount(caption, capW, cfm, emojiW);
     int captionH = nLines * cfm.lineSpacing();
@@ -586,14 +586,14 @@ static void paintMediaContent(QPainter& p, const QRect& bubbleRect,
         // Qt3 QColor 无 alpha，向气泡底色混合 10% 实现 0.9 不透明度观感
         {
             QColor fg = pal.textPrimary, bg = pal.baseBg;
-            capCol = QColor((fg.red()*230 + bg.red()*25) / 255,
-                            (fg.green()*230 + bg.green()*25) / 255,
-                            (fg.blue()*230 + bg.blue()*25) / 255);
+            capCol = QColor((fg.red()*240 + bg.red()*15) / 255,
+                            (fg.green()*240 + bg.green()*15) / 255,
+                            (fg.blue()*240 + bg.blue()*15) / 255);
         }
 #endif
 #ifndef QT3_BUILD
         capCol = pal.textPrimary;
-        capCol.setAlpha(230);
+        capCol.setAlpha(240);
 #endif
         p.setPen(capCol);
         p.setFont(cf);
@@ -942,7 +942,7 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
             imgDispW = std::min(imgMaxW, kMaxMediaDim);
             imgDispH = 200;
         }
-        QFont cfnt = baseFont; cfnt.setPointSize(10);
+        QFont cfnt = baseFont; cfnt.setPointSize(12);
         QFontMetrics cfm(cfnt);
         int capW = bubbleW - 2 * kBubbleHPad;
         if (capW < 20) { capW = 20; }
