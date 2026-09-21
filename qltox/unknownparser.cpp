@@ -684,9 +684,12 @@ static bool tryParseToutiaoNews(const std::string& rawStr, ParseResult& ret) {
     std::string protoType = jsonGetString(root, "proto_type");
     std::string title     = jsonGetString(root, "title");
     std::string groupId   = jsonGetString(root, "group_id");
+    std::string itemId    = jsonGetString(root, "item_id");
     std::string url       = jsonGetString(root, "source_url");
+    // 正向匹配：news + title + (group_id / item_id / source_url 任一)。这三个字段为头条独有，
+    // 酷安 feed（proto_type==news）仅有相对路径 url/id，无三者 → 天然互斥，无需负向守卫。
     if (protoType != "news" || title.empty() ||
-        (url.empty() && groupId.empty())) {
+        (groupId.empty() && itemId.empty() && url.empty())) {
         cJSON_Delete(root);
         return false;
     }
@@ -1431,6 +1434,157 @@ static bool tryParseXiaohongshuNotify(const std::string& rawStr, ParseResult& re
     return true;
 }
 
+// ── 酷安时线订阅流解析 ──
+// 识别: Value.data 为酷安 feed JSON（proto_type==news + feedType/uid/username/title 正向特征）
+//   正向互斥：feedType/uid/username 为酷安独有，头条新闻无 → 不与 tryParseToutiaoNews 冲突；
+//   封面尺寸内嵌于 URL 尾 @WxH（如 _664@1384x625.jpg），由 parseCoolapkSize 提取。
+
+static bool parseCoolapkSize(const std::string& url, int& w, int& h) {
+    w = h = 0;
+    size_t slash = url.find_last_of('/');
+    if (slash == std::string::npos) slash = 0; else slash += 1;
+    size_t at = url.find('@', slash);
+    if (at == std::string::npos) return false;
+    size_t dot = url.find('.', at);
+    if (dot == std::string::npos) dot = url.size();
+    std::string seg = url.substr(at + 1, dot - (at + 1));
+    size_t x = seg.find('x');
+    if (x == std::string::npos) return false;
+    std::string ws = seg.substr(0, x);
+    std::string hs = seg.substr(x + 1);
+    if (!isDigits(ws) || !isDigits(hs)) return false;
+    w = std::atoi(ws.c_str());
+    h = std::atoi(hs.c_str());
+    return w > 0 && h > 0;
+}
+
+static bool tryParseCoolapkTimeline(const std::string& rawStr, ParseResult& ret) {
+    cJSON* root = cJSON_Parse(rawStr.c_str());
+    if (!root) return false;
+
+    std::string protoType = jsonGetString(root, "proto_type");
+    std::string feedType  = jsonGetString(root, "feedType");
+    std::string uidStr    = jsonGetString(root, "uid");
+    std::string username  = jsonGetString(root, "username");
+    std::string title     = jsonGetString(root, "message_title");
+    if (title.empty()) {
+        title = jsonGetString(root, "title");
+    }
+    std::string feedUrl = jsonGetString(root, "url");
+    std::string feedId  = jsonGetString(root, "id");
+    if (protoType != "news" || feedType.empty() || uidStr.empty() ||
+        username.empty() || title.empty() || feedUrl.empty() || feedId.empty()) {
+        cJSON_Delete(root);
+        return false;
+    }
+
+    std::string displayName = jsonGetString(root, "userInfo.displayUsername");
+    if (displayName.empty()) {
+        displayName = username;
+    }
+    std::string avatar = jsonGetString(root, "userAvatar");
+    if (avatar.empty()) {
+        avatar = jsonGetString(root, "userInfo.userAvatar");
+    }
+
+	// must use real UA to access
+    std::string pic = jsonGetString(root, "pic");
+    if (pic.empty()) {
+        pic = jsonGetString(root, "message_cover");
+    }
+
+    std::string feedTypeName = jsonGetString(root, "feedTypeName");
+    std::string deviceTitle  = jsonGetString(root, "device_title");
+    if (deviceTitle.empty()) {
+        deviceTitle = jsonGetString(root, "ttitle");
+    }
+    if (deviceTitle.empty()) {
+        deviceTitle = jsonGetString(root, "targetRow.title");
+    }
+    std::string likes       = jsonGetString(root, "likenum");
+    std::string datelineStr = jsonGetString(root, "dateline_text");
+    std::string body        = jsonGetString(root, "message");
+
+    ContactData cd;
+    cd.id          = kCoolapkTimelineId;
+    cd.name        = "酷安时线";
+    cd.type        = kCoolapkTimelineType;
+    cd.chatId      = kCoolapkTimelineType;
+    cd.status      = "online";
+    cd.isConnected = true;
+    ret.contacts.push_back(cd);
+
+    std::string link = "https://www.coolapk.com" + feedUrl;
+
+    std::string message = title + "\n" + link;
+    std::string meta = "作者 " + displayName;
+    if (!feedTypeName.empty()) {
+        meta += " · " + feedTypeName;
+    }
+    if (!deviceTitle.empty()) {
+        meta += " · " + deviceTitle;
+    }
+    if (!likes.empty() && likes != "0") {
+        meta += " · 点赞 " + likes;
+    }
+    if (!datelineStr.empty()) {
+        meta += " · " + datelineStr;
+    }
+    message += "\n" + meta;
+
+    // 正文摘录（超 300 字符截断）
+    if (!body.empty()) {
+        static const size_t kBodyMax = 300;
+        if (body.size() > kBodyMax) {
+            body = body.substr(0, kBodyMax) + "…";
+        }
+        message += "\n" + body;
+    }
+
+    std::string peerId = uidStr.empty() ? "fedone" : uidStr;
+    std::string peerNick = displayName.empty() ? "fedone" : displayName;
+
+    HistoryMessage hm;
+    hm.message       = message;
+    hm.sender_pubkey = peerId;
+    hm.sender_number = 0;
+    hm.direction     = "received";
+    hm.roomId        = kCoolapkTimelineType;
+    hm.eventId       = feedId;
+    if (!pic.empty()) {
+        int pw = 0, ph = 0;
+        hm.msgtype       = "image";
+        hm.mediaMime     = "image/jpeg";
+        hm.mediaUrl      = pic;
+        if (parseCoolapkSize(pic, pw, ph)) {
+            hm.mediaWidth  = pw;
+            hm.mediaHeight = ph;
+        } else {
+            hm.mediaWidth  = UnkSize;
+            hm.mediaHeight = UnkSize;
+        }
+        hm.fileSize      = UnkSize;
+    } else {
+        hm.msgtype  = "";
+        hm.mediaUrl = "";
+    }
+    ret.messages.push_back(hm);
+
+    PeerInfo pi;
+    pi.publicKey  = peerId;
+    pi.userName   = peerId;
+    pi.nickname   = peerNick;
+    pi.iconUrl    = avatar;
+    pi.peerNumber = 0;
+    ret.peers.push_back(pi);
+
+    ret.senderName  = qFromUtf8(peerNick);
+    ret.handled     = true;
+
+    cJSON_Delete(root);
+    return true;
+}
+
 // ── 旧逻辑：纯文本降级 ──
 
 static void extractSender(cJSON* valueItem, ParseResult& ret) {
@@ -1549,6 +1703,8 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
             if (tryParseClipboardEvent(dataStr, ret))
                 goto done;
             if (tryParseMisskeyNote(dataStr, ret))
+                goto done;
+            if (tryParseCoolapkTimeline(dataStr, ret))
                 goto done;
             if (tryParseToutiaoNews(dataStr, ret))
                 goto done;

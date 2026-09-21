@@ -789,7 +789,8 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
                || type == kZhihuNotifyType
                || type == kBiliNotifyType
                || type == kWeiboHotnewsType
-               || type == kXiaohongshuNotifyType) {
+               || type == kXiaohongshuNotifyType
+               || type == kCoolapkTimelineType) {
         defs << spinDef("auto_refresh", qFromUtf8("刷新间隔"), 30, 3600, 30, 300);
         defs << checkDef("only_video", qFromUtf8("仅视频"));
     } else if (type == kUnknownType) {

@@ -30,6 +30,8 @@ constexpr const char* const kWeiboHotnewsType = "weibo_hotnews";       // 微博
 constexpr int kWeiboHotnewsId = -111;                                  // 微博热闻保留 id（-111，固定不 hash）
 constexpr const char* const kXiaohongshuNotifyType = "xiaohongshu_notify"; // 小红书通知订阅流（type == chatId == roomId）
 constexpr int kXiaohongshuNotifyId = -112;                             // 小红书通知保留 id（-112，固定不 hash）
+constexpr const char* const kCoolapkTimelineType = "coolapk_timeline";  // 酷安时线订阅流（type == chatId == roomId）
+constexpr int kCoolapkTimelineId = -113;                                // 酷安时线保留 id（-113，固定不 hash）
 constexpr int UnkSize = 0;                                             // 未知大小/未知尺寸哨兵（0 = 未知）
 
 #endif // PURECONSTS_HPP
