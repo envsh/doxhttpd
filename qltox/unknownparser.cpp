@@ -1318,6 +1318,119 @@ static bool tryParseWeiboHotnews(const std::string& rawStr, ParseResult& ret) {
     return true;
 }
 
+// ── 小红书通知订阅流解析 ──
+// 识别: Value.data 为小红书 pubsub 笔记 JSON（model_type==note + note_card.display_title 非空）
+//   proto_type==hotlist（与 zhihu_hotnews 的 card_id 互斥）；附封面图（cover.info_list 的 FD_WM_WEBP）
+
+static bool tryParseXiaohongshuNotify(const std::string& rawStr, ParseResult& ret) {
+    cJSON* root = cJSON_Parse(rawStr.c_str());
+    if (!root) return false;
+
+    std::string modelType = jsonGetString(root, "model_type");
+    std::string title     = jsonGetString(root, "note_card.display_title");
+    if (modelType != "note" || title.empty()) {
+        cJSON_Delete(root);
+        return false;
+    }
+
+    std::string noteId   = jsonGetString(root, "id");
+    std::string xsecToken = jsonGetString(root, "xsec_token");
+    // note_card.user：user_id 即 pubkey，nick_name/nickname 即昵称，avatar 即 peer icon
+    std::string userId   = jsonGetString(root, "note_card.user.user_id");
+    std::string author   = jsonGetString(root, "note_card.user.nick_name");
+    if (author.empty()) {
+        author = jsonGetString(root, "note_card.user.nickname");
+    }
+    std::string avatar   = jsonGetString(root, "note_card.user.avatar");
+    std::string likes   = jsonGetString(root, "note_card.interact_info.liked_count");
+    std::string noteType = jsonGetString(root, "note_card.type");
+    int64_t duration    = jsonGetInt64(root, "note_card.video.capa.duration");
+    int64_t coverW      = jsonGetInt64(root, "note_card.cover.width");
+    int64_t coverH      = jsonGetInt64(root, "note_card.cover.height");
+
+    // 封面图：优先 cover.info_list 中 image_scene==FD_WM_WEBP 的 url，回退顺序 cover.url → 首个 info_list url
+    std::string coverUrl;
+    cJSON* infoList = jsonPath(root, "note_card.cover.info_list");
+    if (infoList && cJSON_IsArray(infoList)) {
+        int n = cJSON_GetArraySize(infoList);
+        for (int i = 0; i < n; i++) {
+            cJSON* it = cJSON_GetArrayItem(infoList, i);
+            std::string scene = jsonGetString(it, "image_scene");
+            std::string u     = jsonGetString(it, "url");
+            if (u.empty()) continue;
+            if (scene == "FD_WM_WEBP") {
+                coverUrl = u;
+                break;
+            }
+            if (coverUrl.empty()) coverUrl = u;
+        }
+    }
+    if (coverUrl.empty()) {
+        coverUrl = jsonGetString(root, "note_card.cover.url");
+    }
+
+    ContactData cd;
+    cd.id          = kXiaohongshuNotifyId;
+    cd.name        = "小红书通知";
+    cd.type        = kXiaohongshuNotifyType;
+    cd.chatId      = kXiaohongshuNotifyType;
+    cd.status      = "online";
+    cd.isConnected = true;
+    ret.contacts.push_back(cd);
+
+    std::string url = "https://www.xiaohongshu.com/explore/" + noteId;
+    if (!xsecToken.empty()) {
+        url += "?xsec_token=" + xsecToken + "&xsec_source=pc_feed";
+    }
+
+    std::string message = title + "\n" + url;
+    std::string meta = "作者 " + author;
+    if (!likes.empty()) {
+        meta += " · 点赞 " + likes;
+    }
+    if (noteType == "video" && duration > 0) {
+        meta += " · 视频 " + std::to_string(duration) + "秒";
+    }
+    message += "\n" + meta;
+
+    std::string peerId = userId.empty() ? "fedone" : userId;
+    std::string peerNick = author.empty() ? "fedone" : author;
+
+    HistoryMessage hm;
+    hm.message       = message;
+    hm.sender_pubkey = peerId;
+    hm.sender_number = 0;
+    hm.direction     = "received";
+    hm.roomId        = kXiaohongshuNotifyType;
+    hm.eventId       = noteId;
+    if (!coverUrl.empty()) {
+        hm.msgtype       = "image";
+        hm.mediaMime     = "image/webp";
+        hm.mediaUrl      = coverUrl;
+        hm.mediaWidth    = (coverW > 0) ? (int)coverW : UnkSize;
+        hm.mediaHeight   = (coverH > 0) ? (int)coverH : UnkSize;
+        hm.fileSize      = UnkSize;
+    } else {
+        hm.msgtype  = "";
+        hm.mediaUrl = "";
+    }
+    ret.messages.push_back(hm);
+
+    PeerInfo pi;
+    pi.publicKey  = peerId;
+    pi.userName   = peerId;
+    pi.nickname   = peerNick;
+    pi.iconUrl    = avatar;
+    pi.peerNumber = 0;
+    ret.peers.push_back(pi);
+
+    ret.senderName  = qFromUtf8(peerNick);
+    ret.handled     = true;
+
+    cJSON_Delete(root);
+    return true;
+}
+
 // ── 旧逻辑：纯文本降级 ──
 
 static void extractSender(cJSON* valueItem, ParseResult& ret) {
@@ -1448,6 +1561,8 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
             if (tryParseBiliNotify(dataStr, ret))
                 goto done;
             if (tryParseWeiboHotnews(dataStr, ret))
+                goto done;
+            if (tryParseXiaohongshuNotify(dataStr, ret))
                 goto done;
         }
         fallbackAsPlainText(valueItem, ret);
