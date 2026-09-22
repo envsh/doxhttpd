@@ -18,7 +18,8 @@ EventType34 toEventType34(int raw) {
 #endif
 }
 
-// 时间字符串解析：支持 "yyyy-MM-dd hh:mm:ss" 和 ISO8601 格式
+// 时间字符串解析：支持 "yyyy-MM-dd hh:mm:ss" 和 ISO8601 格式。
+// 返回完整 "yyyy-MM-dd hh:mm:ss"，剥离毫秒与时区后缀（"Z" 或 "+08:00"）。
 QString qFormatTime(const QString& createdAt) {
     // 如果是 ISO8601 格式（包含 'T'），使用 qFormatISO8601 处理
     if (createdAt.contains('T')) {
@@ -26,23 +27,24 @@ QString qFormatTime(const QString& createdAt) {
     }
     
 #ifdef QT3_BUILD
-    // Qt3: 手动解析，split 后取时间部分
+    // Qt3: 手动解析，split 后返回完整日期时间
     QStringList parts = QStringList::split(" ", createdAt);
     if (parts.count() >= 2) {
-        return parts[1].left(5);  // 取 "hh:mm"
+        return parts[0] + " " + parts[1];  // 完整 "yyyy-MM-dd hh:mm:ss"
     }
     return QString();
 #else
     // Qt4: 使用 QDateTime
     QDateTime dt = QDateTime::fromString(createdAt, "yyyy-MM-dd hh:mm:ss");
     if (dt.isValid()) {
-        return dt.toString("hh:mm");
+        return dt.toString("yyyy-MM-dd hh:mm:ss");
     }
     return QString();
 #endif
 }
 
-// 解析 ISO8601 时间字符串，返回 "hh:mm" 格式（与 Web 版一致）
+// 解析 ISO8601 时间字符串，返回完整日期时间 "yyyy-MM-dd hh:mm:ss"。
+// 剥离了小数秒（如 ".123"）与时区后缀（"Z" / "+08:00"），只保留事件记录的时间部分。
 QString qFormatISO8601(const QString& iso8601Str) {
     if (iso8601Str.isEmpty()) { return QString(); }
     
@@ -69,10 +71,10 @@ QString qFormatISO8601(const QString& iso8601Str) {
     if (dotPos >= 0) {
         str = str.left(dotPos);
     }
-    // 现在格式应为 "yyyy-MM-dd hh:mm:ss"，取时间部分
+    // 现在格式应为 "yyyy-MM-dd hh:mm:ss"，返回完整时间
     QStringList parts = QStringList::split(" ", str);
     if (parts.count() >= 2) {
-        return parts[1].left(5);  // 返回 "hh:mm"（与 Web 版一致）
+        return parts[0] + " " + parts[1];  // 完整 "yyyy-MM-dd hh:mm:ss"
     }
     return QString();
 #else
@@ -91,7 +93,7 @@ QString qFormatISO8601(const QString& iso8601Str) {
         dt = QDateTime::fromString(cleaned, "yyyy-MM-ddTHh:mm:ss");
     }
     if (dt.isValid()) {
-        return dt.toString("hh:mm");  // 返回 "hh:mm"（与 Web 版一致）
+        return dt.toString("yyyy-MM-dd hh:mm:ss");
     }
     return QString();
 #endif
