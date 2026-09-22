@@ -1453,6 +1453,20 @@ void MainWindow::trayActivated(int reason) {
     }
 }
 
+// 协议订阅流类型 → 头部 emoji（与 contactlist.cpp typeToEmojiCp 保持一致）。
+// 用 qFromUtf8 包装，避免 QString(const char*) 的 Latin-1 乱码（AGENTS.md 规范）。
+static QString protoStreamEmoji(const QString& type) {
+    if (type == kToutiaoHotnewsType)       return qFromUtf8("📰");
+    if (type == kZhihuNotifyType
+        || type == kZhihuHotnewsType)      return qFromUtf8("📘");
+    if (type == kBiliNotifyType)           return qFromUtf8("📺");
+    if (type == kWeiboHotnewsType)         return qFromUtf8("🔥");
+    if (type == kXiaohongshuNotifyType)    return qFromUtf8("📕");
+    if (type == kCoolapkTimelineType)      return qFromUtf8("📱");
+    if (type == kMisskeyType)              return qFromUtf8("🐱");
+    return QString();
+}
+
 void MainWindow::updateTrayBadge(int total) {
     if (m_tray && m_tray->isVisible()) {
         m_tray->setBadgeCount(total);
@@ -1574,6 +1588,8 @@ void MainWindow::onContactSelected(int id, const QString& type, const QString& n
     } else if (type == kImapMailType) {
         emoji = "E";
         headerText = emoji + " " + name;
+    } else if (!protoStreamEmoji(type).isEmpty()) {
+        headerText = protoStreamEmoji(type) + " " + name;
     }
     
     chatWidget->setHeaderText(headerText);
@@ -2509,6 +2525,17 @@ void MainWindow::retranslateUi() {
             headerText = QString("Paste Bin") + " " + QString::number(currentChatId);
         } else if (currentChatType == kTranslateType) {
             headerText = QString("Translate") + " " + QString::number(currentChatId);
+        } else if (!protoStreamEmoji(currentChatType).isEmpty()) {
+            QString label;
+            std::string type = std::string(qToUtf8(currentChatType).data());
+            for (const auto& cd : m_accumulatedContactData) {
+                if (cd.id == currentChatId && cd.type == type) {
+                    label = qFromUtf8(cd.name);
+                    break;
+                }
+            }
+            if (label.isEmpty()) { label = currentChatType; }
+            headerText = protoStreamEmoji(currentChatType) + " " + label;
         }
         chatWidget->setHeaderText(headerText);
     }
