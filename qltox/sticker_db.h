@@ -54,6 +54,9 @@ public:
     virtual bool delete_sticker(const char* sticker_id) = 0;
     virtual bool delete_stickers_by_pack(const char* pack_id) = 0;
     virtual bool touch_sticker(const char* sticker_id, int64_t now) = 0;
+    // 更新贴纸描述（≤140 字；入库前调用方截断）
+    virtual bool update_sticker_description(const char* sticker_id,
+                                            const char* desc) = 0;
     virtual std::unique_ptr<StickerRow> get_sticker(const char* sticker_id) = 0;
     // 查询某贴纸行的软删态（id 即内容 sha1，全局主键）：
     //   -1=无该行   0=存活   1=软删（deleted=1）

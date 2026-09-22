@@ -62,8 +62,10 @@ class PhotoViewer : public QDialog {
     Q_OBJECT
 public:
     // origData: 原始压缩文件字节（JPEG/PNG），供剪贴板直传原文件；空则回退像素模式
+    // suggestUrl: 原媒体 URL，用于另存对话框预填文件名
     PhotoViewer(QWidget* parent, const QPixmap& pixmap,
-                const QByteArray& origData = QByteArray());
+                const QByteArray& origData = QByteArray(),
+                const QString& suggestUrl = QString());
     ~PhotoViewer();
 
 protected:
@@ -88,6 +90,7 @@ private:
     void setupToolbar(QVBoxLayout* lay);
     void updateTitle();
     void updateStatus();
+    QString defaultPhotoName() const;
 
     PhotoCanvas* m_canvas;
     QWidget* m_toolbar;
@@ -105,6 +108,7 @@ private:
     QPixmap m_origPixmap;
     QByteArray m_origData;   // 原始文件字节（可为空）
     QString m_origMime;      // 魔数探测结果："image/png"/"image/jpeg"/"image/webp"/""
+    QString m_suggestUrl;    // 建议文件名来源（原媒体 URL），另存对话框预填用
 };
 
 #endif

@@ -196,6 +196,17 @@ public:
         return stmt.step();
     }
 
+    bool update_sticker_description(const char* sticker_id,
+                                    const char* desc) override {
+        auto _ = m_conn->get();
+        auto stmt = _->prepare(
+            "UPDATE stickers SET description=?2 WHERE id=?1");
+        if (!stmt.isPrepared()) { return false; }
+        if (!stmt.bind(1, sticker_id)) { return false; }
+        if (!stmt.bind(2, desc)) { return false; }
+        return stmt.step();
+    }
+
     std::unique_ptr<StickerRow> get_sticker(const char* sticker_id) override {
         auto _ = m_conn->get();
         auto stmt = _->prepare(

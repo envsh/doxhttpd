@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <math.h>
 #include <string.h>
+#include <time.h>
 #ifdef QT3_BUILD
 #include <qclipboard.h>
 #include <qmime.h>
@@ -56,47 +57,34 @@ static QString sniffImageMime(const QByteArray& data) {
 
 #ifdef QT3_BUILD
 // 剪贴板数据源（修复 CPU 100% 的核心）：
-// 原图是 JPEG/PNG 时直接返回原始文件字节——零转换；
-// 其余格式懒编码一次并缓存，把"每次 SelectionRequest 全图重编码"
-// 变成"首次编码、后续 memcpy"。无 Q_OBJECT，不涉 moc。
+// PNG/JPEG 原图时只暴露原始格式一个目标，粘贴体积与原文一致；
+// 其余格式懒编码 PNG 一次并缓存。无 Q_OBJECT，不涉 moc。
 class PhotoClipSource : public QMimeSource {
 public:
     PhotoClipSource(const QByteArray& origData, const QString& origMime,
                     const QImage& img)
         : m_orig(origData), m_mime(origMime), m_img(img),
-          m_havePng(false), m_havePpm(false) {}
+          m_havePng(false) {}
 
     virtual const char* format(int n) const {
-        if (m_mime == "image/png") {
-            if (n == 0) { return "image/png"; }
-            if (n == 1) { return "image/ppm"; }
-        } else if (m_mime == "image/jpeg") {
-            if (n == 0) { return "image/jpeg"; }
-            if (n == 1) { return "image/png"; }
-            if (n == 2) { return "image/ppm"; }
-        } else {
-            if (n == 0) { return "image/png"; }
-            if (n == 1) { return "image/ppm"; }
-        }
-        return 0;
+        if (n != 0) { return 0; }
+        if (m_mime == "image/png")  { return "image/png"; }
+        if (m_mime == "image/jpeg") { return "image/jpeg"; }
+        return "image/png";
     }
 
     virtual QByteArray encodedData(const char* fmt) const {
         if (!fmt) { return QByteArray(); }
         // 原始字节直通（300KB 原图粘贴后仍是 300KB）
-        if (m_mime == "image/png" && qstrcmp(fmt, "image/png") == 0) {
+        if ((m_mime == "image/png" || m_mime == "image/jpeg")
+            && qstrcmp(fmt, m_mime.latin1()) == 0) {
             return m_orig;
         }
-        if (m_mime == "image/jpeg" && qstrcmp(fmt, "image/jpeg") == 0) {
-            return m_orig;
-        }
-        if (qstrcmp(fmt, "image/png") == 0) {
+        // 其余格式（webp/未知）兜底一次编码 PNG
+        if (m_mime != "image/png" && m_mime != "image/jpeg"
+            && qstrcmp(fmt, "image/png") == 0) {
             if (!m_havePng) { encodeTo(m_png, "PNG"); m_havePng = true; }
             return m_png;
-        }
-        if (qstrcmp(fmt, "image/ppm") == 0) {
-            if (!m_havePpm) { encodeTo(m_ppm, "PPM"); m_havePpm = true; }
-            return m_ppm;
         }
         return QByteArray();
     }
@@ -117,9 +105,7 @@ private:
     QString m_mime;
     QImage m_img;
     mutable QByteArray m_png;
-    mutable QByteArray m_ppm;
     mutable bool m_havePng;
-    mutable bool m_havePpm;
 };
 #endif
 
@@ -411,7 +397,8 @@ void PhotoCanvas::resizeEvent(QResizeEvent* event) {
 // ============================================================
 
 PhotoViewer::PhotoViewer(QWidget* parent, const QPixmap& pixmap,
-                         const QByteArray& origData)
+                         const QByteArray& origData,
+                         const QString& suggestUrl)
     : QDialog(parent
 #ifdef QT3_BUILD
       , nullptr, false, WDestructiveClose
@@ -429,6 +416,7 @@ PhotoViewer::PhotoViewer(QWidget* parent, const QPixmap& pixmap,
     , m_origPixmap(pixmap)
     , m_origData(origData)
     , m_origMime(sniffImageMime(origData))
+    , m_suggestUrl(suggestUrl)
 {
 #ifndef QT3_BUILD
     setAttribute(Qt::WA_DeleteOnClose);
@@ -621,13 +609,53 @@ void PhotoViewer::closeEvent(QCloseEvent* event) {
     QDialog::closeEvent(event);
 }
 
+// 另存对话框默认文件名：主名优先取原媒体 URL 尾段文件名（仅主名，去掉其扩展名），
+// 扩展名一律由原图实际格式 m_origMime 决定。若不这么做，CDN 尾名扩展名与内容不符
+// 的场景（如 .png 链接实为 JPEG 字节）会默认 .png，保存时重编码 JPEG→PNG 体积放大。
+QString PhotoViewer::defaultPhotoName() const {
+    QString base;
+    {
+        QString u = m_suggestUrl;
+#ifdef QT3_BUILD
+        int slash = u.findRev('/');
+        int q = u.find('?', slash + 1);
+#else
+        int slash = u.lastIndexOf('/');
+        int q = u.indexOf('?', slash + 1);
+#endif
+        if (slash >= 0) { u = u.mid(slash + 1); }
+        if (q >= 0) { u = u.left(q); }
+#ifdef QT3_BUILD
+        QString low = u.lower();
+#else
+        QString low = u.toLower();
+#endif
+        if (low.endsWith(".png"))       { base = u.left(u.length() - 4); }
+        else if (low.endsWith(".jpg"))  { base = u.left(u.length() - 4); }
+        else if (low.endsWith(".jpeg")) { base = u.left(u.length() - 5); }
+    }
+    if (base.isEmpty()) {
+        char tbuf[32] = {0};
+        time_t now = time(NULL);
+        struct tm tmv;
+        localtime_r(&now, &tmv);
+        strftime(tbuf, sizeof(tbuf), "photo_%Y%m%d_%H%M%S", &tmv);
+        base = qFromUtf8(tbuf);
+    }
+    QString ext = ".png";
+    if (m_origMime == "image/jpeg") { ext = ".jpg"; }
+    base += ext;
+    return base;
+}
+
 void PhotoViewer::onSave() {
+    QString startDir = qGetHomePath() + "/" + defaultPhotoName();
 #ifdef QT3_BUILD
     QString path = QFileDialog::getSaveFileName(
-        qGetHomePath(), qFromUtf8("Images (*.png *.jpg)"), this);
+        startDir, qFromUtf8("Images (*.png *.jpg)"), this);
 #else
     QString path = QFileDialog::getSaveFileName(
-        this, qFromUtf8("保存图片"), qGetHomePath(),
+        this, qFromUtf8("保存图片"), startDir,
         qFromUtf8("Images (*.png *.jpg)"));
 #endif
     if (path.isEmpty()) { return; }
@@ -688,14 +716,15 @@ void PhotoViewer::onCopy() {
 #else
     QMimeData* md = new QMimeData();
     if (m_origMime == "image/png" || m_origMime == "image/jpeg") {
-        md->setData(m_origMime, m_origData);                  // 原始字节直通
+        // 原始字节直通；不再 setImageData，否则 X11 剪贴板多出重编码 image/png
+        // 目标——粘贴端优先选它，JPEG 解压→PNG 重编码体积放大约 10 倍
+        md->setData(m_origMime, m_origData);
     } else {
         QBuffer buf;                                          // webp/空：转 PNG 一次
         buf.open(QIODevice::WriteOnly);
         m_origPixmap.save(&buf, "PNG");
         md->setData("image/png", buf.buffer());
     }
-    md->setImageData(m_origPixmap.toImage());                 // 像素兜底（GIMP 等）
     QApplication::clipboard()->setMimeData(md);               // 所有权移交剪贴板
 #endif
 }

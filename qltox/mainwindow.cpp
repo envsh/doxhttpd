@@ -945,7 +945,8 @@ void MainWindow::customEvent(CustomEventBase* event) {
             }
         }
         if (pix.isNull()) { return; }
-        PhotoViewer* pv = new PhotoViewer(this, pix, origData);   // 原始文件字节带入
+        PhotoViewer* pv = new PhotoViewer(this, pix, origData,
+                                          qFromUtf8(e->mediaUrl.c_str())); // 原始字节+媒体URL带入
         pv->show();
         return;
     }
