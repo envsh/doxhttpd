@@ -28,8 +28,8 @@
 using std::min;
 using std::max;
 
-// 放大上限：100 倍（m_scale == 100.0 即 10000%）
-static const double kMaxZoomScale = 100.0;
+// 放大上限：50 倍（m_scale == 50.0 即 5000%）
+static const double kMaxZoomScale = 50.0;
 
 static QString humanBytes(int n) {
     if (n < 1024) {
@@ -481,6 +481,7 @@ void PhotoViewer::setupToolbar(QVBoxLayout* lay) {
         { "保存 s", SLOT(onSave()) },
         { "全屏 f", SLOT(onFullscreen()) },
         { "帮助 h", SLOT(onToggleHelp()) },
+        { "关闭 q", SLOT(onClose()) },
     };
     int numBtns = sizeof(btns) / sizeof(btns[0]);
     for (int i = 0; i < numBtns; i++) {
@@ -778,4 +779,8 @@ void PhotoViewer::onToggleHelp() {
     m_canvas->setShowHelp(!m_canvas->showHelp());
     m_canvas->update();
     updateStatus();
+}
+
+void PhotoViewer::onClose() {
+    close();
 }

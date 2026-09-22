@@ -81,6 +81,7 @@ private slots:
     void onRotateCCW();
     void onFullscreen();
     void onToggleHelp();
+    void onClose();
     void onViewChanged();
 
 private:

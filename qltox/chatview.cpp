@@ -3028,9 +3028,36 @@ void ChatView::copySelectedText() {
     }
 }
 
+static QString mediaTypeLabel(ChatElement::ElementType et) {
+    switch (et) {
+        case ChatElement::Image: return qFromUtf8("图片");
+        case ChatElement::Gif:   return qFromUtf8("动图");
+        case ChatElement::File:  return qFromUtf8("文件");
+        case ChatElement::Video: return qFromUtf8("视频");
+        case ChatElement::Audio: return qFromUtf8("音频");
+        default:                 return qFromUtf8("媒体");
+    }
+}
+
 void ChatView::copyFullMessage(int msgIndex) {
     if (msgIndex >= 0 && msgIndex < (int)m_history->size()) {
-        QApplication::clipboard()->setText((*m_history)[msgIndex].messageText);
+        const ChatElement& el = (*m_history)[msgIndex];
+        QString text = el.messageText;
+        if (!el.mediaUrl.isEmpty()) {
+            if (!text.isEmpty()) { text += "\n"; }
+            text += qFromUtf8("媒体: ") + mediaTypeLabel(el.etype);
+            QString sz = formatFileSize(el.fileSize);
+            if (!sz.isEmpty()) {
+                text += qFromUtf8(" · ") + qFromUtf8("大小: ") + sz;
+            }
+            if (el.mediaWidth > 0 && el.mediaHeight > 0) {
+                text += qFromUtf8(" · ") + qFromUtf8("分辨率: ")
+                    + QString::number(el.mediaWidth) + qFromUtf8("×")
+                    + QString::number(el.mediaHeight);
+            }
+            text += "\n" + el.mediaUrl;
+        }
+        QApplication::clipboard()->setText(text);
     }
 }
 
