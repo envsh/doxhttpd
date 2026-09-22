@@ -1321,11 +1321,11 @@ static bool tryParseWeiboHotnews(const std::string& rawStr, ParseResult& ret) {
     return true;
 }
 
-// ── 小红书通知订阅流解析 ──
-// 识别: Value.data 为小红书 pubsub 笔记 JSON（model_type==note + note_card.display_title 非空）
-//   proto_type==hotlist（与 zhihu_hotnews 的 card_id 互斥）；附封面图（cover.info_list 的 FD_WM_WEBP）
+// ── 小红书推荐流订阅流解析 ──
+// 识别: Value.data 为小红书 pubsub 推荐流笔记 JSON（model_type==note + note_card.display_title 非空）
+//   附封面图（cover.info_list 的 FD_WM_WEBP）；与通知流（proto_type==notification）天然互斥
 
-static bool tryParseXiaohongshuNotify(const std::string& rawStr, ParseResult& ret) {
+static bool tryParseXiaohongshuRecommend(const std::string& rawStr, ParseResult& ret) {
     cJSON* root = cJSON_Parse(rawStr.c_str());
     if (!root) return false;
 
@@ -1373,10 +1373,10 @@ static bool tryParseXiaohongshuNotify(const std::string& rawStr, ParseResult& re
     }
 
     ContactData cd;
-    cd.id          = kXiaohongshuNotifyId;
-    cd.name        = "小红书通知";
-    cd.type        = kXiaohongshuNotifyType;
-    cd.chatId      = kXiaohongshuNotifyType;
+    cd.id          = kXiaohongshuRecommendId;
+    cd.name        = "小红书推荐流";
+    cd.type        = kXiaohongshuRecommendType;
+    cd.chatId      = kXiaohongshuRecommendType;
     cd.status      = "online";
     cd.isConnected = true;
     ret.contacts.push_back(cd);
@@ -1404,7 +1404,7 @@ static bool tryParseXiaohongshuNotify(const std::string& rawStr, ParseResult& re
     hm.sender_pubkey = peerId;
     hm.sender_number = 0;
     hm.direction     = "received";
-    hm.roomId        = kXiaohongshuNotifyType;
+    hm.roomId        = kXiaohongshuRecommendType;
     hm.eventId       = noteId;
     if (!coverUrl.empty()) {
         hm.msgtype       = "image";
@@ -1428,6 +1428,182 @@ static bool tryParseXiaohongshuNotify(const std::string& rawStr, ParseResult& re
     ret.peers.push_back(pi);
 
     ret.senderName  = qFromUtf8(peerNick);
+    ret.handled     = true;
+
+    cJSON_Delete(root);
+    return true;
+}
+
+// ── 小红书通知订阅流解析（评论/互动通知）──
+// 识别: Value.data 为小红书 pubsub 通知 JSON（proto_type==notification + comment_info.id 非空 + item_info.id 非空）
+//   发送者=评论者（comment_info.user_info）；与推荐流（model_type==note）天然互斥
+
+static bool tryParseXiaohongshuNotify(const std::string& rawStr, ParseResult& ret) {
+    cJSON* root = cJSON_Parse(rawStr.c_str());
+    if (!root) return false;
+
+    std::string protoType = jsonGetString(root, "proto_type");
+    std::string title     = jsonGetString(root, "title");
+    std::string commentId = jsonGetString(root, "comment_info.id");
+    std::string itemId    = jsonGetString(root, "item_info.id");
+    if (protoType != "notification" || commentId.empty()
+        || itemId.empty() || title.empty()) {
+        cJSON_Delete(root);
+        return false;
+    }
+
+    std::string commentContent = jsonGetString(root, "comment_info.content");
+    std::string targetContent  = jsonGetString(root, "comment_info.target_comment.content");
+    std::string itemContent    = jsonGetString(root, "item_info.content");
+    std::string itemAuthor     = jsonGetString(root, "item_info.user_info.nickname");
+    std::string xsecToken      = jsonGetString(root, "item_info.xsec_token");
+
+    std::string commenterId     = jsonGetString(root, "comment_info.user_info.userid");
+    std::string commenterNick   = jsonGetString(root, "comment_info.user_info.nickname");
+    std::string commenterAvatar = jsonGetString(root, "comment_info.user_info.image");
+
+    std::string imageUrl = jsonGetString(root, "item_info.image_info.url");
+    int64_t imageW = jsonGetInt64(root, "item_info.image_info.width");
+    int64_t imageH = jsonGetInt64(root, "item_info.image_info.height");
+
+    ContactData cd;
+    cd.id          = kXiaohongshuNotifyId;
+    cd.name        = "小红书通知";
+    cd.type        = kXiaohongshuNotifyType;
+    cd.chatId      = kXiaohongshuNotifyType;
+    cd.status      = "online";
+    cd.isConnected = true;
+    ret.contacts.push_back(cd);
+
+    std::string url = "https://www.xiaohongshu.com/explore/" + itemId;
+    if (!xsecToken.empty()) {
+        url += "?xsec_token=" + xsecToken + "&xsec_source=pc_feed";
+    }
+
+    std::string message = title + "\n" + commentContent;
+    if (!targetContent.empty()) {
+        message += "\n> " + targetContent;
+    }
+    std::string meta;
+    if (!itemContent.empty()) { meta += "笔记 " + itemContent; }
+    if (!itemAuthor.empty())  { meta += " · 作者 " + itemAuthor; }
+    if (!meta.empty())        { message += "\n" + meta; }
+    message += "\n" + url;
+
+    std::string peerId   = commenterId.empty() ? "fedone" : commenterId;
+    std::string peerNick = commenterNick.empty() ? "fedone" : commenterNick;
+
+    HistoryMessage hm;
+    hm.message       = message;
+    hm.sender_pubkey = peerId;
+    hm.sender_number = 0;
+    hm.direction     = "received";
+    hm.roomId        = kXiaohongshuNotifyType;
+    hm.eventId       = commentId;
+    {
+        int64_t t = jsonGetInt64(root, "time");
+        if (t > 0) {
+            char tbuf[32] = {0};
+            time_t sec = (time_t)t;
+            struct tm tmv;
+            localtime_r(&sec, &tmv);
+            strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
+            hm.created_at = tbuf;
+        }
+    }
+    if (!imageUrl.empty()) {
+        hm.msgtype       = "image";
+        hm.mediaMime     = "image/jpeg";
+        hm.mediaUrl      = imageUrl;
+        hm.mediaWidth    = (imageW > 0) ? (int)imageW : UnkSize;
+        hm.mediaHeight   = (imageH > 0) ? (int)imageH : UnkSize;
+        hm.fileSize      = UnkSize;
+    } else {
+        hm.msgtype  = "";
+        hm.mediaUrl = "";
+    }
+    ret.messages.push_back(hm);
+
+    PeerInfo pi;
+    pi.publicKey  = peerId;
+    pi.userName   = peerId;
+    pi.nickname   = peerNick;
+    pi.iconUrl    = commenterAvatar;
+    pi.peerNumber = 0;
+    ret.peers.push_back(pi);
+
+    ret.senderName  = qFromUtf8(peerNick);
+    ret.handled     = true;
+
+    cJSON_Delete(root);
+    return true;
+}
+
+// ── 小红书热闻订阅流解析 ──
+// 识别: Value.data 为小红书热榜 JSON（proto_type==hotlist + 顶层小写 title/url + hot_value）
+//   正向互斥：hot_value 为小红书热榜独有；toutiao_hotlist 要求大写 Title/Url + ClusterId*，
+//   zhihu_hotnews 要求 card_id，均不命中 → 不与 tryParseToutiaoHotlist/tryParseZhihuHotnews 冲突。
+//   封面为 picasso-static 图床 png，无尺寸信息 → UnkSize。
+
+static bool tryParseXiaohongshuHotnews(const std::string& rawStr, ParseResult& ret) {
+    cJSON* root = cJSON_Parse(rawStr.c_str());
+    if (!root) return false;
+
+    std::string protoType = jsonGetString(root, "proto_type");
+    std::string title     = jsonGetString(root, "title");
+    std::string url       = jsonGetString(root, "url");
+    std::string hotValue  = jsonGetString(root, "hot_value");
+    if (protoType != "hotlist" || title.empty() || url.empty() || hotValue.empty()) {
+        cJSON_Delete(root);
+        return false;
+    }
+
+    int64_t index = jsonGetInt64(root, "index");
+
+    ContactData cd;
+    cd.id          = kXiaohongshuHotnewsId;
+    cd.name        = "小红书热闻";
+    cd.type        = kXiaohongshuHotnewsType;
+    cd.chatId      = kXiaohongshuHotnewsType;
+    cd.status      = "online";
+    cd.isConnected = true;
+    ret.contacts.push_back(cd);
+
+    std::string meta = "热度 " + hotValue;
+    if (index > 0) {
+        meta += " · 第 " + std::to_string(index) + " 名";
+    }
+
+    HistoryMessage hm;
+    hm.message       = title + "\n" + url + "\n" + meta;
+    hm.sender_pubkey = "fedone";
+    hm.sender_number = 0;
+    hm.direction     = "received";
+    hm.roomId        = kXiaohongshuHotnewsType;
+    hm.eventId       = url;
+    std::string cover = jsonGetString(root, "cover");
+    if (!cover.empty()) {
+        hm.msgtype     = "image";
+        hm.mediaUrl    = cover;
+        hm.mediaMime   = "image/png";
+        hm.fileSize    = UnkSize;
+        hm.mediaWidth  = UnkSize;
+        hm.mediaHeight = UnkSize;
+    } else {
+        hm.msgtype  = "";
+        hm.mediaUrl = "";
+    }
+    ret.messages.push_back(hm);
+
+    PeerInfo pi;
+    pi.publicKey  = "fedone";
+    pi.userName   = "fedone";
+    pi.nickname   = "小红书热闻";
+    pi.iconUrl    = cover;
+    pi.peerNumber = 0;
+    ret.peers.push_back(pi);
+
+    ret.senderName  = qFromUtf8("小红书热闻");
     ret.handled     = true;
 
     cJSON_Delete(root);
@@ -1714,9 +1890,13 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
                 goto done;
             if (tryParseZhihuHotnews(dataStr, ret))
                 goto done;
+            if (tryParseXiaohongshuHotnews(dataStr, ret))
+                goto done;
             if (tryParseBiliNotify(dataStr, ret))
                 goto done;
             if (tryParseWeiboHotnews(dataStr, ret))
+                goto done;
+            if (tryParseXiaohongshuRecommend(dataStr, ret))
                 goto done;
             if (tryParseXiaohongshuNotify(dataStr, ret))
                 goto done;

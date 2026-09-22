@@ -61,7 +61,9 @@ static uint32_t typeToEmojiCp(const QString& type) {
         || type == kZhihuHotnewsType)      return 0x1F4D8;  // 📘
     if (type == kBiliNotifyType)           return 0x1F4FA;  // 📺
     if (type == kWeiboHotnewsType)         return 0x1F525;  // 🔥
-    if (type == kXiaohongshuNotifyType)    return 0x1F4D5;  // 📕
+    if (type == kXiaohongshuRecommendType) return 0x1F4D5;  // 📕
+    if (type == kXiaohongshuNotifyType)    return 0x1F514;  // 🔔
+    if (type == kXiaohongshuHotnewsType)   return 0x1F4C8;  // 📈
     if (type == kCoolapkTimelineType)      return 0x1F4F1;  // 📱
     if (type == kMisskeyType)              return 0x1F431;  // 🐱
     return 0x1F464;

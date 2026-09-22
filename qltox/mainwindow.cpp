@@ -1461,7 +1461,9 @@ static QString protoStreamEmoji(const QString& type) {
         || type == kZhihuHotnewsType)      return qFromUtf8("📘");
     if (type == kBiliNotifyType)           return qFromUtf8("📺");
     if (type == kWeiboHotnewsType)         return qFromUtf8("🔥");
-    if (type == kXiaohongshuNotifyType)    return qFromUtf8("📕");
+    if (type == kXiaohongshuRecommendType) return qFromUtf8("📕");
+    if (type == kXiaohongshuNotifyType)    return qFromUtf8("🔔");
+    if (type == kXiaohongshuHotnewsType)   return qFromUtf8("📈");
     if (type == kCoolapkTimelineType)      return qFromUtf8("📱");
     if (type == kMisskeyType)              return qFromUtf8("🐱");
     return QString();
