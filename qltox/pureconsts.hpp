@@ -36,6 +36,8 @@ constexpr const char* const kXiaohongshuRecommendType = "xiaohongshu_recommend";
 constexpr int kXiaohongshuRecommendId = -114;                                    // 小红书推荐流保留 id（-114，固定不 hash）
 constexpr const char* const kXiaohongshuHotnewsType = "xiaohongshu_hotnews"; // 小红书热闻订阅流（type == chatId == roomId）
 constexpr int kXiaohongshuHotnewsId = -115;                                // 小红书热闻保留 id（-115，固定不 hash）
+constexpr const char* const kHongguoHotlistType = "hongguo_hotlist";       // 红果热榜订阅流（type == chatId == roomId）
+constexpr int kHongguoHotlistId = -116;                                    // 红果热榜保留 id（-116，固定不 hash）
 constexpr int UnkSize = 0;                                             // 未知大小/未知尺寸哨兵（0 = 未知）
 
 #endif // PURECONSTS_HPP

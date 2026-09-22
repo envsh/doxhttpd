@@ -1610,6 +1610,74 @@ static bool tryParseXiaohongshuHotnews(const std::string& rawStr, ParseResult& r
     return true;
 }
 
+// ── 红果热榜订阅流解析 ──
+// 识别: Value.bits 为红果短剧短剧热榜 JSON（series_id 非空 + url 指向 hongguoduanju.com 短剧详情 + title 非空）
+//   正向互斥：series_id + hongguoduanju.com 为红果独有；小红书/微博/知乎/头条热闻要求 proto_type/proto_id，
+//   且都要求 hot_value/hotlist/ClusterId，均不满足 → 不与 tryParseXiaohongshuHotnews 等冲突。
+//   封面为 novel-pic byteimg 图床（~tplv-shrink:640:0.image 模板），无标注尺寸 → UnkSize。
+
+static bool tryParseHongguoHotlist(const std::string& rawStr, ParseResult& ret) {
+    cJSON* root = cJSON_Parse(rawStr.c_str());
+    if (!root) return false;
+
+    std::string seriesId      = jsonGetString(root, "series_id");
+    std::string title         = jsonGetString(root, "title");
+    std::string url           = jsonGetString(root, "url");
+    if (seriesId.empty() || title.empty() || url.empty()
+        || url.find("hongguoduanju.com") == std::string::npos) {
+        cJSON_Delete(root);
+        return false;
+    }
+    std::string rank = jsonGetString(root, "rank");
+    std::string cover = jsonGetString(root, "cover");
+    std::string episodeCnt = jsonGetString(root, "episode_cnt");
+
+    ContactData cd;
+    cd.id          = kHongguoHotlistId;
+    cd.name        = "红果热榜";
+    cd.type        = kHongguoHotlistType;
+    cd.chatId      = kHongguoHotlistType;
+    cd.status      = "online";
+    cd.isConnected = true;
+    ret.contacts.push_back(cd);
+
+    std::string meta = "热度 " + rank;
+    if (!episodeCnt.empty()) { meta += " · 全 " + episodeCnt + " 集"; }
+
+    HistoryMessage hm;
+    hm.message       = title + "\n" + url + "\n" + meta;
+    hm.sender_pubkey = "fedone";
+    hm.sender_number = 0;
+    hm.direction     = "received";
+    hm.roomId        = kHongguoHotlistType;
+    hm.eventId       = url;
+    if (!cover.empty()) {
+        hm.msgtype    = "image";
+        hm.mediaUrl   = cover;
+        hm.mediaMime  = "image/png";
+        hm.fileSize   = UnkSize;
+        hm.mediaWidth = UnkSize, hm.mediaHeight = UnkSize;
+    } else {
+        hm.msgtype  = "";
+        hm.mediaUrl = "";
+    }
+    ret.messages.push_back(hm);
+
+    PeerInfo pi;
+    pi.publicKey  = "fedone";
+    pi.userName   = "fedone";
+    pi.nickname   = "红果热榜";
+    pi.iconUrl    = cover;
+    pi.peerNumber = 0;
+    ret.peers.push_back(pi);
+
+    ret.senderName = qFromUtf8("红果热榜");
+    ret.handled    = true;
+
+    cJSON_Delete(root);
+    return true;
+}
+
 // ── 酷安时线订阅流解析 ──
 // 识别: Value.data 为酷安 feed JSON（proto_type==news + feedType/uid/username/title 正向特征）
 //   正向互斥：feedType/uid/username 为酷安独有，头条新闻无 → 不与 tryParseToutiaoNews 冲突；
@@ -1899,6 +1967,8 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
             if (tryParseXiaohongshuRecommend(dataStr, ret))
                 goto done;
             if (tryParseXiaohongshuNotify(dataStr, ret))
+                goto done;
+            if (tryParseHongguoHotlist(dataStr, ret))
                 goto done;
         }
         fallbackAsPlainText(valueItem, ret);
