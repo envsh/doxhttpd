@@ -42,6 +42,16 @@ static int64_t jsonGetInt64(cJSON* root, const char* path) {
     return (item && cJSON_IsNumber(item)) ? (int64_t)item->valuedouble : 0;
 }
 
+// jsonGetString 只认字符串；部分订阅流字段是 JSON number（如红果 rank/episode_cnt），
+// 该辅助同时支持字符串与数字。
+static std::string jsonGetStrNum(cJSON* root, const char* path) {
+    cJSON* item = jsonPath(root, path);
+    if (!item) return "";
+    if (cJSON_IsString(item)) { return cJSON_GetStringValue(item); }
+    if (cJSON_IsNumber(item)) { return std::to_string((long long)item->valuedouble); }
+    return "";
+}
+
 // ── Matrix/gomuks sync_complete 解析 ──
 
 static void parseGomuksEvents(cJSON* roomObj, const std::string& roomId, ParseResult& ret) {
@@ -1714,9 +1724,9 @@ static bool tryParseHongguoHotlist(const std::string& rawStr, ParseResult& ret) 
         cJSON_Delete(root);
         return false;
     }
-    std::string rank = jsonGetString(root, "rank");
+    std::string rank = jsonGetStrNum(root, "rank");
     std::string cover = jsonGetString(root, "cover");
-    std::string episodeCnt = jsonGetString(root, "episode_cnt");
+    std::string episodeCnt = jsonGetStrNum(root, "episode_cnt");
 
     ContactData cd;
     cd.id          = kHongguoHotlistId;
@@ -1730,8 +1740,24 @@ static bool tryParseHongguoHotlist(const std::string& rawStr, ParseResult& ret) 
     std::string meta = "热度 " + rank;
     if (!episodeCnt.empty()) { meta += " · 全 " + episodeCnt + " 集"; }
 
+    // tags 数组 → "Tags: #tag1, #tag2, ..." 追加为消息末行
+    std::string tagsLine;
+    cJSON* tagsArr = jsonPath(root, "tags");
+    if (tagsArr && cJSON_IsArray(tagsArr)) {
+        int tagN = cJSON_GetArraySize(tagsArr);
+        for (int i = 0; i < tagN; i++) {
+            cJSON* tagItem = cJSON_GetArrayItem(tagsArr, i);
+            if (!tagItem || !cJSON_IsString(tagItem)) { continue; }
+            std::string tag = cJSON_GetStringValue(tagItem);
+            if (tag.empty()) { continue; }
+            if (!tagsLine.empty()) { tagsLine += ", "; }
+            tagsLine += "#" + tag;
+        }
+    }
+
     HistoryMessage hm;
     hm.message       = title + "\n" + url + "\n" + meta;
+    if (!tagsLine.empty()) { hm.message += "\nTags: " + tagsLine; }
     hm.sender_pubkey = "fedone";
     hm.sender_number = 0;
     hm.direction     = "received";
