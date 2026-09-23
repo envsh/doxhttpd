@@ -745,7 +745,7 @@ void PhotoViewer::onCopy() {
         bool ok = m_origPixmap.save(&buf, "PNG");
         if (!ok) {
             qWarning("PhotoViewer::onCopy: PNG encode failed, mime=%s",
-                     m_origMime.toAscii().data());
+                     qToUtf8(m_origMime).data());
             QMessageBox::warning(this, qFromUtf8("复制失败"),
                                  qFromUtf8("PNG 编码失败，剪贴板已无数据"));
         } else {

@@ -1610,6 +1610,92 @@ static bool tryParseXiaohongshuHotnews(const std::string& rawStr, ParseResult& r
     return true;
 }
 
+// ── 小红书笔记卡片订阅流解析 ──
+// 识别: Value.data 为小红书笔记 JSON（proto_type==xhs_collect，或 note_id+display_title+user.nickname 齐备）
+//   正向互斥：推荐流要求 model_type==note、通知流要求 proto_type==notification、热榜要求 hotlist；
+//   xhs_collect 为收藏/笔记卡片独有 → 不与 tryParseXiaohongshu* 兄弟函数冲突。
+//   封面为 xhscdn 图床 webp，width/height 随附。
+
+static bool tryParseXiaohongshuNote(const std::string& rawStr, ParseResult& ret) {
+    cJSON* root = cJSON_Parse(rawStr.c_str());
+    if (!root) return false;
+
+    std::string protoType = jsonGetString(root, "proto_type");
+    std::string noteId    = jsonGetString(root, "note_id");
+    std::string title     = jsonGetString(root, "display_title");
+    std::string author    = jsonGetString(root, "user.nickname");
+    if (protoType != "xhs_collect"
+            && (noteId.empty() || title.empty() || author.empty())) {
+        cJSON_Delete(root);
+        return false;
+    }
+
+    std::string authorId  = jsonGetString(root, "user.user_id");
+    std::string avatar    = jsonGetString(root, "user.avatar");
+    std::string likes     = jsonGetString(root, "interact_info.liked_count");
+    std::string xsecToken = jsonGetString(root, "xsec_token");
+    std::string coverUrl  = jsonGetString(root, "cover.url");
+    int64_t coverW = jsonGetInt64(root, "cover.width");
+    int64_t coverH = jsonGetInt64(root, "cover.height");
+
+    ContactData cd;
+    cd.id          = kXiaohongshuNoteId;
+    cd.name        = "小红书笔记";
+    cd.type        = kXiaohongshuNoteType;
+    cd.chatId      = kXiaohongshuNoteType;
+    cd.status      = "online";
+    cd.isConnected = true;
+    ret.contacts.push_back(cd);
+
+    std::string url = "https://www.xiaohongshu.com/explore/" + noteId;
+    if (!xsecToken.empty()) {
+        url += "?xsec_token=" + xsecToken;
+    }
+
+    std::string message = title + "\n" + url;
+    std::string meta;
+    if (!author.empty()) { meta += "作者 " + author; }
+    if (!likes.empty())   { meta += std::string(meta.empty() ? "" : " · ") + "点赞 " + likes; }
+    if (!meta.empty())    { message += "\n" + meta; }
+
+    std::string peerId   = authorId.empty() ? "fedone" : authorId;
+    std::string peerNick = author.empty() ? "fedone" : author;
+
+    HistoryMessage hm;
+    hm.message       = message;
+    hm.sender_pubkey = peerId;
+    hm.sender_number = 0;
+    hm.direction     = "received";
+    hm.roomId        = kXiaohongshuNoteType;
+    hm.eventId       = noteId;
+    if (!coverUrl.empty()) {
+        hm.msgtype     = "image";
+        hm.mediaMime   = "image/webp";
+        hm.mediaUrl    = coverUrl;
+        hm.mediaWidth  = (coverW > 0) ? (int)coverW : UnkSize;
+        hm.mediaHeight = (coverH > 0) ? (int)coverH : UnkSize;
+        hm.fileSize    = UnkSize;
+    } else {
+        hm.msgtype  = "";
+        hm.mediaUrl = "";
+    }
+    ret.messages.push_back(hm);
+
+    PeerInfo pi;
+    pi.publicKey  = peerId;
+    pi.userName   = peerId;
+    pi.nickname   = peerNick;
+    pi.iconUrl    = avatar;
+    pi.peerNumber = 0;
+    ret.peers.push_back(pi);
+
+    ret.senderName  = qFromUtf8(peerNick);
+    ret.handled     = true;
+
+    cJSON_Delete(root);
+    return true;
+}
+
 // ── 红果热榜订阅流解析 ──
 // 识别: Value.bits 为红果短剧短剧热榜 JSON（series_id 非空 + url 指向 hongguoduanju.com 短剧详情 + title 非空）
 //   正向互斥：series_id + hongguoduanju.com 为红果独有；小红书/微博/知乎/头条热闻要求 proto_type/proto_id，
@@ -1875,6 +1961,7 @@ static void fallbackAsPlainText(cJSON* valueItem, ParseResult& ret) {
         free(raw);
     }
     extractSender(valueItem, ret);
+    ret.handled = true;
 }
 
 // ── 主流程 ──
@@ -1967,6 +2054,8 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
             if (tryParseXiaohongshuRecommend(dataStr, ret))
                 goto done;
             if (tryParseXiaohongshuNotify(dataStr, ret))
+                goto done;
+            if (tryParseXiaohongshuNote(dataStr, ret))
                 goto done;
             if (tryParseHongguoHotlist(dataStr, ret))
                 goto done;
