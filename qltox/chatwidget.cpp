@@ -61,6 +61,17 @@ QStringList quickReplies() {
     return defaultQuickReplies();
 }
 
+// 截图按钮 tooltip：按平台追加系统截图快捷键
+QString screenshotShortcutHint() {
+#ifdef Q_OS_WIN32
+    return qFromUtf8("屏幕抓图 (Win+Shift+S)");
+#elif defined(Q_OS_MAC) || defined(Q_OS_MACX) || defined(Q_OS_DARWIN)
+    return qFromUtf8("屏幕抓图 (Cmd+Shift+4)");
+#else
+    return qFromUtf8("屏幕抓图 (Shift+PrtSc)");
+#endif
+}
+
 }  // namespace
 
 ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
@@ -242,7 +253,7 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     inputGrid->addWidget(historyBtn, 0, 3);
     screenshotBtn = new EmojiPushButton(qFromUtf8("📷"), this);
     screenshotBtn->setFixedSize(24, 24);
-    qSetToolTip(screenshotBtn, qFromUtf8("屏幕抓图"));
+    qSetToolTip(screenshotBtn, screenshotShortcutHint());
     inputGrid->addWidget(screenshotBtn, 1, 3);
     sendBtn = new QPushButton(_("buttons.send"), this);
     QFontMetrics fm = inputEdit->fontMetrics();
@@ -283,7 +294,7 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     inputGrid->addWidget(historyBtn, 0, 3);
     screenshotBtn = new EmojiPushButton(qFromUtf8("📷"), this);
     screenshotBtn->setFixedSize(24, 24);
-    qSetToolTip(screenshotBtn, qFromUtf8("屏幕抓图"));
+    qSetToolTip(screenshotBtn, screenshotShortcutHint());
     inputGrid->addWidget(screenshotBtn, 1, 3);
     sendBtn = new QPushButton(_("buttons.send"), this);
     QFontMetrics fm = inputEdit->fontMetrics();
