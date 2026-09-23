@@ -2,6 +2,7 @@
 #include "pureconsts.hpp"
 #include "cJSON.h"
 #include "compatcore34.h"
+#include "tagutil.h"
 #include <dlfcn.h>
 #include <ctime>
 #include <cstdlib>
@@ -1740,20 +1741,18 @@ static bool tryParseHongguoHotlist(const std::string& rawStr, ParseResult& ret) 
     std::string meta = "热度 " + rank;
     if (!episodeCnt.empty()) { meta += " · 全 " + episodeCnt + " 集"; }
 
-    // tags 数组 → "Tags: #tag1, #tag2, ..." 追加为消息末行
-    std::string tagsLine;
+    // tags 数组 → TagUtil::format 得 "#tag1, #tag2, ..."，追加为消息末行
+    std::vector<std::string> rawTags;
     cJSON* tagsArr = jsonPath(root, "tags");
     if (tagsArr && cJSON_IsArray(tagsArr)) {
         int tagN = cJSON_GetArraySize(tagsArr);
         for (int i = 0; i < tagN; i++) {
             cJSON* tagItem = cJSON_GetArrayItem(tagsArr, i);
             if (!tagItem || !cJSON_IsString(tagItem)) { continue; }
-            std::string tag = cJSON_GetStringValue(tagItem);
-            if (tag.empty()) { continue; }
-            if (!tagsLine.empty()) { tagsLine += ", "; }
-            tagsLine += "#" + tag;
+            rawTags.push_back(cJSON_GetStringValue(tagItem));
         }
     }
+    std::string tagsLine = TagUtil::format(rawTags);
 
     HistoryMessage hm;
     hm.message       = title + "\n" + url + "\n" + meta;
