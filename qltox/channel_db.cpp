@@ -1,4 +1,5 @@
 #include "channel_db.h"
+#include "tagutil.h"
 
 namespace {
 
@@ -373,6 +374,41 @@ public:
         return stmt.step();
     }
 
+    std::vector<std::string> get_channel_tags(const char* chanid) override {
+        auto _ = m_conn->get();
+        std::vector<std::string> out;
+        auto stmt = _->prepare(
+            "SELECT tag FROM channel_tags "
+            "WHERE chanid=?1 ORDER BY seq ASC");
+        if (!stmt.isPrepared()) { return out; }
+        if (!stmt.bind(1, chanid)) { return out; }
+        while (stmt.stepRow()) { out.push_back(stmt.columnText(0)); }
+        return out;
+    }
+
+    bool set_channel_tags(const char* chanid, const char* tags) override {
+        auto _ = m_conn->get();
+        std::vector<std::string> list = TagUtil::splitTags(tags ? tags : "");
+        TagUtil::dedupTags(list);
+        if (!_->beginTransaction()) { return false; }
+        {
+            auto del = _->prepare("DELETE FROM channel_tags WHERE chanid=?1");
+            if (!del.bind(1, chanid) || !del.step()) {
+                _->rollbackTransaction(); return false;
+            }
+        }
+        for (size_t i = 0; i < list.size(); i++) {
+            auto ins = _->prepare(
+                "INSERT INTO channel_tags (chanid,tag,seq)"
+                " VALUES (?1,?2,?3)");
+            if (!ins.bind(1, chanid) || !ins.bind(2, list[i].c_str())
+                || !ins.bind(3, (int64_t)i) || !ins.step()) {
+                _->rollbackTransaction(); return false;
+            }
+        }
+        return _->commitTransaction();
+    }
+
     bool increment_unread(const char* chanid, int delta,
                           int64_t msgRowid = 0) override {
         auto _ = m_conn->get();
@@ -554,6 +590,24 @@ public:
         });
     }
 
+    void set_channel_tags(std::string chanid, std::string tags,
+                          std::function<void(bool)> done) override {
+        auto sync = m_sync;
+        post([sync, chanid, tags, done]() {
+            bool ok = sync->get().set_channel_tags(chanid.c_str(), tags.c_str());
+            if (done) { done(ok); }
+        });
+    }
+
+    void get_channel_tags(std::string chanid,
+                          std::function<void(std::vector<std::string>)> done) override {
+        auto sync = m_sync;
+        post([sync, chanid, done]() {
+            auto rows = sync->get().get_channel_tags(chanid.c_str());
+            if (done) { done(std::move(rows)); }
+        });
+    }
+
     void increment_unread(std::string chanid, int delta, int64_t msgRowid,
                           std::function<void(bool)> done) override {
         auto sync = m_sync;
@@ -640,10 +694,21 @@ bool init_channel_db(SqliteDb& db) {
         "  updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
         "  PRIMARY KEY (chanid, peer_number)"
         ")");
+    // 联系人 tags 规范化子表（镜像 message_tags，独立于 channels 原表）
+    ok = ok && db.exec(
+        "CREATE TABLE IF NOT EXISTS channel_tags ("
+        "  chanid  TEXT NOT NULL REFERENCES channels(chanid) ON DELETE CASCADE,"
+        "  tag     TEXT NOT NULL,"
+        "  seq     INTEGER NOT NULL DEFAULT 0,"
+        "  PRIMARY KEY (chanid, tag)"
+        ")");
+    ok = ok && db.exec("CREATE INDEX IF NOT EXISTS idx_channel_tags_chanid"
+                       "  ON channel_tags(chanid, seq)");
     return ok;
 }
 
 bool drop_channel_db(SqliteDb& db) {
     return db.exec("DROP TABLE IF EXISTS channels") &&
+           db.exec("DROP TABLE IF EXISTS channel_tags") &&
            db.exec("DROP TABLE IF EXISTS peers");
 }

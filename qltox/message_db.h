@@ -109,6 +109,9 @@ public:
                                  const char* sender) = 0;
     virtual std::vector<ReactionRow> get_reactions(int64_t msg_rowid) = 0;
 
+    virtual bool set_message_tags(int64_t rowid, const char* tags) = 0;
+    virtual std::vector<std::string> get_message_tags(int64_t rowid) = 0;
+
     virtual bool set_translation(const TranslationRow& row) = 0;
     virtual std::unique_ptr<TranslationRow> get_translation(
         int64_t msg_rowid, const char* lang) = 0;
@@ -165,6 +168,10 @@ public:
                                  std::function<void(bool)> done) = 0;
     virtual void get_reactions(int64_t msg_rowid,
                                std::function<void(std::vector<ReactionRow>)> done) = 0;
+    virtual void set_message_tags(int64_t rowid, std::string tags,
+                                  std::function<void(bool)> done) = 0;
+    virtual void get_message_tags(int64_t rowid,
+                                  std::function<void(std::vector<std::string>)> done) = 0;
     virtual void set_translation(TranslationRow row,
                                  std::function<void(bool)> done) = 0;
     virtual void get_translation(int64_t msg_rowid, std::string lang,

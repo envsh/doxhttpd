@@ -69,6 +69,8 @@ public:
 
     virtual bool add_contact_channel(const ChannelRow& row) = 0;
     virtual bool update_contact_channel(const ChannelRow& row) = 0;
+    virtual bool set_channel_tags(const char* chanid, const char* tags) = 0;
+    virtual std::vector<std::string> get_channel_tags(const char* chanid) = 0;
     virtual bool increment_unread(const char* chanid, int delta,
                                   int64_t msgRowid = 0) = 0;
     virtual bool mark_read(const char* chanid, int64_t lastReadRowid) = 0;
@@ -109,6 +111,10 @@ public:
         std::function<void(std::vector<ChannelRow>)> done) = 0;
     virtual void add_contact_channel(ChannelRow row, std::function<void(bool)> done) = 0;
     virtual void update_contact_channel(ChannelRow row, std::function<void(bool)> done) = 0;
+    virtual void set_channel_tags(std::string chanid, std::string tags,
+                                  std::function<void(bool)> done) = 0;
+    virtual void get_channel_tags(std::string chanid,
+                                  std::function<void(std::vector<std::string>)> done) = 0;
     virtual void increment_unread(std::string chanid, int delta, int64_t msgRowid,
                                   std::function<void(bool)> done) = 0;
     virtual void mark_read(std::string chanid, int64_t lastReadRowid,

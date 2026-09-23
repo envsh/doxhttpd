@@ -1,5 +1,6 @@
 #include "message_db.h"
 #include <algorithm>
+#include "tagutil.h"
 
 namespace {
 
@@ -425,6 +426,41 @@ row->relates_to_rowid = stmt.columnInt64(i++);
         return true;
     }
 
+    bool set_message_tags(int64_t rowid, const char* tags) override {
+        auto _ = m_conn->get();
+        std::vector<std::string> list = TagUtil::splitTags(tags ? tags : "");
+        TagUtil::dedupTags(list);
+        if (!_->beginTransaction()) { return false; }
+        {
+            auto del = _->prepare("DELETE FROM message_tags WHERE message_rowid=?1");
+            if (!del.bind(1, rowid) || !del.step()) {
+                _->rollbackTransaction(); return false;
+            }
+        }
+        for (size_t i = 0; i < list.size(); i++) {
+            auto ins = _->prepare(
+                "INSERT INTO message_tags (message_rowid,tag,seq)"
+                " VALUES (?1,?2,?3)");
+            if (!ins.bind(1, rowid) || !ins.bind(2, list[i].c_str())
+                || !ins.bind(3, (int64_t)i) || !ins.step()) {
+                _->rollbackTransaction(); return false;
+            }
+        }
+        return _->commitTransaction();
+    }
+
+    std::vector<std::string> get_message_tags(int64_t rowid) override {
+        auto _ = m_conn->get();
+        std::vector<std::string> out;
+        auto stmt = _->prepare(
+            "SELECT tag FROM message_tags "
+            "WHERE message_rowid=?1 ORDER BY seq ASC");
+        if (!stmt.isPrepared()) { return out; }
+        if (!stmt.bind(1, rowid)) { return out; }
+        while (stmt.stepRow()) { out.push_back(stmt.columnText(0)); }
+        return out;
+    }
+
     bool begin_write_transaction() override { auto _ = m_conn->get(); return _->beginTransaction(); }
     bool commit_transaction() override { auto _ = m_conn->get(); return _->commitTransaction(); }
 
@@ -611,6 +647,24 @@ public:
         auto sync = m_sync;
         post([sync, msg_rowid, done]() {
             auto rows = sync->get().get_reactions(msg_rowid);
+            if (done) { done(std::move(rows)); }
+        });
+    }
+
+    void set_message_tags(int64_t rowid, std::string tags,
+                          std::function<void(bool)> done) override {
+        auto sync = m_sync;
+        post([sync, rowid, tags, done]() {
+            bool ok = sync->get().set_message_tags(rowid, tags.c_str());
+            if (done) { done(ok); }
+        });
+    }
+
+    void get_message_tags(int64_t rowid,
+                          std::function<void(std::vector<std::string>)> done) override {
+        auto sync = m_sync;
+        post([sync, rowid, done]() {
+            auto rows = sync->get().get_message_tags(rowid);
             if (done) { done(std::move(rows)); }
         });
     }
@@ -829,6 +883,18 @@ bool init_message_db(SqliteDb& db) {
         "  UNIQUE(message_rowid)"
         ")")) { return false; }
 
+    // 消息 tags 规范化子表（对标 Telegram/Tigase junction 设计）；
+    // seq 保插入顺序；ON DELETE CASCADE 与 translations 同位（FK pragma 已开启）
+    if (!db.exec(
+        "CREATE TABLE IF NOT EXISTS message_tags ("
+        "  message_rowid INTEGER NOT NULL REFERENCES messages(rowid) ON DELETE CASCADE,"
+        "  tag           TEXT NOT NULL,"
+        "  seq           INTEGER NOT NULL DEFAULT 0,"
+        "  PRIMARY KEY (message_rowid, tag)"
+        ")")) { return false; }
+    db.exec("CREATE INDEX IF NOT EXISTS idx_message_tags_message"
+            "  ON message_tags(message_rowid, seq)");
+
     // FTS — try trigram first, fallback to unicode61
     if (!db.tryExec(
         "CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5("
@@ -877,6 +943,7 @@ bool drop_message_db(SqliteDb& db) {
     db.exec("DROP TABLE IF EXISTS bookmarks");
     db.exec("DROP TABLE IF EXISTS translations");
     db.exec("DROP TABLE IF EXISTS reactions");
+    db.exec("DROP TABLE IF EXISTS message_tags");
     db.exec("DROP TABLE IF EXISTS messages");
     return true;
 }
