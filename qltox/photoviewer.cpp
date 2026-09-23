@@ -511,6 +511,11 @@ void PhotoViewer::updateStatus() {
     if (!m_origData.isEmpty()) {
         s += qFromUtf8("  |  原图: ") + humanBytes(m_origData.size());
     }
+    if (!m_origMime.isEmpty()) {
+        s += qFromUtf8("  |  MIME: ") + m_origMime;
+    } else {
+        s += qFromUtf8("  |  MIME: ?");   // 魔数不可识别（如无 origData）
+    }
     if (m_canvas->showHelp()) {
         s += qFromUtf8("  |  [?]");
     }
@@ -650,15 +655,38 @@ QString PhotoViewer::defaultPhotoName() const {
 
 void PhotoViewer::onSave() {
     QString startDir = qGetHomePath() + "/" + defaultPhotoName();
+    // mac NSSavePanel 会按过滤器第一个类型补回显示时被隐藏的扩展名；
+    // 原图是 JPEG 时把 *.jpg 放首位，避免面板默认补成 *.png 导致转码成 PNG
+    QString imageFilter = (m_origMime == "image/jpeg")
+        ? qFromUtf8("Images (*.jpg *.png)")
+        : qFromUtf8("Images (*.png *.jpg)");
 #ifdef QT3_BUILD
     QString path = QFileDialog::getSaveFileName(
-        startDir, qFromUtf8("Images (*.png *.jpg)"), this);
+        startDir, imageFilter, this);
 #else
     QString path = QFileDialog::getSaveFileName(
         this, qFromUtf8("保存图片"), startDir,
-        qFromUtf8("Images (*.png *.jpg)"));
+        imageFilter);
 #endif
     if (path.isEmpty()) { return; }
+
+    // mac 原生 NSSavePanel 显示时隐藏扩展名，个别返回路径可能缺后缀；
+    // 这里确保写盘文件名一定带正确扩展名（jpeg 用 .jpg，其余 .png），
+    // 并与下方"扩展名匹配则原文直写"逻辑衔接。
+    {
+        QString lower;
+#ifdef QT3_BUILD
+        lower = path.lower();
+#else
+        lower = path.toLower();
+#endif
+        bool hasExt = lower.endsWith(".png")
+            || lower.endsWith(".jpg") || lower.endsWith(".jpeg");
+        if (!hasExt) {
+            path += (m_origMime == "image/jpeg")
+                ? QString(".jpg") : QString(".png");
+        }
+    }
 
     // 与剪贴板同策略：扩展名与原格式一致时直接写原始字节，零重编码
     // （300KB 原图保存后仍是 300KB）
@@ -735,7 +763,7 @@ void PhotoViewer::onCopy() {
         if (!ok) {
             qWarning("PhotoViewer::onCopy: PNG encode failed for JPEG fallback");
             QMessageBox::warning(this, qFromUtf8("复制失败"),
-                                 qFromUtf8("生成像素数据失败，仅可粘贴到支持 JPEG 的目标"));
+                                 qFromUtf8("生成像素数据失败"));
         } else {
             md->setData("image/png", buf.buffer());
         }
@@ -752,6 +780,10 @@ void PhotoViewer::onCopy() {
             md->setData("image/png", buf.buffer());
         }
     }
+    // 像素兜底：macOS Cocoa 的 NSPasteboard 需要 TIFF/pixel 类型才可被目标应用粘贴；
+    // 仅自定义 image/png|image/jpeg 字节时 mac 上粘贴为空。加回 setImageData
+    // （副作用：粘贴端在 mac 拿到的可能是 TIFF，体积大于原图，但保证可粘贴）。
+    md->setImageData(m_origPixmap.toImage());
     QApplication::clipboard()->setMimeData(md);               // 所有权移交剪贴板
 #endif
     if (m_statusLabel) { m_statusLabel->setText(qFromUtf8("已复制到剪贴板")); }
