@@ -678,6 +678,7 @@ void PhotoViewer::onSave() {
 #else
         if (!f.open(QIODevice::WriteOnly)) {
 #endif
+            qWarning("PhotoViewer::onSave: open failed: %s", qToUtf8(path).data());
             QMessageBox::warning(this, qFromUtf8("保存失败"), path);
             return;
         }
@@ -687,6 +688,7 @@ void PhotoViewer::onSave() {
         f.write(m_origData.constData(), m_origData.size());
 #endif
         f.close();
+        if (m_statusLabel) { m_statusLabel->setText(qFromUtf8("已保存: ") + path); }
         return;
     }
 
@@ -700,7 +702,10 @@ void PhotoViewer::onSave() {
     ok = m_origPixmap.save(path);          // Qt4 按扩展名自动识别
 #endif
     if (!ok) {
+        qWarning("PhotoViewer::onSave: transc save failed: %s", qToUtf8(path).data());
         QMessageBox::warning(this, qFromUtf8("保存失败"), path);
+    } else if (m_statusLabel) {
+        m_statusLabel->setText(qFromUtf8("已保存: ") + path);
     }
 }
 
@@ -715,18 +720,41 @@ void PhotoViewer::onCopy() {
                             m_origPixmap.convertToImage()));  // 所有权移交剪贴板
 #else
     QMimeData* md = new QMimeData();
-    if (m_origMime == "image/png" || m_origMime == "image/jpeg") {
-        // 原始字节直通；不再 setImageData，否则 X11 剪贴板多出重编码 image/png
-        // 目标——粘贴端优先选它，JPEG 解压→PNG 重编码体积放大约 10 倍
-        md->setData(m_origMime, m_origData);
+    if (m_origMime == "image/png") {
+        // 原始字节直通，零重编码（主场景，体积与原文一致）
+        md->setData("image/png", m_origData);
+    } else if (m_origMime == "image/jpeg") {
+        // 原始字节直通 + 一次性 PNG 像素兜底：仅 image/jpeg 一个目标时，
+        // X11 上不认 jpeg 剪贴板的粘贴端什么都拿不到（复制失效回归的根因）。
+        // 拷贝点击时编码一次（等效旧 setImageData 成本），不复活
+        // "SelectionRequest 期重编码"的 CPU 100% 老 bug。
+        md->setData("image/jpeg", m_origData);
+        QBuffer buf;
+        buf.open(QIODevice::WriteOnly);
+        bool ok = m_origPixmap.save(&buf, "PNG");
+        if (!ok) {
+            qWarning("PhotoViewer::onCopy: PNG encode failed for JPEG fallback");
+            QMessageBox::warning(this, qFromUtf8("复制失败"),
+                                 qFromUtf8("生成像素数据失败，仅可粘贴到支持 JPEG 的目标"));
+        } else {
+            md->setData("image/png", buf.buffer());
+        }
     } else {
         QBuffer buf;                                          // webp/空：转 PNG 一次
         buf.open(QIODevice::WriteOnly);
-        m_origPixmap.save(&buf, "PNG");
-        md->setData("image/png", buf.buffer());
+        bool ok = m_origPixmap.save(&buf, "PNG");
+        if (!ok) {
+            qWarning("PhotoViewer::onCopy: PNG encode failed, mime=%s",
+                     m_origMime.toAscii().data());
+            QMessageBox::warning(this, qFromUtf8("复制失败"),
+                                 qFromUtf8("PNG 编码失败，剪贴板已无数据"));
+        } else {
+            md->setData("image/png", buf.buffer());
+        }
     }
     QApplication::clipboard()->setMimeData(md);               // 所有权移交剪贴板
 #endif
+    if (m_statusLabel) { m_statusLabel->setText(qFromUtf8("已复制到剪贴板")); }
 }
 
 void PhotoViewer::onZoomIn() {
