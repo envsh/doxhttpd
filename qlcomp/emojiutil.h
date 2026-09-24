@@ -31,7 +31,7 @@ private:
     void* m_face;
     bool m_ok;
     std::string m_fontPath;
-    std::map<uint32_t, QPixmap> m_cache;
+    std::map<uint64_t, QPixmap> m_cache;
 };
 #endif
 

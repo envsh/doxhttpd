@@ -301,12 +301,22 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     int twoLineH = fm.lineSpacing() * 2 + fm.lineSpacing() / 2 + 6;
     inputEdit->setMaximumHeight(twoLineH);
     sendBtn->setFixedSize(twoLineH, twoLineH);
+    sendBtn->setAttribute(Qt::WA_LayoutUsesWidgetRect, true);
     inputGrid->addWidget(sendBtn, 0, 4, 2, 1);
     inputGrid->setColumnStretch(0, 1);
+
+    inputGrid->setColumnMinimumWidth(1, 24);
+    inputGrid->setColumnMinimumWidth(2, 24);
+    inputGrid->setColumnMinimumWidth(3, 24);
+    inputGrid->setRowMinimumHeight(0, 24);
+    inputGrid->setRowMinimumHeight(1, 24);
+    inputGrid->setRowMinimumHeight(0, 24);
+    inputGrid->setRowMinimumHeight(1, 24);
 
     m_sendEnBtn = new QPushButton("Send EN", this);
     m_sendEnBtn->setFixedWidth(60);
     m_sendEnBtn->setFixedHeight(twoLineH);
+    m_sendEnBtn->setAttribute(Qt::WA_LayoutUsesWidgetRect, true);
     inputGrid->addWidget(m_sendEnBtn, 0, 5, 2, 1);
 #endif
 

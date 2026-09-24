@@ -141,7 +141,8 @@ EmojiRenderer& EmojiRenderer::instance() {
 }
 
 QPixmap EmojiRenderer::loadEmoji(uint32_t codepoint, int size) {
-    auto it = m_cache.find(codepoint);
+    uint64_t key = ((uint64_t)codepoint << 32) | (uint32_t)size;
+    auto it = m_cache.find(key);
     if (it != m_cache.end()) { return it->second; }
 
     QPixmap pm;
@@ -163,7 +164,7 @@ QPixmap EmojiRenderer::loadEmoji(uint32_t codepoint, int size) {
 
     if (FT_Load_Char(face, codepoint, FT_LOAD_COLOR) != 0) {
         fprintf(stderr, "EmojiRenderer: FT_Load_Char failed for U+%04X\n", codepoint);
-        m_cache[codepoint] = pm;
+        m_cache[key] = pm;
         return pm;
     }
 
@@ -181,7 +182,7 @@ QPixmap EmojiRenderer::loadEmoji(uint32_t codepoint, int size) {
 #endif
     }
 
-    m_cache[codepoint] = pm;
+    m_cache[key] = pm;
     return pm;
 }
 
@@ -222,17 +223,22 @@ void EmojiRenderer::drawText(QPainter& p, const QRect& textRect, const QString& 
             if (text[i] == QChar('\n')) { hasNewline = true; break; }
         }
         if (!hasNewline && text.length() <= 8) {
-            setupEmojiFallbackFont(p);
-            QFontMetrics fm = p.fontMetrics();
-            int tw = fm.width(text);
-            int th = fm.height();
-            if (tw > textRect.width()) { tw = textRect.width(); }
-            if (th > textRect.height()) { th = textRect.height(); }
-            int cx = textRect.x() + (textRect.width() - tw) / 2;
-            int cy = textRect.y() + (textRect.height() - th) / 2;
-            QRect cr(cx, cy, tw, th);
-            p.drawText(cr, Qt::AlignLeft | Qt::AlignTop, text);
-            return;
+            if (setupEmojiFallbackFont(p)) {
+                QFont f = p.font();
+                int fs = emojiSize > 0 ? emojiSize
+                                       : (textRect.width() < textRect.height()
+                                              ? textRect.width() : textRect.height());
+                if (fs < 8) { fs = 8; }
+                if (fs > 64) { fs = 64; }
+                f.setPixelSize(fs);
+                p.setFont(f);
+#ifdef QT3_BUILD
+                p.drawText(textRect, Qt::AlignCenter | Qt::DontClip, text);
+#else
+                p.drawText(textRect, Qt::AlignCenter | Qt::TextDontClip, text);
+#endif
+                return;
+            }
         }
 #ifdef QT3_BUILD
         p.drawText(textRect, Qt::WordBreak | Qt::AlignLeft | Qt::AlignTop, text);
