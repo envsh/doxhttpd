@@ -1,4 +1,3 @@
-#include <stdio.h>
 #include "emojiwidgets.h"
 #include "emojiutil.h"
 
@@ -61,13 +60,17 @@ void EmojiPushButton::setText(const QString& text) {
 #include <qstyle.h>
 
 EmojiPushButton::EmojiPushButton(QWidget* parent, const char* name)
-    : QPushButton(parent, name) { setText(QString()); }
+    : QPushButton(parent, name), m_emojiInset(0) { setText(QString()); }
 EmojiPushButton::EmojiPushButton(const QString& text, QWidget* parent, const char* name)
-    : QPushButton(parent, name) { setText(text); }
+    : QPushButton(parent, name), m_emojiInset(0) { setText(text); }
 
 void EmojiPushButton::drawButtonLabel(QPainter* p) {
     if (!m_emojiText.isEmpty()) {
         QRect cr = rect();
+        if (m_emojiInset > 0) {
+            cr.addCoords(m_emojiInset, m_emojiInset, -m_emojiInset, -m_emojiInset);
+            if (cr.width() < 4 || cr.height() < 4) { cr = rect(); }
+        }
         QFont f = p->font();
         int px = cr.width() < cr.height() ? cr.width() : cr.height();
         if (px > 64) { px = 64; }
@@ -83,12 +86,6 @@ void EmojiPushButton::drawButtonLabel(QPainter* p) {
         QRect tr(cr.x() + (cr.width() - ew) / 2,
                  cr.y(), ew, cr.height());
         EmojiRenderer::instance().drawText(*p, tr, m_emojiText, es);
-        static int s_gdb = 0;
-        if (s_gdb < 6) {
-            s_gdb++;
-            fprintf(stderr, "EmojiBtn n=%d geo=%dx%d@%d,%d cr=%dx%d es=%d\n",
-                    s_gdb, width(), height(), x(), y(), cr.width(), cr.height(), es);
-        }
         return;
     }
     QPushButton::drawButtonLabel(p);
@@ -96,12 +93,12 @@ void EmojiPushButton::drawButtonLabel(QPainter* p) {
 
 #else
 
-EmojiPushButton::EmojiPushButton(QWidget* parent) : QPushButton(parent) {
+EmojiPushButton::EmojiPushButton(QWidget* parent) : QPushButton(parent), m_emojiInset(0) {
     setAttribute(Qt::WA_LayoutUsesWidgetRect, true);
     setText(QString());
 }
 EmojiPushButton::EmojiPushButton(const QString& text, QWidget* parent)
-    : QPushButton(parent) {
+    : QPushButton(parent), m_emojiInset(0) {
     setAttribute(Qt::WA_LayoutUsesWidgetRect, true);
     setText(text);
 }
@@ -114,6 +111,10 @@ void EmojiPushButton::paintEvent(QPaintEvent* event) {
     opt.text = QString();
     style()->drawControl(QStyle::CE_PushButton, &opt, &p, this);
     QRect cr = contentsRect();
+    if (m_emojiInset > 0) {
+        cr.adjust(m_emojiInset, m_emojiInset, -m_emojiInset, -m_emojiInset);
+        if (cr.width() < 4 || cr.height() < 4) { cr = contentsRect(); }
+    }
     QFont f = p.font();
     int px = cr.width() < cr.height() ? cr.width() : cr.height();
     if (px > 64) { px = 64; }
@@ -129,12 +130,6 @@ void EmojiPushButton::paintEvent(QPaintEvent* event) {
     QRect tr(cr.x() + (cr.width() - ew) / 2,
              cr.y(), ew, cr.height());
     EmojiRenderer::instance().drawText(p, tr, m_emojiText, es);
-    static int s_gdb = 0;
-    if (s_gdb < 6) {
-        s_gdb++;
-        fprintf(stderr, "EmojiBtn n=%d geo=%dx%d@%d,%d cr=%dx%d es=%d\n",
-                s_gdb, width(), height(), x(), y(), cr.width(), cr.height(), es);
-    }
 }
 
 #endif

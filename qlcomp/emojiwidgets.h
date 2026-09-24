@@ -43,6 +43,7 @@ public:
 #endif
     void setText(const QString& text);
     QString text() const;
+    void setEmojiInset(int px) { m_emojiInset = px > 0 ? px : 0; }
 protected:
 #ifdef QT3_BUILD
     void drawButtonLabel(QPainter* p);
@@ -51,6 +52,7 @@ protected:
 #endif
 private:
     QString m_emojiText;
+    int m_emojiInset;
 };
 
 class EmojiToolButton : public QToolButton {

@@ -58,6 +58,7 @@ SelfInfoWidget::SelfInfoWidget(QWidget* parent) : QWidget(parent), selfAddress("
     
     copyBtn = new EmojiPushButton(qFromUtf8("📋"), this);
     copyBtn->setFixedSize(50, 25);
+    copyBtn->setEmojiInset(3);
     connect(copyBtn, SIGNAL(clicked()), this, SLOT(onCopyAddress()));
     addrLayout->addWidget(copyBtn);
     mainLayout->addLayout(addrLayout);
