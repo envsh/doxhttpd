@@ -42,6 +42,7 @@ class SharedStatusBar : public QWidget
     Q_OBJECT
 public:
     static SharedStatusBar *instance();
+    static bool instanceExists();
 
     void showMessage(const QString &msg, int timeout = 0);
     void clearMessage();

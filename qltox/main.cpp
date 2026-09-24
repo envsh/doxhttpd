@@ -11,6 +11,8 @@
 #include "config.h"
 #include "version.h"
 #include "translation_cache.h"
+#include "globaluiutil.h"
+#include "sharedstatusbar.h"
 #include <stdio.h>
 #include <string.h>
 #ifdef __linux__
@@ -20,6 +22,14 @@
 // 读取保存的语言设置（从 config.json）
 static QString loadSavedLanguage() {
     return Config::value("uilang");
+}
+
+// 封装 SharedStatusBar 显示消息：历史记录 + 底部状态栏展示。
+// 未开启 SharedStatusBar（s_instance 未创建）时静默忽略。
+void stbarShowStatusMessage(const QString &msg, int timeout)
+{
+    if (!SharedStatusBar::instanceExists()) { return; }
+    SharedStatusBar::instance()->showMessage(msg, timeout);
 }
 
 

@@ -124,6 +124,11 @@ SharedStatusBar *SharedStatusBar::instance()
     return s_instance;
 }
 
+bool SharedStatusBar::instanceExists()
+{
+    return s_instance != nullptr;
+}
+
 void SharedStatusBar::showMessage(const QString &msg, int timeout)
 {
     if (!msg.isEmpty()) {
