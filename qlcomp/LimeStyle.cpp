@@ -977,7 +977,9 @@ void LimeStyle::drawControl(ControlElement ce, QPainter *p,
     }
     case CE_PopupMenuItem: {
         if (const QMenuItem* mi = opt.menuItem()) {
-            bool selected = (flags & Style_Selected);
+            // Qt3 QPopupMenu 悬停/键盘选中的项由 drawItem 传 Style_Active（fork
+            // qpopupmenu.cpp:1491），只查 Style_Selected 会导致所有菜单无悬停高亮
+            bool selected = (flags & Style_Active) || (flags & Style_Selected);
             bool disabled = !(flags & Style_Enabled);
             QString text = mi->text();
             bool isSep = mi->isSeparator();
