@@ -21,6 +21,7 @@ class EmojiRenderer {
 public:
     static EmojiRenderer& instance();
     void drawText(QPainter& p, const QRect& textRect, const QString& text);
+    void drawText(QPainter& p, const QRect& textRect, const QString& text, int emojiSize);
     QPixmap renderEmoji(uint32_t codepoint, int size);
 private:
     EmojiRenderer();

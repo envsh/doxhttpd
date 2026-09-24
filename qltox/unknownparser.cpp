@@ -1728,7 +1728,19 @@ static bool tryParseHongguoHotlist(const std::string& rawStr, ParseResult& ret) 
     std::string rank = jsonGetStrNum(root, "rank");
     std::string cover = jsonGetString(root, "cover");
     std::string episodeCnt = jsonGetStrNum(root, "episode_cnt");
-
+    std::string avatar = jsonGetString(root, "userAvatar");
+    if (avatar.empty()) {
+        avatar = jsonGetString(root, "userInfo.userAvatar");
+    }
+    if (avatar.empty()) {
+		// 看短剧
+        avatar = "https://img.utdstc.com/icon/9dc/a99/9dca996e59e2f2bef0fa99c195774a2266e994c4cc98faae03eef6b7aef9e94e:200";
+        // 热门短剧,webp
+        avatar = "https://tse1.mm.bing.net/th/id/OIP.Ca0bhQJAdDFLzqE6wejuJAHaHa?r=0&rs=1&pid=ImgDetMain&o=7&rm=3";
+        // 热门短剧,jpg
+        avatar = "https://is1-ssl.mzstatic.com/image/thumb/Purple211/v4/f2/8e/91/f28e91e3-a2e7-14de-1950-517cb6fed7b5/AppIcon-0-0-1x_U007emarketing-0-8-0-85-220.png/512x512bb.jpg";
+    }
+    
     ContactData cd;
     cd.id          = kHongguoHotlistId;
     cd.name        = "红果热榜";
@@ -1778,7 +1790,7 @@ static bool tryParseHongguoHotlist(const std::string& rawStr, ParseResult& ret) 
     pi.publicKey  = "fedone";
     pi.userName   = "fedone";
     pi.nickname   = "红果热榜";
-    pi.iconUrl    = cover;
+    pi.iconUrl    = avatar;
     pi.peerNumber = 0;
     ret.peers.push_back(pi);
 

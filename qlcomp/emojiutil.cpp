@@ -4,8 +4,10 @@
 #ifdef EMOJI_RENDER_QT34
 #ifdef QT3_BUILD
 #include <qimage.h>
+#include <qfontinfo.h>
 #else
 #include <QImage>
+#include <QFontInfo>
 #endif
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -69,6 +71,17 @@ bool textHasEmoji(const QString& text) {
 
 #ifdef EMOJI_RENDER_QT34
 
+static QPixmap scalePixmap(const QPixmap& pm, int w, int h) {
+#ifdef QT3_BUILD
+    QImage img = pm.convertToImage().smoothScale(w, h);
+    QPixmap out;
+    out.convertFromImage(img);
+    return out;
+#else
+    return pm.scaled(w, h, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+#endif
+}
+
 static QPixmap rawBytesToQPixmap(const unsigned char* bgra, int w, int h) {
 #ifdef QT3_BUILD
     QImage img(w, h, 32);
@@ -99,6 +112,8 @@ EmojiRenderer::EmojiRenderer() : m_lib(0), m_face(0), m_ok(false) {
     }
     fprintf(stderr, "EmojiRenderer: FT_Init_FreeType OK\n");
     const char* paths[] = {
+        "/System/Library/Fonts/Apple Color Emoji.ttc",
+        "/Library/Fonts/Apple Color Emoji.ttc",
         "/usr/share/fonts/twemoji/twemoji.ttf",
         "/usr/share/fonts/noto/NotoColorEmoji.ttf",
         0
@@ -175,8 +190,50 @@ QPixmap EmojiRenderer::renderEmoji(uint32_t codepoint, int size) {
     return loadEmoji(codepoint, size);
 }
 
+static bool setupEmojiFallbackFont(QPainter& p) {
+    static const char* fams[] = {
+        "Apple Color Emoji",
+        "Noto Color Emoji",
+        "Noto Emoji",
+        "Segoe UI Emoji",
+        "Twemoji Mozilla",
+        0
+    };
+    QFont base = p.font();
+    for (int i = 0; fams[i]; i++) {
+        QFont f = base;
+        f.setFamily(qFromUtf8(fams[i]));
+        QFontInfo info(f);
+        if (info.family() != qFromUtf8(fams[i])) { continue; }
+        p.setFont(f);
+        return true;
+    }
+    return false;
+}
+
 void EmojiRenderer::drawText(QPainter& p, const QRect& textRect, const QString& text) {
+    drawText(p, textRect, text, 0);
+}
+
+void EmojiRenderer::drawText(QPainter& p, const QRect& textRect, const QString& text, int emojiSize) {
     if (!m_ok) {
+        bool hasNewline = false;
+        for (int i = 0; i < text.length(); i++) {
+            if (text[i] == QChar('\n')) { hasNewline = true; break; }
+        }
+        if (!hasNewline && text.length() <= 8) {
+            setupEmojiFallbackFont(p);
+            QFontMetrics fm = p.fontMetrics();
+            int tw = fm.width(text);
+            int th = fm.height();
+            if (tw > textRect.width()) { tw = textRect.width(); }
+            if (th > textRect.height()) { th = textRect.height(); }
+            int cx = textRect.x() + (textRect.width() - tw) / 2;
+            int cy = textRect.y() + (textRect.height() - th) / 2;
+            QRect cr(cx, cy, tw, th);
+            p.drawText(cr, Qt::AlignLeft | Qt::AlignTop, text);
+            return;
+        }
 #ifdef QT3_BUILD
         p.drawText(textRect, Qt::WordBreak | Qt::AlignLeft | Qt::AlignTop, text);
 #else
@@ -186,18 +243,10 @@ void EmojiRenderer::drawText(QPainter& p, const QRect& textRect, const QString& 
     }
 
     auto cps = toCodepoints(text);
-    {
-        int emojiCount = 0;
-        for (size_t i = 0; i < cps.size(); i++) {
-            if (isEmojiChar(cps[i])) { emojiCount++; }
-        }
-        if (emojiCount > 0) {
-         //   fprintf(stderr, "EmojiRenderer: msg has %d emoji / %zu cps | font: %s | ok=%d\n",
-           //         emojiCount, cps.size(), m_fontPath.c_str(), (int)m_ok);
-	}
-    }
     QFontMetrics fm = p.fontMetrics();
-    int lh = fm.lineSpacing();
+    int lh = emojiSize > 0 ? emojiSize : fm.lineSpacing();
+    if (lh <= 0) { lh = fm.height(); }
+    if (lh <= 0) { lh = 16; }
     int maxW = textRect.width();
     int x = textRect.x();
     int y = textRect.y();
@@ -211,7 +260,8 @@ void EmojiRenderer::drawText(QPainter& p, const QRect& textRect, const QString& 
         int lastSpace = -1;
         int lineEnd = i;
         for (int j = i; j < n && cps[j] != '\n'; j++) {
-            int cw = isEmojiChar(cps[j]) ? fm.height() : fm.width(QChar((ushort)cps[j]));
+            int cw = isEmojiChar(cps[j]) ? (emojiSize > 0 ? lh : fm.height())
+                                         : fm.width(QChar((ushort)cps[j]));
             lineWidth += cw;
             if (cps[j] == ' ') { lastSpace = j; }
             if (lineWidth >= maxW) {
@@ -227,14 +277,24 @@ void EmojiRenderer::drawText(QPainter& p, const QRect& textRect, const QString& 
             if (isEmojiChar(cps[j])) {
                 QPixmap pm = loadEmoji(cps[j], lh);
                 if (!pm.isNull()) {
+                    int pw = pm.width();
+                    int ph = pm.height();
+                    if (pw > textRect.width()) { pw = textRect.width(); }
+                    if (ph > textRect.height()) { ph = textRect.height(); }
+                    if (pm.width() != pw || pm.height() != ph) {
+                        if (pw > 0 && ph > 0) {
+                            pm = scalePixmap(pm, pw, ph);
+                        }
+                    }
                     int ey = y + (lh - pm.height()) / 2;
                     p.drawPixmap(lx, ey, pm);
+                    lx += (emojiSize > 0 ? pm.width() : fm.height());
                 } else {
                     if (cps[j] <= 0xFFFF) {
                         p.drawText(lx, y + fm.ascent(), QChar((ushort)cps[j]));
                     }
+                    lx += (emojiSize > 0 ? lh : fm.height());
                 }
-                lx += fm.height();
             } else {
                 int s = j;
                 QString seg;
