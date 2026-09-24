@@ -1,14 +1,20 @@
 #include "sharedstatusbar.h"
+#include "compatcore34.h"
 #ifdef QT3_BUILD
 #include <qpainter.h>
 #include <qpen.h>
 #include <qcursor.h>
+#include <qdatetime.h>
+#include <qpopupmenu.h>
+#include <qtooltip.h>
 #ifdef Q_OS_LINUX
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #endif
 #else
 #include <QPainter>
+#include <QDateTime>
+#include <QMenu>
 #ifdef Q_OS_LINUX
 #include <QX11Info>
 #include <X11/Xlib.h>
@@ -18,6 +24,21 @@
 SharedStatusBar *SharedStatusBar::s_instance = nullptr;
 
 static const int GRIP_SIZE = 16;
+static const int HISTORY_MAX = 30;
+static const int HISTORY_TEXT_MAX = 140;
+static const int HISTORY_MENU_MAX_PX = 560;
+
+static QString elideTextForMenu(const QFontMetrics &fm, const QString &s, int maxPx)
+{
+    if (fm.width(s) <= maxPx) { return s; }
+    const QString ell = QString(QChar(0x2026));
+    QString r = s;
+    while (!r.isEmpty() && fm.width(r) > maxPx - fm.width(ell)) {
+        r = r.left(r.length() - 1);
+    }
+    if (r.isEmpty()) { r = s.left(1); }
+    return r + ell;
+}
 
 SharedStatusBar::SharedStatusBar()
 #ifdef QT3_BUILD
@@ -31,6 +52,7 @@ SharedStatusBar::SharedStatusBar()
     , m_activeWindow(nullptr)
     , m_dragging(false)
     , m_repositioning(false)
+    , m_historyBtn(nullptr)
 #ifdef QT3_BUILD
     , m_debounceTimer(nullptr)
     , m_pendingHide(false)
@@ -50,14 +72,30 @@ SharedStatusBar::SharedStatusBar()
     m_bar->setSizeGripEnabled(false);
     setMouseTracking(true);
 
+    // 历史消息按钮：下三角箭头在 LimeStyle / 当前字体下渲染不可见，
+    // 暂用大写字母 "W" 代替 ▾；点击弹出 30 条消息历史菜单
+    m_historyBtn = new QToolButton(this);
+    m_historyBtn->setText("W");
+    m_historyBtn->setAutoRaise(true);
+    m_historyBtn->setFixedSize(18, 18);
 #ifdef QT3_BUILD
-    QBoxLayout *lay = new QBoxLayout(this, QBoxLayout::TopToBottom, 0, 0);
+    QToolTip::add(m_historyBtn, qFromUtf8("查看消息历史"));
 #else
-    QVBoxLayout *lay = new QVBoxLayout(this);
+    m_historyBtn->setToolTip(qFromUtf8("查看消息历史"));
+#endif
+    m_historyBtn->hide();
+    connect(m_historyBtn, SIGNAL(clicked()),
+            this, SLOT(onHistoryClicked()));
+
+#ifdef QT3_BUILD
+    QBoxLayout *lay = new QBoxLayout(this, QBoxLayout::LeftToRight, 0, 0);
+#else
+    QHBoxLayout *lay = new QHBoxLayout(this);
     lay->setContentsMargins(0, 0, 0, 0);
     lay->setSpacing(0);
 #endif
-    lay->addWidget(m_bar);
+    lay->addWidget(m_historyBtn);
+    lay->addWidget(m_bar, 1);
 
     qApp->installEventFilter(this);
 }
@@ -88,11 +126,61 @@ SharedStatusBar *SharedStatusBar::instance()
 
 void SharedStatusBar::showMessage(const QString &msg, int timeout)
 {
+    if (!msg.isEmpty()) {
+        StatusHistoryEntry e;
+        e.timeStr = QTime::currentTime().toString("HH:mm:ss");
+        e.text = msg;
+        if (e.text.length() > HISTORY_TEXT_MAX) {
+            e.text = e.text.left(HISTORY_TEXT_MAX - 1) + QString(QChar(0x2026));
+        }
+        m_history.prepend(e);
+        while (m_history.size() > HISTORY_MAX) {
+#ifdef QT3_BUILD
+            m_history.remove(m_history.at(m_history.size() - 1));
+#else
+            m_history.removeAt(m_history.size() - 1);
+#endif
+        }
+        m_historyBtn->show();
+    }
 #ifdef QT3_BUILD
     m_bar->message(msg, timeout);
 #else
     m_bar->showMessage(msg, timeout);
 #endif
+}
+
+void SharedStatusBar::onHistoryClicked()
+{
+    if (m_history.isEmpty()) {
+        m_historyBtn->hide();
+        return;
+    }
+    showHistoryMenu();
+}
+
+void SharedStatusBar::showHistoryMenu()
+{
+#ifdef QT3_BUILD
+    QPopupMenu *menu = new QPopupMenu(this);
+#else
+    QMenu *menu = new QMenu(this);
+#endif
+    QFontMetrics fm(menu->font());
+    for (int i = 0; i < m_history.size(); ++i) {
+        const StatusHistoryEntry &e = m_history[i];
+        QString item = e.timeStr + QString(" ") + e.text;
+        item = elideTextForMenu(fm, item, HISTORY_MENU_MAX_PX);
+#ifdef QT3_BUILD
+        menu->insertItem(item);
+#else
+        menu->addAction(item);
+#endif
+    }
+    connect(menu, SIGNAL(aboutToHide()), menu, SLOT(deleteLater()));
+    QPoint pop = m_historyBtn->mapToGlobal(
+        QPoint(0, m_historyBtn->height()));
+    menu->popup(pop);
 }
 
 void SharedStatusBar::clearMessage()
@@ -134,6 +222,7 @@ bool SharedStatusBar::eventFilter(QObject *watched, QEvent *event)
         if (!tw || tw == this) return false;
 #ifdef QT3_BUILD
         if (tw->inherits("QLabel")) return false;
+        if (tw->inherits("QPopupMenu")) return false;
         if (tw->inherits("DesktopLyrics")) return false;
         if (tw->inherits("ScreenshotRegionSelector")) return false;
         if (tw->inherits("ScreenshotPreviewDialog")) return false;
@@ -189,6 +278,7 @@ bool SharedStatusBar::eventFilter(QObject *watched, QEvent *event)
 #ifdef QT3_BUILD
         // TipLabel 是顶层 QLabel — 跳过，不跟踪
         if (tw->inherits("QLabel")) return false;
+        if (tw->inherits("QPopupMenu")) return false;
         if (tw->inherits("DesktopLyrics")) return false;
         if (tw->inherits("ScreenshotRegionSelector")) return false;
         if (tw->inherits("ScreenshotPreviewDialog")) return false;

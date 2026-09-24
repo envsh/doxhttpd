@@ -11,14 +11,30 @@
 #include <qpoint.h>
 #include <qlayout.h>
 #include <qtimer.h>
+#include <qtoolbutton.h>
+#include <qvaluelist.h>
 #else
 #include <QWidget>
 #include <QStatusBar>
 #include <QMouseEvent>
 #include <QApplication>
-#include <QVBoxLayout>
+#include <QHBoxLayout>
 #include <QTimer>
 #include <QPointer>
+#include <QToolButton>
+#include <QList>
+#endif
+
+struct StatusHistoryEntry
+{
+    QString timeStr;
+    QString text;
+};
+
+#ifdef QT3_BUILD
+typedef QValueList<StatusHistoryEntry> StatusHistoryList;
+#else
+typedef QList<StatusHistoryEntry> StatusHistoryList;
 #endif
 
 class SharedStatusBar : public QWidget
@@ -48,12 +64,15 @@ private:
     bool        m_repositioning;
     QPoint      m_dragStartGlobal;
     QRect       m_windowStartGeo;
+    QToolButton *m_historyBtn;
+    StatusHistoryList m_history;
 
     bool isInGripArea(const QPoint &localPos) const;
     void handleGripPress(const QPoint &globalPos);
     void handleGripDrag(const QPoint &globalPos);
     void handleGripRelease();
     void reposition();
+    void showHistoryMenu();
 
     void paintEvent(QPaintEvent *e) override;
     bool event(QEvent *e) override;
@@ -61,6 +80,7 @@ private:
 
 private slots:
     void onFocusChanged(QWidget *old, QWidget *now);
+    void onHistoryClicked();
 
 private:
     void installEventFiltersOnMyselfTopLevelWidgets();
