@@ -73,11 +73,14 @@ SharedStatusBar::SharedStatusBar()
     setMouseTracking(true);
 
     // 历史消息按钮：下三角箭头在 LimeStyle / 当前字体下渲染不可见，
-    // 暂用大写字母 "W" 代替 ▾；点击弹出 30 条消息历史菜单
+    // 现在在 "W" 前加空心下三角 ▽ 试验是否可渲染；
+    // 点击弹出 30 条消息历史菜单
     m_historyBtn = new QToolButton(this);
-    m_historyBtn->setText("W");
+    m_historyBtn->setText(qFromUtf8("▽ W"));
     m_historyBtn->setAutoRaise(true);
-    m_historyBtn->setFixedSize(18, 18);
+    // 按文本实际宽度自适应（△ 是测试符号，字体差异大，用固定宽易裁切）
+    int btnW = m_historyBtn->fontMetrics().width(m_historyBtn->text()) + 12;
+    m_historyBtn->setFixedSize(btnW, 18);
 #ifdef QT3_BUILD
     QToolTip::add(m_historyBtn, qFromUtf8("查看消息历史"));
 #else

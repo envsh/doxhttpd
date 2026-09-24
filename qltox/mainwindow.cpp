@@ -58,6 +58,7 @@
 #endif
 #include "toastwidget.h"
 #include "sharedstatusbar.h"
+#include "globaluiutil.h"
 #include "photoviewer.h"
 #include "media_shmem_cache.h"
 #include <qtimer.h>
@@ -853,6 +854,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 }
                 if (isCurrent) {
                     chatWidget->updateElement(realIdx);
+                    stbarShowStatusMessage(qFromUtf8("图片下载失败（数据校验失败）"), 4000);
                 }
             }
         } else {
@@ -864,7 +866,10 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 elp->downloadSpeedBps = 0;
                 elp->mediaUrl = qFromUtf8(e->mxcUrl);
                 elp->mediaErrorMsg = qFromUtf8(e->errorInfo);
-                if (isCurrent) { chatWidget->updateElement(realIdx); }
+                if (isCurrent) {
+                    chatWidget->updateElement(realIdx);
+                    stbarShowStatusMessage(qFromUtf8("图片下载失败：") + qFromUtf8(e->errorInfo), 4000);
+                }
             }
         }
         return;
@@ -912,6 +917,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
             qWarning("AvatarManager: download failed for [%s] reason: [%s]",
                      e->mxcUrl.c_str(), e->errorInfo.c_str());
             AvatarManager::inst().removePending(key);
+            stbarShowStatusMessage(qFromUtf8("头像下载失败"), 3000);
         }
         return;
     }
@@ -1243,6 +1249,9 @@ void MainWindow::customEvent(CustomEventBase* event) {
             if (!evt->success) {
                 ToastWidget::show(chatWidget, _("send_failed").arg(targetName)
                 .arg(formatElapsedMs(evt->elapsedMs)).arg(qFromUtf8(evt->errorMessage)), 8000);
+                stbarShowStatusMessage(_("send_failed").arg(targetName)
+                .arg(formatElapsedMs(evt->elapsedMs))
+                .arg(qFromUtf8(evt->errorMessage)), 5000);
                 m_lyrics->setPlayedColor(QColor(0xFF,0x44,0x44));
                 m_lyrics->setLrcText(qFromUtf8("[00:00.000]发送失败"));
                 m_lyrics->setPosition(0);   // setLrcText 只装载不定位，需显式定位首行才渲染
@@ -1255,6 +1264,8 @@ void MainWindow::customEvent(CustomEventBase* event) {
             }
             else {
                 ToastWidget::show(chatWidget, _("send_success").arg(targetName).arg(formatElapsedMs(evt->elapsedMs)), 2000);
+                stbarShowStatusMessage(_("send_success").arg(targetName)
+                .arg(formatElapsedMs(evt->elapsedMs)), 2000);
                 m_lyrics->setPlayedColor(QColor(0x00,0xB4,0xD8));
                 m_lyrics->setLrcText(qFromUtf8("[00:00.000]已发送"));
                 m_lyrics->setPosition(0);   // setLrcText 只装载不定位，需显式定位首行才渲染
@@ -1362,6 +1373,9 @@ void MainWindow::customEvent(CustomEventBase* event) {
             chatWidget->onTranslateResult(tev->msgIndex, tev->success,
                 qFromUtf8(tev->translatedText.data(), (int)tev->translatedText.size()),
                 qFromUtf8(tev->errorMessage.data(), (int)tev->errorMessage.size()));
+            if (!tev->success) {
+                stbarShowStatusMessage(qFromUtf8("翻译失败：") + qFromUtf8(tev->errorMessage), 8000);
+            }
             return;
         }
 
@@ -1388,6 +1402,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
             } else {
                 chatWidget->loadingBar()->hideLoading(kLoadSendMsg);
                 ToastWidget::show(chatWidget, "翻译失败", 8000);
+                stbarShowStatusMessage(qFromUtf8("翻译失败"), 8000);
             }
             return;
         }
