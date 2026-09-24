@@ -124,34 +124,75 @@ void qInfo(const char* fmt, ...) {
 #include <qglobal.h>
 #include <cstdio>
 #include <ctime>
+#include <qstring.h>
 
 static void qt4MsgHandler(QtMsgType type, const char* msg) {
     const char* level = "";
+    const char* labelColor = "";
     switch (type) {
-        case QtDebugMsg:    level = "DEBUG"; break;
-        case QtWarningMsg:  level = "WARN";  break;
-        case QtCriticalMsg: level = "ERROR"; break;
-        case QtFatalMsg:    level = "FATAL"; break;
+        case QtDebugMsg:    level = "DEBUG"; labelColor = "\033[2m";    break;
+        case QtWarningMsg:  level = "WARN";  labelColor = "\033[1;33m"; break;
+        case QtCriticalMsg: level = "ERROR"; labelColor = "\033[1;31m"; break;
+        case QtFatalMsg:    level = "FATAL"; labelColor = "\033[1;31m"; break;
+    }
+    static bool s_tty = isatty(fileno(stderr)) != 0;
+    const char* dimOn  = "";
+    const char* dimOff = "";
+    if (s_tty) {
+        dimOn  = "\033[2m";
+        dimOff = "\033[0m";
     }
     time_t now = time(nullptr);
     struct tm* t = localtime(&now);
     char tbuf[32];
     strftime(tbuf, sizeof(tbuf), "%H:%M:%S", t);
-    fprintf(stderr, "[%s] [%s] %s\n", tbuf, level, msg);
+    fprintf(stderr, "%s[%s]%s %s[%s]\033[0m %s\n",
+            dimOn, tbuf, dimOff, labelColor, level, msg);
     fflush(stderr);
     if (type == QtFatalMsg) abort();
 }
 
-struct Qt4MsgInit {
-    Qt4MsgInit() {
-		#if QT_VERSION < 0x050000
-			qInstallMsgHandler(qt4MsgHandler);
-		#elif QT_VERSION < 0x060000
-			// TODO
-			// qInstallMessageHandler(qt4MsgHandler);
-		#endif
+#if QT_VERSION >= 0x050000
+static void qt5MsgHandler(QtMsgType type, const QMessageLogContext&, const QString& msg) {
+    const char* level = "";
+    const char* labelColor = "";
+    switch (type) {
+        case QtDebugMsg:    level = "DEBUG"; labelColor = "\033[2m";    break;
+        case QtWarningMsg:  level = "WARN";  labelColor = "\033[1;33m"; break;
+        case QtCriticalMsg: level = "ERROR"; labelColor = "\033[1;31m"; break;
+        case QtFatalMsg:    level = "FATAL"; labelColor = "\033[1;31m"; break;
+#if QT_VERSION >= 0x050500
+        case QtInfoMsg:     level = "INFO";  labelColor = "\033[1;32m"; break;
+#endif
+    }
+    static bool s_tty = isatty(fileno(stderr)) != 0;
+    const char* dimOn  = "";
+    const char* dimOff = "";
+    if (s_tty) {
+        dimOn  = "\033[2m";
+        dimOff = "\033[0m";
+    }
+    time_t now = time(nullptr);
+    struct tm* t = localtime(&now);
+    char tbuf[32];
+    strftime(tbuf, sizeof(tbuf), "%H:%M:%S", t);
+     QByteArray qToUtf8(const QString&); // must link compatcore34.cpp
+    fprintf(stderr, "%s[%s]%s %s[%s]\033[0m %s\n",
+            dimOn, tbuf, dimOff, labelColor, level, qToUtf8(msg).constData());
+    fflush(stderr);
+    if (type == QtFatalMsg) { abort(); }
+}
+#endif
+
+struct Qt456MsgInit {
+    Qt456MsgInit() {
+        #if QT_VERSION < 0x050000
+            qInstallMsgHandler(qt4MsgHandler);
+        #else
+            qInstallMessageHandler(qt5MsgHandler);
+        #endif
 	}
 };
-static Qt4MsgInit g_qt4MsgInit;
+static Qt456MsgInit g_qt456MsgInit;
 
 #endif
