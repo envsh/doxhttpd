@@ -110,8 +110,10 @@
     "load_failed": "加载失败",
     "load_messages_failed": "加载消息失败（%1）",
     "load_messages_empty": "没有历史消息（%1）",
-    "menu.homepage": "项目主页",
-    "menu.aboutqt": "关于 Qt",
+    "menu": {
+        "homepage": "项目主页",
+        "aboutqt": "关于 Qt"
+    },
     "load_contacts_failed": "加载联系人失败",
     "conference": {
         "invitation_received": "收到会议邀请",
@@ -226,11 +228,6 @@
     "invite_failed": "邀请失败",
     "not_yet_implemented": "尚未实现",
     "no_conference": "没有可用的会议",
-    "style.fusion": "Qt Fusion",
-    "style.macos": "macOS",
-    "style.windows": "Windows 11",
-    "style.material": "Material You",
-    "style.github": "GitHub",
     "rename": {
         "title": "修改群组昵称",
         "current_nick": "当前昵称",

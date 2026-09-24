@@ -102,6 +102,10 @@
     "tox_id_copied": "Tox ID 已複製到剪貼簿",
     "please_wait": "請等待載入完成",
     "load_failed": "載入失敗",
+    "menu": {
+        "homepage": "專案首頁",
+        "aboutqt": "關於 Qt"
+    },
     "load_contacts_failed": "載入聯絡人失敗",
     "conference": {
         "invitation_received": "收到會議邀請",
@@ -204,11 +208,6 @@
         "objects": "食物與物品",
         "symbols": "符號與旅行"
     },
-    "style.fusion": "Qt Fusion",
-    "style.macos": "macOS",
-    "style.windows": "Windows 11",
-    "style.material": "Material You",
-    "style.github": "GitHub",
     "context": {
         "copy_message": "複製訊息",
         "select_all": "全選",

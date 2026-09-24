@@ -110,8 +110,10 @@
     "load_failed": "Load failed",
     "load_messages_failed": "Failed to load messages (%1)",
     "load_messages_empty": "No messages (%1)",
-    "menu.homepage": "Home Page",
-    "menu.aboutqt": "About Qt",
+    "menu": {
+        "homepage": "Home Page",
+        "aboutqt": "About Qt"
+    },
     "load_contacts_failed": "Failed to load contacts",
     "conference": {
         "invitation_received": "Conference invitation received",
@@ -194,11 +196,6 @@
         "objects": "Food & Objects",
         "symbols": "Symbols & Travel"
     },
-    "style.fusion": "Qt Fusion",
-    "style.macos": "macOS",
-    "style.windows": "Windows 11",
-    "style.material": "Material You",
-    "style.github": "GitHub",
     "context": {
         "copy_message": "Copy Message",
         "select_all": "Select All",

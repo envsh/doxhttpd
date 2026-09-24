@@ -291,7 +291,7 @@ void SystemTrayIcon::initTray(const QPixmap& pm)
 	m_baseIcon = pm;
 	d->native = new QSystemTrayIcon(QIcon(m_baseIcon), this);
 	connect(d->native, SIGNAL(activated(QSystemTrayIcon::ActivationReason)),
-		this, SLOT(nativeActivated(QSystemTrayIcon::ActivationReason)));
+		this, SLOT(nativeActivated(TrayActivationReason)));
 }
 
 void SystemTrayIcon::fireActivated(int reason)
