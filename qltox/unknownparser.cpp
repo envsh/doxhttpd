@@ -6,6 +6,7 @@
 #include <dlfcn.h>
 #include <ctime>
 #include <cstdlib>
+#include <cassert> 
 
 // ── JSON 路径导航 ──
 
@@ -568,12 +569,18 @@ static bool tryParseImapMessage(const std::string& rawStr, ParseResult& ret) {
         // base64 数据存在但解码后为空 → 解码失败，附上原始 base64 文本
         fullText += "\n(dcode failed, raw: " + cleanB64 + ")";
     }
+    
+    // todo 根据account区分room,但现在没有
+    std::string chatId = jsonGetString(root, "account_id"); // std::to_string(kOutlookGraphId);
+    std::string chatName = jsonGetString(root, "account_name"); // "ImapGraph收件箱";
+	if (chatName.empty()) { chatName = chatId; }
+	assert(!chatId.empty());
 
     ContactData cd;
-    cd.id          = (int)(std::hash<std::string>{}(toRecip + kImapMailType) & 0x7fffffff);
-    cd.name        = toRecip;
+    cd.id          = (int)(std::hash<std::string>{}(chatId + kImapMailType) & 0x7fffffff);
+    cd.name        = chatName; // toRecip;
     cd.type        = kImapMailType;
-    cd.chatId      = toRecip;
+    cd.chatId      = chatId;
     cd.status      = "online";
     cd.isConnected = true;
     ret.contacts.push_back(cd);
@@ -720,11 +727,14 @@ static bool tryParseMisskeyNote(const std::string& rawStr, ParseResult& ret) {
     if (displayName.empty()) displayName = userId;
     std::string peerId = userHost.empty() ? userId : userId + "@" + userHost;
 
-    std::string chatId = userId;
+    std::string chatId = jsonGetString(root, "account_id"); // std::to_string(kMisskeyTimelineId); // userId;
+    std::string chatName = jsonGetString(root, "account_name"); // "Misskey时间线";
+	if (chatName.empty()) { chatName = chatId; }
+	assert(!chatId.empty());
 
     ContactData cd;
     cd.id          = (int)(std::hash<std::string>{}(chatId + kMisskeyType) & 0x7fffffff);
-    cd.name        = displayName;
+    cd.name        = chatName;
     cd.type        = kMisskeyType;
     cd.chatId      = chatId;
     cd.status      = "online";
@@ -817,7 +827,7 @@ static bool tryParseMisskeyNote(const std::string& rawStr, ParseResult& ret) {
     ret.peers.push_back(pi);
 
     ret.senderName  = qFromUtf8(displayName);
-    ret.contactName = qFromUtf8(displayName);
+    ret.contactName = qFromUtf8(chatName);
     ret.handled = true;
 
     cJSON_Delete(root);
@@ -2017,7 +2027,7 @@ static bool tryParseCoolapkTimeline(const std::string& rawStr, ParseResult& ret)
 
     ContactData cd;
     cd.id          = kCoolapkTimelineId;
-    cd.name        = "酷安时线";
+    cd.name        = "酷安时间线";
     cd.type        = kCoolapkTimelineType;
     cd.chatId      = kCoolapkTimelineType;
     cd.status      = "online";

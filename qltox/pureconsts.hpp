@@ -41,6 +41,11 @@ constexpr const char* const kHongguoHotlistType = "hongguo_hotlist";       // �
 constexpr int kHongguoHotlistId = -116;                                    // 红果热榜保留 id（-116，固定不 hash）
 constexpr const char* const kXiaohongshuNoteType = "xiaohongshu_note";     // 小红书笔记卡片订阅流（type == chatId == roomId）
 constexpr int kXiaohongshuNoteId = -117;                                   // 小红书笔记保留 id（-117，固定不 hash）
+
+constexpr int kMisskeyTimelineId = -118;
+constexpr int kOutlookGraphId = -119;
+constexpr int kImapBareId = -120;
+
 constexpr int UnkSize = 0;                                             // 未知大小/未知尺寸哨兵（0 = 未知）
 
 #endif // PURECONSTS_HPP
