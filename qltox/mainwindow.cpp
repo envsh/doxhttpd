@@ -3981,15 +3981,15 @@ void MainWindow::onMenu2Stub() {
 void MainWindow::onAboutApp() {
     QString text = QString(
         "<h3>qltox %1</h3>"
-        "<p>A lightweight Tox client based on toxhttpd.</p>"
+        "<p>A lightweight Tox client based on doxhttpd.</p>"
         "<p>Qt: %2 | Build: %3</p>"
-        "<p><a href='https://github.com/envsh/toxhttpd'>https://github.com/envsh/toxhttpd</a></p>"
+        "<p><a href='https://github.com/envsh/doxhttpd'>https://github.com/envsh/doxhttpd</a></p>"
     ).arg(APP_VERSION_FULL).arg(qVersion()).arg(__DATE__);
-    QMessageBox::about(this, "About qltox", text);
+    QMessageBox::about(this, "About qldox", text);
 }
 
 void MainWindow::openHomePage() {
-    qOpenUrl("https://github.com/envsh/toxhttpd");
+    qOpenUrl("https://github.com/envsh/doxhttpd");
 }
 
 void MainWindow::onEtappActivated(int index) {
