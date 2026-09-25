@@ -1,0 +1,20 @@
+# ChangeLog
+
+## v0.7 (2026-09-15)
+
+### Bug 修复
+- SharedStatusBar 系列修复：Qt3 恢复 XSetTransientForHint、Qt4 状态栏、启动重试、最终修复
+- crox 防锁屏/屏保系列修复
+- 歌词解析格式修复与错误提示、歌词背景/字号修复
+- 上下文菜单宽度与条目数修复、窗口过滤
+- osx i18n
+
+### 新功能
+- ql 系统托盘、截图、贴纸工具
+- 桌面歌词系列：基础版/改进版/移动/右键菜单/边框/日期时间显示，LRC 标准解析
+- 插件应用基础版与插件加载、防屏保
+- hjson 配置支持、crc64
+
+### 优化改进
+- 代码整理（impr file orgg / code orggg）、crox coreut 优化
+- 双缓冲绘制减少闪烁、hangui 慢点日志、CI（upstm）改进

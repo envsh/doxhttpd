@@ -100,7 +100,7 @@ Psi 的托盘窗口固定 22×22 且 paintEvent 只居中不缩放，大图标�
 
 ## 已知限制（v1）
 
-- showMessage 气泡未实现。
+- showMessage 气泡：Qt4 原生 / Qt3 自绘 TrayBubble（贴托盘图标、去重×N、FIFO 上限 3、200ms 冷却），详见 [systemtrayicon-showmessage.md](./systemtrayicon-showmessage.md)。
 - 托盘程序重启后不自动重注册（需重新 show 或重启应用）。
 - 无托盘环境 setVisible(true) 静默失败（m_visible 保持 false，与实际状态一致）。
 

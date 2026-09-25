@@ -23,6 +23,7 @@
 
 #include <qobject.h>
 #include <qimage.h>
+#include <qrect.h>
 
 class QPopupMenu;
 
@@ -81,6 +82,8 @@ private:
 	// system-dependant part
 public:
 	class TrayIconPrivate;
+	// 托盘图标全局几何(Qt3 气泡锚点;无托盘/未知返回空)
+	QRect trayIconGeometry() const;
 private:
 	TrayIconPrivate *d;
 	void sysInstall();

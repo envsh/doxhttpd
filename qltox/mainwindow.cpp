@@ -714,6 +714,7 @@ MainWindow::MainWindow(QWidget* parent)
         m_tray = new SystemTrayIcon(QPixmap(app_icon), this);
         m_tray->setToolTip(_("app_title"));
         connect(m_tray, SIGNAL(activated(int)), this, SLOT(trayActivated(int)));
+        connect(m_tray, SIGNAL(messageClicked()), this, SLOT(trayShowMainWindow()));
 
         PopupMenu* trayMenu = new PopupMenu(this);
         EmbeddedMenuBar::addItem(trayMenu, qFromUtf8("打开主窗口"), this, SLOT(trayShowMainWindow()));
@@ -1412,6 +1413,14 @@ void MainWindow::customEvent(CustomEventBase* event) {
 
 bool MainWindow::event(QEvent* event) {
     bool ret = QMainWindow::event(event);
+#ifdef QT3_BUILD
+    bool windowActivated = (event->type() == QEvent::WindowActivate);
+#else
+    bool windowActivated = (event->type() == QEvent::ActivationChange);
+#endif
+    if (m_tray && windowActivated && qApp->activeWindow() == this) {
+        m_tray->clearMessageQueue();   // 主窗激活时清空待显示气泡
+    }
     if (!m_firstPaintLogged && event->type() == QEvent::Paint) {
         m_paintCounter++;		
 	}

@@ -404,3 +404,25 @@ void TrayIcon::sysUpdateToolTip()
 	else
 		QToolTip::add(d, tip);
 }
+
+QRect TrayIcon::trayIconGeometry() const
+{
+	if ( !d )
+		return QRect();
+
+	Display* dpy = d->x11Display();
+	if ( !dpy )
+		return QRect();
+
+	Window root = XDefaultRootWindow(dpy);
+	Window child_ret;
+	int rx = 0, ry = 0;
+	if ( !XTranslateCoordinates(dpy, d->winId(), root, 0, 0, &rx, &ry, &child_ret) )
+		return QRect();
+
+	XWindowAttributes attr;
+	if ( !XGetWindowAttributes(dpy, d->winId(), &attr) )
+		return QRect();
+
+	return QRect(rx, ry, (int)attr.width, (int)attr.height);
+}

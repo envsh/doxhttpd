@@ -257,3 +257,9 @@ void TrayIcon::sysUpdateToolTip()
     if ( d )
 		d->trayMessage( NIM_MODIFY );
 }
+
+QRect TrayIcon::trayIconGeometry() const
+{
+	// 未实现,调用方回退屏幕右下角
+	return QRect();
+}
