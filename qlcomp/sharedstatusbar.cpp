@@ -3,6 +3,7 @@
 #ifdef QT3_BUILD
 #include <qpainter.h>
 #include <qpen.h>
+#include <qpixmap.h>
 #include <qcursor.h>
 #include <qdatetime.h>
 #include <qpopupmenu.h>
@@ -13,6 +14,7 @@
 #endif
 #else
 #include <QPainter>
+#include <QPixmap>
 #include <QDateTime>
 #include <QMenu>
 #ifdef Q_OS_LINUX
@@ -27,6 +29,54 @@ static const int GRIP_SIZE = 16;
 static const int HISTORY_MAX = 30;
 static const int HISTORY_TEXT_MAX = 140;
 static const int HISTORY_MENU_MAX_PX = 560;
+static const int ICON_PIX_SIZE = 16;
+static const int ICON_CIRCLE_SIZE = 14;
+
+static QColor typeColor(StatusMessageType type)
+{
+    switch (type) {
+        case StatusWarning:
+            return QColor(0xFF, 0xC1, 0x07);
+        case StatusError:
+            return QColor(0xD0, 0x20, 0x20);
+        default:
+            return QColor(0x00, 0x9E, 0xFF);
+    }
+}
+
+static QString typeChar(StatusMessageType type)
+{
+    switch (type) {
+        case StatusWarning:
+            return QString("!");
+        case StatusError:
+            return QString("x");
+        default:
+            return QString("i");
+    }
+}
+
+static QPixmap makeTypePixmap(StatusMessageType type)
+{
+    QPixmap pm(ICON_PIX_SIZE, ICON_PIX_SIZE);
+#ifdef QT3_BUILD
+    pm.fill(Qt::color0);
+#else
+    pm.fill(Qt::transparent);
+#endif
+    QPainter p(&pm);
+    p.setPen(Qt::NoPen);
+    p.setBrush(typeColor(type));
+    int c = (ICON_PIX_SIZE - ICON_CIRCLE_SIZE) / 2;
+    p.drawEllipse(c, c, ICON_CIRCLE_SIZE, ICON_CIRCLE_SIZE);
+    QFont f = p.font();
+    f.setBold(true);
+    f.setPixelSize(10);
+    p.setFont(f);
+    p.setPen(Qt::white);
+    p.drawText(0, 0, ICON_PIX_SIZE, ICON_PIX_SIZE, Qt::AlignCenter, typeChar(type));
+    return pm;
+}
 
 static QString elideTextForMenu(const QFontMetrics &fm, const QString &s, int maxPx)
 {
@@ -53,6 +103,8 @@ SharedStatusBar::SharedStatusBar()
     , m_dragging(false)
     , m_repositioning(false)
     , m_historyBtn(nullptr)
+    , m_iconLbl(nullptr)
+    , m_iconTimer(nullptr)
 #ifdef QT3_BUILD
     , m_debounceTimer(nullptr)
     , m_pendingHide(false)
@@ -90,6 +142,17 @@ SharedStatusBar::SharedStatusBar()
     connect(m_historyBtn, SIGNAL(clicked()),
             this, SLOT(onHistoryClicked()));
 
+    m_iconLbl = new QLabel(this);
+    m_iconLbl->setFixedSize(ICON_PIX_SIZE, ICON_PIX_SIZE);
+    m_iconLbl->hide();
+    m_iconTimer = new QTimer(this);
+#ifdef QT3_BUILD
+    connect(m_iconTimer, SIGNAL(timeout()), this, SLOT(onIconTimeout()));
+#else
+    m_iconTimer->setSingleShot(true);
+    connect(m_iconTimer, SIGNAL(timeout()), this, SLOT(onIconTimeout()));
+#endif
+
 #ifdef QT3_BUILD
     QBoxLayout *lay = new QBoxLayout(this, QBoxLayout::LeftToRight, 0, 0);
 #else
@@ -98,6 +161,7 @@ SharedStatusBar::SharedStatusBar()
     lay->setSpacing(0);
 #endif
     lay->addWidget(m_historyBtn);
+    lay->addWidget(m_iconLbl);
     lay->addWidget(m_bar, 1);
 
     qApp->installEventFilter(this);
@@ -134,10 +198,22 @@ bool SharedStatusBar::instanceExists()
 
 void SharedStatusBar::showMessage(const QString &msg, int timeout)
 {
+    doMessage(msg, timeout, StatusInfo, false);
+}
+
+void SharedStatusBar::showMessageTyped(const QString &msg, StatusMessageType type, int timeout)
+{
+    doMessage(msg, timeout, type, true);
+}
+
+void SharedStatusBar::doMessage(const QString &msg, int timeout,
+                                StatusMessageType type, bool typed)
+{
     if (!msg.isEmpty()) {
         StatusHistoryEntry e;
         e.timeStr = QTime::currentTime().toString("HH:mm:ss");
         e.text = msg;
+        e.type = type;
         if (e.text.length() > HISTORY_TEXT_MAX) {
             e.text = e.text.left(HISTORY_TEXT_MAX - 1) + QString(QChar(0x2026));
         }
@@ -151,11 +227,29 @@ void SharedStatusBar::showMessage(const QString &msg, int timeout)
         }
         m_historyBtn->show();
     }
+    if (m_iconTimer) { m_iconTimer->stop(); }
+    m_iconLbl->hide();
+    if (typed) {
+        m_iconLbl->setPixmap(makeTypePixmap(type));
+        m_iconLbl->show();
+        if (timeout > 0) {
+#ifdef QT3_BUILD
+            m_iconTimer->start(timeout, true);
+#else
+            m_iconTimer->start(timeout);
+#endif
+        }
+    }
 #ifdef QT3_BUILD
     m_bar->message(msg, timeout);
 #else
     m_bar->showMessage(msg, timeout);
 #endif
+}
+
+void SharedStatusBar::onIconTimeout()
+{
+    m_iconLbl->hide();
 }
 
 void SharedStatusBar::onHistoryClicked()
@@ -179,10 +273,11 @@ void SharedStatusBar::showHistoryMenu()
         const StatusHistoryEntry &e = m_history[i];
         QString item = e.timeStr + QString(" ") + e.text;
         item = elideTextForMenu(fm, item, HISTORY_MENU_MAX_PX);
+        QPixmap pm = makeTypePixmap(e.type);
 #ifdef QT3_BUILD
-        menu->insertItem(item);
+        menu->insertItem(pm, item);
 #else
-        menu->addAction(item);
+        menu->addAction(QIcon(pm), item);
 #endif
     }
     connect(menu, SIGNAL(aboutToHide()), menu, SLOT(deleteLater()));
@@ -193,6 +288,8 @@ void SharedStatusBar::showHistoryMenu()
 
 void SharedStatusBar::clearMessage()
 {
+    if (m_iconTimer) { m_iconTimer->stop(); }
+    m_iconLbl->hide();
 #ifdef QT3_BUILD
     m_bar->clear();
 #else

@@ -868,7 +868,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 }
                 if (isCurrent) {
                     chatWidget->updateElement(realIdx);
-                    stbarShowStatusMessage(qFromUtf8("图片下载失败（数据校验失败）"), 4000);
+                    stbarShowStatusMessage(qFromUtf8("图片下载失败（数据校验失败）"), SticonWarning, 4000);
                     sticonShowStatusMessage(qFromUtf8("图片下载失败（数据校验失败）"), SticonWarning, 4000);
                 }
             }
@@ -884,7 +884,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 if (isCurrent) {
                     chatWidget->updateElement(realIdx);
                     const QString failMsg = qFromUtf8("图片下载失败：") + qFromUtf8(e->errorInfo);
-                    stbarShowStatusMessage(failMsg, 4000);
+                    stbarShowStatusMessage(failMsg, SticonWarning, 4000);
                     sticonShowStatusMessage(failMsg, SticonWarning, 4000);
                 }
             }
@@ -934,7 +934,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
             qWarning("AvatarManager: download failed for [%s] reason: [%s]",
                      e->mxcUrl.c_str(), e->errorInfo.c_str());
             AvatarManager::inst().removePending(key);
-            stbarShowStatusMessage(qFromUtf8("头像下载失败"), 3000);
+            stbarShowStatusMessage(qFromUtf8("头像下载失败"), SticonWarning, 3000);
             sticonShowStatusMessage(qFromUtf8("头像下载失败"), SticonWarning, 3000);
         }
         return;
@@ -1270,7 +1270,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 const QString failText = _("send_failed").arg(targetName)
                 .arg(formatElapsedMs(evt->elapsedMs))
                 .arg(qFromUtf8(evt->errorMessage));
-                stbarShowStatusMessage(failText, 5000);
+                stbarShowStatusMessage(failText, SticonCritical, 5000);
                 sticonShowStatusMessage(failText, SticonCritical, 5000);
                 m_lyrics->setPlayedColor(QColor(0xFF,0x44,0x44));
                 m_lyrics->setLrcText(qFromUtf8("[00:00.000]发送失败"));
@@ -1286,7 +1286,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 ToastWidget::show(chatWidget, _("send_success").arg(targetName).arg(formatElapsedMs(evt->elapsedMs)), 2000);
                 const QString okText = _("send_success").arg(targetName)
                 .arg(formatElapsedMs(evt->elapsedMs));
-                stbarShowStatusMessage(okText, 2000);
+                stbarShowStatusMessage(okText, SticonInfo, 2000);
                 sticonShowStatusMessage(okText, SticonInfo, 2000);
                 m_lyrics->setPlayedColor(QColor(0x00,0xB4,0xD8));
                 m_lyrics->setLrcText(qFromUtf8("[00:00.000]已发送"));
@@ -1397,7 +1397,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 qFromUtf8(tev->errorMessage.data(), (int)tev->errorMessage.size()));
             if (!tev->success) {
                 const QString trFail = qFromUtf8("翻译失败：") + qFromUtf8(tev->errorMessage);
-                stbarShowStatusMessage(trFail, 8000);
+                stbarShowStatusMessage(trFail, SticonWarning, 8000);
                 sticonShowStatusMessage(trFail, SticonWarning, 8000);
             }
             return;
@@ -1426,7 +1426,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
             } else {
                 chatWidget->loadingBar()->hideLoading(kLoadSendMsg);
                 ToastWidget::show(chatWidget, "翻译失败", 8000);
-                stbarShowStatusMessage(qFromUtf8("翻译失败"), 8000);
+                stbarShowStatusMessage(qFromUtf8("翻译失败"), SticonWarning, 8000);
                 sticonShowStatusMessage(qFromUtf8("翻译失败"), SticonWarning, 8000);
             }
             return;

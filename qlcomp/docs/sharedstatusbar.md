@@ -9,6 +9,8 @@
 ```
 SharedStatusBar : QWidget (singleton)
 ├── QStatusBar *m_bar           ← 内嵌状态栏
+├── QLabel *m_iconLbl           ← 消息类型图标（彩色圆 i/!/x，外层布局，m_bar 左侧）
+├── QTimer *m_iconTimer         ← 类型图标超时隐藏（单发，与消息超时同步）
 ├── QWidget *m_activeWindow    ← 当前追踪的顶层窗口
 ├── bool m_repositioning       ← 防重入守卫 (reposition 重入保护)
 ├── QTimer *m_debounceTimer    ← [Qt3 only] 失活 debounce 定时器 (100ms)
@@ -127,11 +129,20 @@ instance()
 | 方法 | 说明 |
 |------|------|
 | `static SharedStatusBar *instance()` | singleton 获取（不自动 show） |
-| `showMessage(msg, timeout)` | 临时消息（透传内嵌 QStatusBar） |
+| `showMessage(msg, timeout)` | 临时消息（透传内嵌 QStatusBar，不带类型图标，历史 type=Info） |
+| `showMessageTyped(msg, type, timeout)` | 临时消息 + 类型图标（实时区 m_iconLbl + 历史菜单均显示） |
 | `clearMessage()` | 清除临时消息 |
 | `addWidget(w, stretch)` | 添加左对齐 widget |
 | `addPermanentWidget(w, stretch)` | 添加右对齐 widget（不隐藏） |
 | `removeWidget(w)` | 移除已添加的 widget |
+
+## 消息类型图标
+
+- `enum StatusMessageType`（Info=1 / Warning=2 / Error=3），数值对齐 `SticonIcon` / `SystemTrayIcon::MessageIcon`。
+- 图标 = 16×16 彩色圆 + 白色加粗字形：Info 蓝 `#009EFF` + `i`、Warning 黄 `#FFC107` + `!`、Error 红 `#D02020` + `x`（配色/字形与托盘气泡一致）。由 `makeTypePixmap()` 运行时绘制，Qt3/Qt4 通用。
+- **实时区**：图标为外层布局的 `QLabel *m_iconLbl`（位于 `m_historyBtn` 与 `m_bar` 之间）。因在 `m_bar` 外层，Qt3 `message()` 只隐藏内嵌 widget、不会隐藏它，故消息显示时图标紧邻文本左侧。`m_iconTimer` 单发与消息超时同步隐藏；`clearMessage()` 一并隐藏。
+- **历史菜单**：每项左侧插对应类型图标（Qt3 `insertItem(pixmap)` / Qt4 `addAction(QIcon)`）。
+- 老 `showMessage(msg, timeout)` 走 `doMessage(..., typed=false)`（public 行为不变，仅图标隐藏）；`showMessageTyped` 走 `typed=true`。
 
 ## 与 QMainWindow::statusBar() 的差异
 

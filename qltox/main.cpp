@@ -32,6 +32,12 @@ void stbarShowStatusMessage(const QString &msg, int timeout)
     SharedStatusBar::instance()->showMessage(msg, timeout);
 }
 
+void stbarShowStatusMessage(const QString &msg, SticonIcon type, int timeout)
+{
+    if (!SharedStatusBar::instanceExists()) { return; }
+    SharedStatusBar::instance()->showMessageTyped(msg, (StatusMessageType)type, timeout);
+}
+
 
 #include "app_icon.xpm"
 

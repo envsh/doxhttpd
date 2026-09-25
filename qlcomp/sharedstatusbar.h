@@ -12,6 +12,7 @@
 #include <qlayout.h>
 #include <qtimer.h>
 #include <qtoolbutton.h>
+#include <qlabel.h>
 #include <qvaluelist.h>
 #else
 #include <QWidget>
@@ -22,13 +23,22 @@
 #include <QTimer>
 #include <QPointer>
 #include <QToolButton>
+#include <QLabel>
 #include <QList>
 #endif
+
+// 消息类型（数值对齐 SticonIcon / SystemTrayIcon::MessageIcon：1/2/3）
+enum StatusMessageType {
+	StatusInfo    = 1,
+	StatusWarning = 2,
+	StatusError   = 3
+};
 
 struct StatusHistoryEntry
 {
     QString timeStr;
     QString text;
+    StatusMessageType type;
 };
 
 #ifdef QT3_BUILD
@@ -45,6 +55,7 @@ public:
     static bool instanceExists();
 
     void showMessage(const QString &msg, int timeout = 0);
+    void showMessageTyped(const QString &msg, StatusMessageType type, int timeout = 0);
     void clearMessage();
     void addWidget(QWidget *w, int stretch = 0);
     void addPermanentWidget(QWidget *w, int stretch = 0);
@@ -66,6 +77,8 @@ private:
     QPoint      m_dragStartGlobal;
     QRect       m_windowStartGeo;
     QToolButton *m_historyBtn;
+    QLabel       *m_iconLbl;
+    QTimer       *m_iconTimer;
     StatusHistoryList m_history;
 
     bool isInGripArea(const QPoint &localPos) const;
@@ -74,6 +87,8 @@ private:
     void handleGripRelease();
     void reposition();
     void showHistoryMenu();
+    void doMessage(const QString &msg, int timeout,
+                   StatusMessageType type, bool typed);
 
     void paintEvent(QPaintEvent *e) override;
     bool event(QEvent *e) override;
@@ -82,6 +97,7 @@ private:
 private slots:
     void onFocusChanged(QWidget *old, QWidget *now);
     void onHistoryClicked();
+    void onIconTimeout();
 
 private:
     void installEventFiltersOnMyselfTopLevelWidgets();
