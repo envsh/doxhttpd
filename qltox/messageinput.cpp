@@ -18,6 +18,8 @@
 #include <qimage.h>
 #include <qapplication.h>
 #include <qpainter.h>
+#include <qurl.h>
+#include <qstringlist.h>
 #else
 #include <QMimeData>
 #include <QClipboard>
@@ -315,31 +317,69 @@ void MessageInput::dropEvent(QDropEvent* e) {
 
 #ifdef QT3_BUILD
 
+// Qt3 拖放载荷判定：文件(uri-list)或图片才接收；纯文本交给基类
+static bool srcProvidesFileOrImage(QMimeSource* src)
+{
+    // QDragEnterEvent/QDragMoveEvent/QDropEvent 均为 QMimeSource 子类
+    return src->provides("text/uri-list")
+        || QImageDrag::canDecode(src);
+}
+
+void MessageInput::contentsDragEnterEvent(QDragEnterEvent* e)
+{
+    if (srcProvidesFileOrImage(e)) {
+        e->acceptAction();
+        return;
+    }
+    QTextEdit::contentsDragEnterEvent(e);
+}
+
+void MessageInput::contentsDragMoveEvent(QDragMoveEvent* e)
+{
+    if (srcProvidesFileOrImage(e)) {
+        e->acceptAction();
+        return;
+    }
+    QTextEdit::contentsDragMoveEvent(e);
+}
+
+void MessageInput::contentsDropEvent(QDropEvent* e)
+{
+    if (handleMimeSource(e, kModeDrop)) {
+        e->acceptAction();
+        return;
+    }
+    QTextEdit::contentsDropEvent(e);
+}
+
 bool MessageInput::handleMimeSource(QMimeSource* src, int srcMode) {
     const char* fmt;
     for (int i = 0; (fmt = src->format(i)) != 0; i++) {
         if (qstrcmp(fmt, "text/uri-list") == 0) {
             QByteArray ba = src->encodedData("text/uri-list");
             QString uris = qFromUtf8(ba.data());
-            uris = uris.stripWhiteSpace();
-            int idx = uris.find('\n');
-            if (idx >= 0) { uris = uris.left(idx); }
-            QString path = uris;
-            if (path.startsWith("file://")) path = path.mid(7);
-            if (path.isEmpty() || !QFile::exists(path)) { return false; }
-            QImage pv;
-            if (tryLoadImage(path, pv)) {
+            // uri-list 行分隔可能带 \r\n，逐行解析；百分号编码路径需解码
+            QStringList lines = QStringList::split('\n', uris, false);
+            for (int i = 0; i < lines.count(); ++i) {
+                QString path = lines[i].stripWhiteSpace();
+                if (path.startsWith("file://")) { path = path.mid(7); }
+                if (!path.isEmpty()) { QUrl::decode(path); }
+                if (path.isEmpty() || !QFile::exists(path)) { continue; }
+                QImage pv;
+                if (tryLoadImage(path, pv)) {
+                    QString sizeStr = formatFileSize((uint)QFileInfo(path).size());
+                    ImageInputConfirmDialog dlg(pv, path, sizeStr, srcText(kindPath(srcMode)), this);
+                    if (dlg.exec() != QDialog::Accepted) { return false; }
+                    emit filePasteRequested(path, dlg.caption());
+                    return true;
+                }
                 QString sizeStr = formatFileSize((uint)QFileInfo(path).size());
-                ImageInputConfirmDialog dlg(pv, path, sizeStr, srcText(kindPath(srcMode)), this);
-                if (dlg.exec() != QDialog::Accepted) { return false; }
-                emit filePasteRequested(path, dlg.caption());
-                return true;
+                int ret = QMessageBox::question(this, _("confirm"),
+                            _A("confirm_send_file", QStringList() << path << sizeStr),
+                            QMessageBox::Yes, QMessageBox::No);
+                if (ret == QMessageBox::Yes) { emit filePasteRequested(path, QString()); return true; }
+                return false;
             }
-            QString sizeStr = formatFileSize((uint)QFileInfo(path).size());
-            int ret = QMessageBox::question(this, _("confirm"),
-                        _A("confirm_send_file", QStringList() << path << sizeStr),
-                        QMessageBox::Yes, QMessageBox::No);
-            if (ret == QMessageBox::Yes) { emit filePasteRequested(path, QString()); return true; }
             return false;
         }
     }

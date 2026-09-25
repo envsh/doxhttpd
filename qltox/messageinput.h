@@ -39,6 +39,12 @@ protected:
     void dropEvent(QDropEvent* e);
 
 #ifdef QT3_BUILD
+    // Qt3 fork QTextEdit 是 QScrollView 子类，拖放走 viewport 的 contents* 虚函数
+    // （QScrollView::viewportEvent → contentsDragEnterEvent 等），widget 级
+    // dragEnterEvent/dropEvent 不会被调用（Qt4 才经 viewportEvent 转发到 widget 级）
+    void contentsDragEnterEvent(QDragEnterEvent* e);
+    void contentsDragMoveEvent(QDragMoveEvent* e);
+    void contentsDropEvent(QDropEvent* e);
     bool handleMimeSource(QMimeSource* src, int srcMode);
 #else
     void insertFromMimeData(const QMimeData* source);
