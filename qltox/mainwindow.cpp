@@ -1411,7 +1411,8 @@ void MainWindow::customEvent(CustomEventBase* event) {
                     _("sending_message"));
                 std::string type = std::string(qToUtf8(currentChatType).data());
                 std::string idOverride;
-                if (type == kGomuksRoomType || type == kUnktoxConferenceType
+                if (type == kGomuksRoomType || type == kMtxliteRoomType
+        || type == kUnktoxConferenceType
                     || type == kUnktoxFriendType || type == kUnktoxGroupType
                     || type == kMisskeyType || type == kImapMailType) {
                     for (const auto& cd : m_accumulatedContactData) {
@@ -1627,6 +1628,9 @@ void MainWindow::onContactSelected(int id, const QString& type, const QString& n
     } else if (type == kGomuksRoomType) {
         emoji = EMOJI_MATRIX;
         headerText = emoji + " " + name;
+    } else if (type == kMtxliteRoomType) {
+        emoji = EMOJI_MTXLITE;
+        headerText = emoji + " " + name;
     } else if (type == kUnktoxFriendType) {
         emoji = EMOJI_FRIEND;
         headerText = emoji + " " + name;
@@ -1754,7 +1758,8 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
 
     // 虚拟类型使用 chatId 字符串（如 gomuks room ID）而非 numeric contactId
     std::string idOverride;
-    if (type == kGomuksRoomType || type == kUnktoxConferenceType
+    if (type == kGomuksRoomType || type == kMtxliteRoomType
+        || type == kUnktoxConferenceType
         || type == kUnktoxFriendType || type == kUnktoxGroupType
         || type == kMisskeyType || type == kImapMailType) {
         for (const auto& cd : m_accumulatedContactData) {
@@ -3345,7 +3350,8 @@ void MainWindow::onResendMessage(int msgIndex) {
 #ifdef USE_UNIFIED_SEND_API
     std::string type = std::string(qToUtf8(currentChatType).data());
     std::string idOverride;
-    if (type == kGomuksRoomType || type == kUnktoxConferenceType
+    if (type == kGomuksRoomType || type == kMtxliteRoomType
+        || type == kUnktoxConferenceType
         || type == kUnktoxFriendType || type == kUnktoxGroupType
         || type == kMisskeyType || type == kImapMailType) {
         for (const auto& cd : m_accumulatedContactData) {
@@ -3381,7 +3387,8 @@ void MainWindow::onRequestRedactMessage(int msgIndex) {
     std::string msgId = std::string(qToUtf8(el.messageId).data());
     // 虚拟类型使用 chatId 字符串（如 gomuks room ID）而非 numeric contactId
     std::string idOverride;
-    if (type == kGomuksRoomType || type == kUnktoxConferenceType
+    if (type == kGomuksRoomType || type == kMtxliteRoomType
+        || type == kUnktoxConferenceType
         || type == kUnktoxFriendType || type == kUnktoxGroupType
         || type == kMisskeyType || type == kImapMailType) {
         for (const auto& cd : m_accumulatedContactData) {
@@ -3641,7 +3648,8 @@ void MainWindow::onFileSendRequested(const QString& filePath, const QString& cap
 
     std::string fileType = std::string(qToUtf8(currentChatType).data());
     std::string fileIdOverride;
-    if (fileType == kGomuksRoomType || fileType == kUnktoxConferenceType
+    if (fileType == kGomuksRoomType || fileType == kMtxliteRoomType
+        || fileType == kUnktoxConferenceType
         || fileType == kUnktoxFriendType || fileType == kUnktoxGroupType
         || fileType == kMisskeyType || fileType == kImapMailType) {
         for (const auto& cd : m_accumulatedContactData) {

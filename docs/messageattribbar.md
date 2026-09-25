@@ -53,6 +53,7 @@ struct MessageAttrDef {
 | `kUnktoxConferenceType` | combo `speak_mode` + check `record` + kTags |
 | `kUnktoxGroupType` | combo `priority` + check `sticky` + kTags |
 | `kGomuksRoomType` | check `notify` + combo `priority` + kTags |
+| `kMtxliteRoomType` | check `notify` + combo `priority` + kTags |
 | `kImapMailType` | check `mark_as_read` + combo `priority` + kTags |
 | `kMisskeyType` | combo `publicity` + line `note` + kTags |
 | `kFilesyncType` | line `sync_dir` + check `overwrite` |

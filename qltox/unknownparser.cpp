@@ -263,6 +263,149 @@ static bool tryParseGomuksSync(const std::string& rawStr, ParseResult& ret) {
     return true;
 }
 
+// ── Matrix/mtxlite 单事件解析 ──
+// 识别: Value.data 为单条 Matrix m.room.message 事件（非 sync_complete 包裹）。
+//   识别条件: type=="m.room.message" 且 event_id/room_id/sender 非空、origin_server_ts 非 0。
+//   与 gomuks sync_complete（command=="sync_complete"）天然互斥；媒体/提及/关系解析自成一体，
+//   不复用 parseGomuksEvents（仅共用文件级 jsonGetString/jsonGetInt64 工具）。
+//   时间字段走 Matrix 标准 origin_server_ts（毫秒），而非 gomuks 的 timestamp。
+
+static bool tryParseMtxliteRoom(const std::string& rawStr, ParseResult& ret) {
+    if (rawStr.empty()) return false;
+
+    cJSON* root = cJSON_Parse(rawStr.c_str());
+    if (!root) return false;
+
+    std::string eventId = jsonGetString(root, "event_id");
+    std::string roomId  = jsonGetString(root, "room_id");
+    std::string sender  = jsonGetString(root, "sender");
+    int64_t tsMs = jsonGetInt64(root, "origin_server_ts");
+    if (jsonGetString(root, "type") != "m.room.message"
+            || eventId.empty() || roomId.empty() || sender.empty() || tsMs <= 0) {
+        cJSON_Delete(root);
+        return false;
+    }
+
+    ContactData cd;
+    cd.id          = (int)(std::hash<std::string>{}(roomId) & 0x7fffffff);
+    cd.name        = roomId;
+    cd.type        = kMtxliteRoomType;
+    cd.chatId      = roomId;
+    cd.status      = "online";
+    cd.isConnected = true;
+    ret.contacts.push_back(cd);
+
+    HistoryMessage hm;
+    hm.message       = jsonGetString(root, "content.body");
+    hm.sender_pubkey = sender;
+    hm.sender_number = 0;
+    hm.direction     = "received";
+    {
+        char tbuf[32] = {0};
+        if (tsMs > 0) {
+            time_t sec = (time_t)(tsMs / 1000);
+            struct tm tmv;
+            localtime_r(&sec, &tmv);
+            strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
+        }
+        hm.created_at = tbuf;
+    }
+    hm.roomId        = roomId;
+    hm.eventId       = eventId;
+
+    // m.room.message 媒体检测（org.matrix 规范：content.url + content.info）
+    std::string msgtype = jsonGetString(root, "content.msgtype");
+    cJSON* info = jsonPath(root, "content.info");
+    if (msgtype.find("m.image") == 0) {
+        hm.msgtype      = "image";
+        hm.mediaUrl     = jsonGetString(root, "content.url");
+        if (info) {
+            hm.mediaMime   = jsonGetString(root, "content.info.mimetype");
+            hm.mediaWidth  = (int)jsonGetInt64(root, "content.info.w");
+            hm.mediaHeight = (int)jsonGetInt64(root, "content.info.h");
+            hm.fileSize    = (int)jsonGetInt64(root, "content.info.size");
+        }
+    } else if (msgtype.find("m.video") == 0) {
+        hm.msgtype      = "video";
+        hm.mediaUrl     = jsonGetString(root, "content.url");
+        if (info) {
+            hm.mediaMime    = jsonGetString(root, "content.info.mimetype");
+            hm.mediaWidth   = (int)jsonGetInt64(root, "content.info.w");
+            hm.mediaHeight  = (int)jsonGetInt64(root, "content.info.h");
+            hm.duration     = (int)jsonGetInt64(root, "content.info.duration");
+            hm.thumbnailUrl = jsonGetString(root, "content.info.thumbnail_url");
+            hm.fileSize     = (int)jsonGetInt64(root, "content.info.size");
+        }
+    } else if (msgtype.find("m.audio") == 0) {
+        hm.msgtype  = "audio";
+        hm.mediaUrl = jsonGetString(root, "content.url");
+        if (info) {
+            hm.mediaMime = jsonGetString(root, "content.info.mimetype");
+            hm.duration  = (int)jsonGetInt64(root, "content.info.duration");
+            hm.fileSize  = (int)jsonGetInt64(root, "content.info.size");
+        }
+    } else if (msgtype.find("m.file") == 0) {
+        hm.msgtype  = "file";
+        hm.mediaUrl = jsonGetString(root, "content.url");
+        if (info) {
+            hm.mediaMime = jsonGetString(root, "content.info.mimetype");
+            hm.fileSize  = (int)jsonGetInt64(root, "content.info.size");
+        }
+        std::string filename = jsonGetString(root, "content.filename");
+        if (!filename.empty()) {
+            hm.message = filename;
+        }
+    }
+
+    // m.room.message 提及（content.m.mentions.user_ids[]）
+    cJSON* mentions = jsonPath(root, "content.m.mentions.user_ids");
+    if (mentions && cJSON_IsArray(mentions)) {
+        int mn = cJSON_GetArraySize(mentions);
+        for (int j = 0; j < mn; j++) {
+            cJSON* m = cJSON_GetArrayItem(mentions, j);
+            if (m && cJSON_IsString(m))
+                hm.mentions.push_back(cJSON_GetStringValue(m));
+        }
+    }
+
+    // m.room.message 关系（回复 content.m.relates_to.m.in_reply_to.event_id；
+    // 线程 content.m.relates_to.rel_type=="m.thread" 的 event_id 为线程根）
+    cJSON* relatesTo = jsonPath(root, "content.m.relates_to");
+    if (relatesTo) {
+        std::string replyEid = jsonGetString(root, "content.m.relates_to.m.in_reply_to.event_id");
+        if (!replyEid.empty()) {
+            hm.relatesTos.push_back(replyEid);
+        }
+        if (jsonGetString(root, "content.m.relates_to.rel_type") == "m.thread") {
+            std::string threadRoot = jsonGetString(root, "content.m.relates_to.event_id");
+            if (!threadRoot.empty()) {
+                hm.relatesTos.push_back(threadRoot);
+            }
+        }
+        // 编辑（rel_type=="m.replace"）：真实正文在 m.new_content.body，优先取用
+        if (jsonGetString(root, "content.m.relates_to.rel_type") == "m.replace") {
+            std::string newBody = jsonGetString(root, "content.m.new_content.body");
+            if (!newBody.empty() && msgtype.find("m.file") != 0) {
+                hm.message = newBody;
+            }
+        }
+    }
+
+    ret.messages.push_back(hm);
+
+    PeerInfo pi;
+    pi.publicKey  = sender;
+    pi.userName   = sender;
+    pi.peerNumber = 0;
+    ret.peers.push_back(pi);
+
+    ret.senderName  = qFromUtf8(sender);
+    ret.handled     = true;
+
+    cJSON_Delete(root);
+    return true;
+}
+
 // ── Tox 消息事件解析 ──
 
 static bool tryParseToxMessage(const std::string& rawStr, ParseResult& ret) {
@@ -2061,6 +2204,8 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
             //     }
             // }
             if (tryParseGomuksSync(dataStr, ret))
+                goto done;
+            if (tryParseMtxliteRoom(dataStr, ret))
                 goto done;
             if (tryParseToxMessage(dataStr, ret))
                 goto done;

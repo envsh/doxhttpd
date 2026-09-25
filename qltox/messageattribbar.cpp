@@ -764,6 +764,10 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
         defs << checkDef("notify", qFromUtf8("提醒"));
         defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal");
         defs << tagsDef("tags", qFromUtf8("标签"));
+    } else if (type == kMtxliteRoomType) {
+        defs << checkDef("notify", qFromUtf8("提醒"));
+        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal");
+        defs << tagsDef("tags", qFromUtf8("标签"));
     } else if (type == kImapMailType) {
         defs << checkDef("mark_as_read", qFromUtf8("自动已读"));
         defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal");

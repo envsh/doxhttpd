@@ -5,6 +5,7 @@
 // C++11 constexpr（内部链接，每 TU 一份；消费方为内容比较/赋值，无指针同一性依赖）
 constexpr const char* const kImapMailType       = "imap_mail";
 constexpr const char* const kGomuksRoomType     = "gomuks_room";
+constexpr const char* const kMtxliteRoomType    = "mtxlite_room";
 constexpr const char* const kUnktoxFriendType   = "unktox_friend";
 constexpr const char* const kUnktoxConferenceType = "unktox_conference";
 constexpr const char* const kUnktoxGroupType    = "unktox_group";
