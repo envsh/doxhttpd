@@ -12,6 +12,11 @@
 #include <qpushbutton.h>
 #include <qlabel.h>
 #include <qthread.h>
+#ifdef QT3_BUILD
+#include <qtimer.h>
+#else
+#include <QTimer>
+#endif
 #include <sys/stat.h>
 #include <cstdio>
 #include <atomic>
@@ -48,6 +53,13 @@ std::string groupNum(int64_t v) {
         if (i >= start && i < n - 1 && (n - 1 - i) % 3 == 0) { out += ','; }
     }
     return out;
+}
+
+QString fmtDurMs(uint64_t ms) {
+    QString s;
+    s += QString::number(ms / 1000.0, 'f', 2);
+    s += qFromUtf8(" 秒");
+    return s;
 }
 
 QString fmtBytes(int64_t b) {
@@ -188,12 +200,13 @@ StatisticsDialog::StatisticsDialog(QWidget* parent) : QDialog(parent) {
     barLay->setMargin(0);
     barLay->setSpacing(0);
 
-    QString titles[3];
+    QString titles[4];
     titles[0] = qFromUtf8("总览");
     titles[1] = qFromUtf8("消息");
     titles[2] = qFromUtf8("缓存");
+    titles[3] = qFromUtf8("网络");
 
-    for (int i = 0; i < 3; ++i) {
+    for (int i = 0; i < 4; ++i) {
         QPushButton* btn = new QPushButton(titles[i], m_tabBar);
         btn->setFixedHeight(24);
         btn->setFlat(true);
@@ -215,11 +228,15 @@ StatisticsDialog::StatisticsDialog(QWidget* parent) : QDialog(parent) {
     m_pageStack->addWidget(overview);
     m_pages.push_back(overview);
 
-    for (int i = 1; i < 3; ++i) {
+    for (int i = 1; i < 4; ++i) {
         QWidget* page = new QWidget(m_pageStack);
         QWidget* inner = nullptr;
         ScrollArea* scroll = makeScrollArea(page, inner);
-        (new QVBoxLayout(inner))->addWidget(new QLabel(qFromUtf8("（待定）"), inner));
+        if (i == 3) {
+            buildNetworkPage(inner);
+        } else {
+            (new QVBoxLayout(inner))->addWidget(new QLabel(qFromUtf8("（待定）"), inner));
+        }
         (new QVBoxLayout(page))->addWidget(scroll);
         m_pageStack->addWidget(page);
         m_pages.push_back(page);
@@ -229,6 +246,11 @@ StatisticsDialog::StatisticsDialog(QWidget* parent) : QDialog(parent) {
     root->addWidget(m_pageStack, 10);
 
     qStackSetCurrent(m_pageStack, m_pages[0]);
+
+    m_netTimer = new QTimer(this);
+    connect(m_netTimer, SIGNAL(timeout()), this, SLOT(updateNetStats()));
+    m_netTimer->start(2000);
+    updateNetStats();
 }
 
 void StatisticsDialog::buildOverviewPage(QWidget* inner) {
@@ -340,9 +362,64 @@ void StatisticsDialog::onTabClicked() {
     for (size_t i = 0; i < m_tabButtons.size(); ++i) {
         if (m_tabButtons[i] == btn) {
             qStackSetCurrent(m_pageStack, m_pages[i]);
+            if (i == 3) { updateNetStats(); }
             break;
         }
     }
+}
+
+void StatisticsDialog::buildNetworkPage(QWidget* inner) {
+    QVBoxLayout* lay = new QVBoxLayout(inner);
+
+    QHBoxLayout* topRow = new QHBoxLayout;
+    QLabel* title = new QLabel(qFromUtf8("事件轮询 (Event Poller)"), inner);
+    QFont f = title->font();
+    f.setBold(true);
+    title->setFont(f);
+    topRow->addWidget(title);
+    topRow->addStretch(1);
+    QPushButton* refreshBtn = new QPushButton(qFromUtf8("刷新"), inner);
+    connect(refreshBtn, SIGNAL(clicked()), this, SLOT(updateNetStats()));
+    topRow->addWidget(refreshBtn);
+    lay->addLayout(topRow);
+
+    QWidget* box = new QWidget(inner);
+    QGridLayout* grid = new QGridLayout(box);
+    grid->setSpacing(6);
+#ifdef QT3_BUILD
+    grid->setColStretch(1, 1);
+#else
+    grid->setColumnStretch(1, 1);
+#endif
+    int row = 0;
+    auto addNetRow = [&](const QString& name) {
+        QLabel* nl = new QLabel(name, box);
+        nl->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        grid->addWidget(nl, row, 0);
+        QLabel* vl = new QLabel("-", box);
+        vl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        grid->addWidget(vl, row, 1);
+        m_netLabels.push_back(vl);
+        ++row;
+    };
+    addNetRow(qFromUtf8("轮询次数"));
+    addNetRow(qFromUtf8("总时间"));
+    addNetRow(qFromUtf8("平均时间"));
+    addNetRow(qFromUtf8("成功次数"));
+    addNetRow(qFromUtf8("失败次数"));
+    lay->addWidget(box, 1);
+    lay->addStretch(1);
+}
+
+void StatisticsDialog::updateNetStats() {
+    if (!isVisible()) { return; }
+    ToxAPI::PollStats s = ToxAPI::pollStats();
+    if (m_netLabels.size() != 5) { return; }
+    m_netLabels[0]->setText(qFromUtf8(groupNum((int64_t)s.total).c_str()));
+    m_netLabels[1]->setText(fmtDurMs(s.totalElapsedMs));
+    m_netLabels[2]->setText(fmtDurMs(s.total ? s.totalElapsedMs / s.total : 0));
+    m_netLabels[3]->setText(qFromUtf8(groupNum((int64_t)s.ok).c_str()));
+    m_netLabels[4]->setText(qFromUtf8(groupNum((int64_t)s.fail).c_str()));
 }
 
 void StatisticsDialog::refreshStats() {

@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <atomic>
 #include "eventpoller.h"
 #ifdef QT3_BUILD
 #include <qmap.h>
@@ -96,6 +97,14 @@ public:
     static void lazyLoadFriendDetail(int friendId);
     static std::string urlEncode(const std::string& str);
 
+    struct PollStats {
+        uint64_t total = 0;
+        uint64_t totalElapsedMs = 0;
+        uint64_t ok = 0;
+        uint64_t fail = 0;
+    };
+    static PollStats pollStats();
+
     // Sync helper methods for dialog contexts
     static std::vector<GroupInfo> getGroupsSync();
     static std::vector<ConferenceInfo> getConferencesSync();
@@ -166,6 +175,10 @@ private:
     static QObject* s_target;
     static std::string s_baseUrl;
     static uint64_t s_lastEventId;
+    static std::atomic<uint64_t> s_pollTotal;
+    static std::atomic<uint64_t> s_pollTotalElapsedMs;
+    static std::atomic<uint64_t> s_pollOk;
+    static std::atomic<uint64_t> s_pollFail;
     static int s_sendMsgSeq;
     static bool s_pollRunning;
     static bool s_loadingAllData;

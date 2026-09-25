@@ -4,11 +4,13 @@
 #include "compat34.h"
 #include <qdialog.h>
 #include <vector>
+#include "restapi.h"
 
 class QPushButton;
 class QLabel;
 class StatsWorker;
 class QCloseEvent;
+class QTimer;
 
 class StatisticsDialog : public QDialog {
     Q_OBJECT
@@ -21,6 +23,7 @@ private slots:
     void openDataDir();
     void copyStats();
     void onTabClicked();
+    void updateNetStats();
 
 protected:
     void customEvent(CustomEventBase* event);
@@ -29,6 +32,7 @@ protected:
 private:
     void buildOverviewPage(QWidget* inner);
     void buildResultGrid(QWidget* host);
+    void buildNetworkPage(QWidget* inner);
     QString dataDirText() const;
     void rebuildResultText();
 
@@ -45,6 +49,8 @@ private:
     StatsWorker* m_worker = nullptr;
     std::vector<int64_t> m_vals;
     TimePoint m_statStart = timeNow();
+    std::vector<QLabel*> m_netLabels;
+    QTimer* m_netTimer = nullptr;
 };
 
 #endif

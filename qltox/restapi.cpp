@@ -14,6 +14,10 @@
 QObject* ToxAPI::s_target = nullptr;
 std::string ToxAPI::s_baseUrl = "http://localhost:8181";
 uint64_t ToxAPI::s_lastEventId = 0;
+std::atomic<uint64_t> ToxAPI::s_pollTotal{0};
+std::atomic<uint64_t> ToxAPI::s_pollTotalElapsedMs{0};
+std::atomic<uint64_t> ToxAPI::s_pollOk{0};
+std::atomic<uint64_t> ToxAPI::s_pollFail{0};
 int ToxAPI::s_sendMsgSeq = 100;
 bool ToxAPI::s_pollRunning = false;
 bool ToxAPI::s_loadingAllData = false;
@@ -224,6 +228,15 @@ void ToxAPI::setEventTarget(QObject* target) { s_target = target; }
 void ToxAPI::setBaseUrl(const std::string& url) { s_baseUrl = url; }
 
 void ToxAPI::resetLastEventId() { s_lastEventId = 0; }
+
+ToxAPI::PollStats ToxAPI::pollStats() {
+    PollStats s;
+    s.total = s_pollTotal.load();
+    s.totalElapsedMs = s_pollTotalElapsedMs.load();
+    s.ok = s_pollOk.load();
+    s.fail = s_pollFail.load();
+    return s;
+}
 
 void ToxAPI::startPollEvent() {
     s_pollRunning = true;
@@ -896,6 +909,8 @@ void ToxAPI::dispatchResult(ApiCtx* ctx, const HttpResponse& resp) {
     switch (type) {
 
     case ApiPollEvents: {
+        s_pollTotal++;
+        s_pollTotalElapsedMs += resp.elapsedMs;
         bool restartDetected = false;
         auto it = resp.headers.find("x-server-next-id");
         if (it != resp.headers.end()) {
@@ -908,6 +923,7 @@ void ToxAPI::dispatchResult(ApiCtx* ctx, const HttpResponse& resp) {
         }
 
         if (resp.httpCode == 0 && !resp.curlErrStr.empty()) {
+            s_pollFail++;
             ALOG_WARN("Event poll error:", resp.curlErrStr);
             if (s_pollRunning) {
                 schedulePoll(2000);
@@ -916,12 +932,15 @@ void ToxAPI::dispatchResult(ApiCtx* ctx, const HttpResponse& resp) {
         }
 
         if (resp.httpCode != 200) {
+            s_pollFail++;
             ALOG_WARN("!! event poll non-200:", resp.httpCode);
             if (s_pollRunning) {
                 schedulePoll(2000);
             }
             break;
         }
+
+        s_pollOk++;
 
         bool useNdjson = s_useNdjson;
 
