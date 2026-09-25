@@ -85,6 +85,9 @@ static const int VIRTUAL_AICHAT_ID    = -104;
 static const int VIRTUAL_PASTEBIN_ID  = -105;
 static const int VIRTUAL_TRANSLATE_ID = -106;
 
+// sticonShowStatusMessage 使用的托盘实例（MainWindow 创建/销毁时维护，不导出）
+static SystemTrayIcon* s_trayIcon = 0;
+
 // ── 媒体本机播放辅助（worker 线程调用，不触碰 UI）──
 static void urlIdPart(const std::string& mediaUrl, std::string* out) {
     size_t slash = mediaUrl.find_last_of('/');
@@ -712,6 +715,7 @@ MainWindow::MainWindow(QWidget* parent)
     // ── 系统托盘：关闭最小化到托盘，左键/双击恢复 ──
     if (SystemTrayIcon::isSystemTrayAvailable()) {
         m_tray = new SystemTrayIcon(QPixmap(app_icon), this);
+        s_trayIcon = m_tray;
         m_tray->setToolTip(_("app_title"));
         connect(m_tray, SIGNAL(activated(int)), this, SLOT(trayActivated(int)));
         connect(m_tray, SIGNAL(messageClicked()), this, SLOT(trayShowMainWindow()));
@@ -760,9 +764,18 @@ MainWindow::MainWindow(QWidget* parent)
 }
 
 MainWindow::~MainWindow() {
+    s_trayIcon = 0;
     ToxAPI::stopPollEvent();
     EventPoller::stop();
     Storage::instance().close();
+}
+
+// 托盘气泡通知：仅显示提示气泡，不触碰 SharedStatusBar（状态栏各管各的）。
+void sticonShowStatusMessage(const QString &msg, SticonIcon iconType, int timeout)
+{
+    if (s_trayIcon && s_trayIcon->isVisible() && SystemTrayIcon::supportsMessages())
+        s_trayIcon->showMessage(msg, QString(),
+            (SystemTrayIcon::MessageIcon)iconType, timeout);
 }
 
 // 环形缓冲裁剪/prepend 会移动索引：以 mediaUrl 身份定位真实目标。
@@ -856,6 +869,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 if (isCurrent) {
                     chatWidget->updateElement(realIdx);
                     stbarShowStatusMessage(qFromUtf8("图片下载失败（数据校验失败）"), 4000);
+                    sticonShowStatusMessage(qFromUtf8("图片下载失败（数据校验失败）"), SticonWarning, 4000);
                 }
             }
         } else {
@@ -869,7 +883,9 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 elp->mediaErrorMsg = qFromUtf8(e->errorInfo);
                 if (isCurrent) {
                     chatWidget->updateElement(realIdx);
-                    stbarShowStatusMessage(qFromUtf8("图片下载失败：") + qFromUtf8(e->errorInfo), 4000);
+                    const QString failMsg = qFromUtf8("图片下载失败：") + qFromUtf8(e->errorInfo);
+                    stbarShowStatusMessage(failMsg, 4000);
+                    sticonShowStatusMessage(failMsg, SticonWarning, 4000);
                 }
             }
         }
@@ -919,6 +935,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                      e->mxcUrl.c_str(), e->errorInfo.c_str());
             AvatarManager::inst().removePending(key);
             stbarShowStatusMessage(qFromUtf8("头像下载失败"), 3000);
+            sticonShowStatusMessage(qFromUtf8("头像下载失败"), SticonWarning, 3000);
         }
         return;
     }
@@ -1250,9 +1267,11 @@ void MainWindow::customEvent(CustomEventBase* event) {
             if (!evt->success) {
                 ToastWidget::show(chatWidget, _("send_failed").arg(targetName)
                 .arg(formatElapsedMs(evt->elapsedMs)).arg(qFromUtf8(evt->errorMessage)), 8000);
-                stbarShowStatusMessage(_("send_failed").arg(targetName)
+                const QString failText = _("send_failed").arg(targetName)
                 .arg(formatElapsedMs(evt->elapsedMs))
-                .arg(qFromUtf8(evt->errorMessage)), 5000);
+                .arg(qFromUtf8(evt->errorMessage));
+                stbarShowStatusMessage(failText, 5000);
+                sticonShowStatusMessage(failText, SticonCritical, 5000);
                 m_lyrics->setPlayedColor(QColor(0xFF,0x44,0x44));
                 m_lyrics->setLrcText(qFromUtf8("[00:00.000]发送失败"));
                 m_lyrics->setPosition(0);   // setLrcText 只装载不定位，需显式定位首行才渲染
@@ -1265,8 +1284,10 @@ void MainWindow::customEvent(CustomEventBase* event) {
             }
             else {
                 ToastWidget::show(chatWidget, _("send_success").arg(targetName).arg(formatElapsedMs(evt->elapsedMs)), 2000);
-                stbarShowStatusMessage(_("send_success").arg(targetName)
-                .arg(formatElapsedMs(evt->elapsedMs)), 2000);
+                const QString okText = _("send_success").arg(targetName)
+                .arg(formatElapsedMs(evt->elapsedMs));
+                stbarShowStatusMessage(okText, 2000);
+                sticonShowStatusMessage(okText, SticonInfo, 2000);
                 m_lyrics->setPlayedColor(QColor(0x00,0xB4,0xD8));
                 m_lyrics->setLrcText(qFromUtf8("[00:00.000]已发送"));
                 m_lyrics->setPosition(0);   // setLrcText 只装载不定位，需显式定位首行才渲染
@@ -1375,7 +1396,9 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 qFromUtf8(tev->translatedText.data(), (int)tev->translatedText.size()),
                 qFromUtf8(tev->errorMessage.data(), (int)tev->errorMessage.size()));
             if (!tev->success) {
-                stbarShowStatusMessage(qFromUtf8("翻译失败：") + qFromUtf8(tev->errorMessage), 8000);
+                const QString trFail = qFromUtf8("翻译失败：") + qFromUtf8(tev->errorMessage);
+                stbarShowStatusMessage(trFail, 8000);
+                sticonShowStatusMessage(trFail, SticonWarning, 8000);
             }
             return;
         }
@@ -1404,6 +1427,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 chatWidget->loadingBar()->hideLoading(kLoadSendMsg);
                 ToastWidget::show(chatWidget, "翻译失败", 8000);
                 stbarShowStatusMessage(qFromUtf8("翻译失败"), 8000);
+                sticonShowStatusMessage(qFromUtf8("翻译失败"), SticonWarning, 8000);
             }
             return;
         }

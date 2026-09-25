@@ -102,3 +102,9 @@ Qt4 原生气泡 z 序/外观随系统（StatusNotifierItem 下部分 DE 可能�
 - `mainwindow.cpp` ctor 托盘区：`connect(m_tray, SIGNAL(messageClicked()), this, SLOT(trayShowMainWindow()))` —— 点击气泡恢复主窗。
 - `MainWindow::event()`：`WindowActivate`（Qt3）/`ActivationChange`（Qt4）且 `qApp->activeWindow()==this` 时调 `m_tray->clearMessageQueue()` —— 主窗激活清空待显示队列。
 - 冒烟（独立程序，非 qltox 内）：见 `验证计划`；几何/点击/队列晋升均已程序化验证。
+
+## 全局通知入口（qltox/mainwindow.cpp，已完成）
+
+- `globaluiutil.h`：枚举 `SticonIcon`（Info=1/Warning=2/Critical=3，数值对齐 `SystemTrayIcon::MessageIcon`）+ 声明 `sticonShowStatusMessage(msg, iconType, timeout)`；调用方零 include 依赖。
+- 定义在 `mainwindow.cpp`：经文件静态 `s_trayIcon`（ctor 托盘创建时赋值、`~MainWindow` 清空，不导出）→ `SystemTrayIcon::showMessage(msg, "", iconType, timeout)`。**只管气泡**，不触碰 SharedStatusBar（状态栏仍由原 `stbarShowStatusMessage` 各管各的）。
+- 调用点：原 `stbarShowStatusMessage(...)` 行之后并列追加 `sticonShowStatusMessage(...)`（3 处长表达式先提升为局部 `const QString` 共用）——原函数与研究点零改动。
