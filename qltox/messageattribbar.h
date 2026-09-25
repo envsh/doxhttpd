@@ -23,7 +23,8 @@ struct MessageAttrDef {
     QStringList options;      // kCombo
     int spinMin; int spinMax; int spinStep;   // kSpin
     QString defValue;         // 默认值(combo=选项文本 / check="0"/"1" / spin=数字串 / line,tags=文本)
-    QString hint;             // tooltip 提示(Qt3 无 placeholder,仅 tooltip)
+    QString hint;             // 全局/简短用法提示(Qt3 无 placeholder,仅 tooltip)
+    QString tooltip;          // 该 key 作用与意义的详细说明(hint 与 tooltip 拼接显示)
 };
 
 #ifdef QT3_BUILD

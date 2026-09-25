@@ -335,6 +335,8 @@ static const QMap<QString, bool>& ctxAllowedKeys() {
         m.insert("relates_to",   true); // not reply_to
         m.insert("mentions",   true);
         m.insert("visibility", true);
+        m.insert("localOnly",  true);
+        m.insert("cw",         true);
         initialized = true;
     }
     return m;

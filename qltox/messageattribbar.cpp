@@ -538,9 +538,18 @@ void MessageAttribBar::rebuildChildren() {
             ctl->setFixedHeight(ch);
         }
         it.control = ctl;
-        if (!d.hint.isEmpty()) {
-            qSetToolTip(it.label, d.hint);
-            qSetToolTip(it.control, d.hint);
+        {
+            QString tip;
+            if (!d.tooltip.isEmpty()) {
+                tip = d.hint.isEmpty() ? d.tooltip
+                                       : d.hint + qFromUtf8(" — ") + d.tooltip;
+            } else {
+                tip = d.hint;
+            }
+            if (!tip.isEmpty()) {
+                qSetToolTip(it.label, tip);
+                qSetToolTip(it.control, tip);
+            }
         }
         it.label->show();
         it.control->show();
@@ -697,35 +706,46 @@ void MessageAttribBar::setTypeLabel(const QString& text) {
 
 // ── 占位 schema：按联系人类型返回属性集(键名/选项后续按需调整) ──
 static MessageAttrDef comboDef(const QString& key, const QString& label,
-                               const QStringList& options, const QString& def) {
+                               const QStringList& options, const QString& def,
+                               const QString& tooltip = QString()) {
     MessageAttrDef d;
     d.key = key; d.label = label; d.kind = MessageAttrDef::kCombo;
     d.options = options; d.defValue = def;
+    d.tooltip = tooltip;
     return d;
 }
-static MessageAttrDef checkDef(const QString& key, const QString& label) {
+static MessageAttrDef checkDef(const QString& key, const QString& label,
+                               const QString& tooltip = QString()) {
     MessageAttrDef d;
     d.key = key; d.label = label; d.kind = MessageAttrDef::kCheck;
     d.defValue = QString::fromLatin1("0");
+    d.tooltip = tooltip;
     return d;
 }
-static MessageAttrDef lineDef(const QString& key, const QString& label, const QString& hint) {
+static MessageAttrDef lineDef(const QString& key, const QString& label,
+                              const QString& hint,
+                              const QString& tooltip = QString()) {
     MessageAttrDef d;
     d.key = key; d.label = label; d.kind = MessageAttrDef::kLine; d.hint = hint;
+    d.tooltip = tooltip;
     return d;
 }
-static MessageAttrDef tagsDef(const QString& key, const QString& label) {
+static MessageAttrDef tagsDef(const QString& key, const QString& label,
+                              const QString& tooltip = QString()) {
     MessageAttrDef d;
     d.key = key; d.label = label; d.kind = MessageAttrDef::kTags;
     d.hint = qFromUtf8("标签1,标签2");
+    d.tooltip = tooltip;
     return d;
 }
 static MessageAttrDef spinDef(const QString& key, const QString& label,
-                              int mn, int mx, int step, int def) {
+                              int mn, int mx, int step, int def,
+                              const QString& tooltip = QString()) {
     MessageAttrDef d;
     d.key = key; d.label = label; d.kind = MessageAttrDef::kSpin;
     d.spinMin = mn; d.spinMax = mx; d.spinStep = step;
     d.defValue = QString::number(def);
+    d.tooltip = tooltip;
     return d;
 }
 
@@ -736,58 +756,92 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
     QStringList sm;   sm  << "auto" << "ptt" << "muted";
     QStringList lv;   lv  << "info" << "warning" << "error";
     if (type == "friend") {
-        defs << comboDef("presence", qFromUtf8("状态"), pre, "normal");
-        defs << lineDef("note", qFromUtf8("备注"), qFromUtf8("给该好友的备注"));
+        defs << comboDef("presence", qFromUtf8("状态"), pre, "normal",
+                         qFromUtf8("当前在线状态：normal=在线 / away=离开 / busy=忙碌"));
+        defs << lineDef("note", qFromUtf8("备注"), qFromUtf8("给该好友的备注"),
+                        qFromUtf8("该好友的本地备注名，仅用于查找与展示，不下发"));
         defs << tagsDef("tags", qFromUtf8("标签"));
     } else if (type == "group") {
-        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal");
-        defs << checkDef("sticky", qFromUtf8("置顶"));
-        defs << lineDef("subject", qFromUtf8("主题"), QString());
+        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal",
+                         qFromUtf8("消息优先级：low/normal/high，影响提醒强度"));
+        defs << checkDef("sticky", qFromUtf8("置顶"),
+                         qFromUtf8("是否将该群会话固定在列表顶部"));
+        defs << lineDef("subject", qFromUtf8("主题"), QString(),
+                        qFromUtf8("群会话的主题/标题，用于列表与查找"));
         defs << tagsDef("tags", qFromUtf8("标签"));
     } else if (type == "conference") {
-        defs << comboDef("speak_mode", qFromUtf8("发言"), sm, "auto");
-        defs << checkDef("record", qFromUtf8("录音"));
+        defs << comboDef("speak_mode", qFromUtf8("发言"), sm, "auto",
+                         qFromUtf8("发言方式：auto=自动 / ptt=按住说话 / muted=静音"));
+        defs << checkDef("record", qFromUtf8("录音"),
+                         qFromUtf8("是否对该语音会议会话录音"));
         defs << tagsDef("tags", qFromUtf8("标签"));
     } else if (type == kUnktoxFriendType) {
-        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal");
-        defs << lineDef("note", qFromUtf8("备注"), qFromUtf8("未知协议好友备注"));
+        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal",
+                         qFromUtf8("消息优先级：low/normal/high，影响提醒强度"));
+        defs << lineDef("note", qFromUtf8("备注"), qFromUtf8("未知协议好友备注"),
+                        qFromUtf8("该好友的本地备注名，仅用于查找与展示，不下发"));
         defs << tagsDef("tags", qFromUtf8("标签"));
     } else if (type == kUnktoxConferenceType) {
-        defs << comboDef("speak_mode", qFromUtf8("发言"), sm, "auto");
-        defs << checkDef("record", qFromUtf8("录音"));
+        defs << comboDef("speak_mode", qFromUtf8("发言"), sm, "auto",
+                         qFromUtf8("发言方式：auto=自动 / ptt=按住说话 / muted=静音"));
+        defs << checkDef("record", qFromUtf8("录音"),
+                         qFromUtf8("是否对该语音会议会话录音"));
         defs << tagsDef("tags", qFromUtf8("标签"));
     } else if (type == kUnktoxGroupType) {
-        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal");
-        defs << checkDef("sticky", qFromUtf8("置顶"));
+        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal",
+                         qFromUtf8("消息优先级：low/normal/high，影响提醒强度"));
+        defs << checkDef("sticky", qFromUtf8("置顶"),
+                         qFromUtf8("是否将该群会话固定在列表顶部"));
         defs << tagsDef("tags", qFromUtf8("标签"));
     } else if (type == kGomuksRoomType) {
-        defs << checkDef("notify", qFromUtf8("提醒"));
-        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal");
+        defs << checkDef("notify", qFromUtf8("提醒"),
+                         qFromUtf8("新消息到达时是否弹出提醒通知"));
+        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal",
+                         qFromUtf8("消息优先级：low/normal/high，影响提醒强度"));
         defs << tagsDef("tags", qFromUtf8("标签"));
     } else if (type == kMtxliteRoomType) {
-        defs << checkDef("notify", qFromUtf8("提醒"));
-        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal");
+        defs << checkDef("notify", qFromUtf8("提醒"),
+                         qFromUtf8("新消息到达时是否弹出提醒通知"));
+        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal",
+                         qFromUtf8("消息优先级：low/normal/high，影响提醒强度"));
         defs << tagsDef("tags", qFromUtf8("标签"));
     } else if (type == kImapMailType) {
-        defs << checkDef("mark_as_read", qFromUtf8("自动已读"));
-        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal");
+        defs << checkDef("mark_as_read", qFromUtf8("自动已读"),
+                         qFromUtf8("新邮件到达时是否自动标记为已读"));
+        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal",
+                         qFromUtf8("消息优先级：low/normal/high，影响提醒强度"));
         defs << tagsDef("tags", qFromUtf8("标签"));
     } else if (type == kMisskeyType) {
-        defs << comboDef("publicity", qFromUtf8("可见性"), pre, "normal");
-        defs << lineDef("note", qFromUtf8("备注"), QString());
-        defs << tagsDef("tags", qFromUtf8("标签"));
+        QStringList msvis; msvis << "public" << "home" << "followers" << "specified";
+        defs << comboDef("visibility", qFromUtf8("可见性"), msvis, "public",
+                         qFromUtf8("笔记可见范围：public=公开（默认，公共时间线并联邦）；home=仅首页；followers=仅粉丝；specified=仅指定用户"));
+        defs << checkDef("localOnly", qFromUtf8("仅本站"),
+                         qFromUtf8("仅本站可见，不通过 ActivityPub 联邦到远端实例。与可见性正交可任意组合，如 public+localOnly 本地公开不出站"));
+        defs << lineDef("cw", qFromUtf8("折叠警告"), qFromUtf8("如: 内含剧透"),
+                        qFromUtf8("CW 内容警告（1-100 字符）。设置后正文折叠，需点击展开；不能为空串"));
+        defs << lineDef("note", qFromUtf8("备注"), QString(),
+                        qFromUtf8("本联系人的本地备注，仅用于查找与展示，不下发"));
+        defs << tagsDef("tags", qFromUtf8("标签"),
+                        qFromUtf8("逗号分隔的标签；Misskey 侧解析为笔记哈希标签"));
     } else if (type == kFilesyncType) {
-        defs << lineDef("sync_dir", qFromUtf8("同步目录"), qFromUtf8("如 /data/sync"));
-        defs << checkDef("overwrite", qFromUtf8("覆盖"));
+        defs << lineDef("sync_dir", qFromUtf8("同步目录"), qFromUtf8("如 /data/sync"),
+                        qFromUtf8("与该会话绑定的本地同步目录路径"));
+        defs << checkDef("overwrite", qFromUtf8("覆盖"),
+                         qFromUtf8("目标文件已存在时是否直接覆盖"));
     } else if (type == kClipboardType) {
-        defs << checkDef("keep_history", qFromUtf8("保留历史"));
+        defs << checkDef("keep_history", qFromUtf8("保留历史"),
+                         qFromUtf8("剪贴板同步是否保留历史记录"));
         defs << tagsDef("tags", qFromUtf8("标签"));
     } else if (type == kSyseventType) {
-        defs << comboDef("level", qFromUtf8("级别"), lv, "info");
-        defs << checkDef("sound", qFromUtf8("声音"));
+        defs << comboDef("level", qFromUtf8("级别"), lv, "info",
+                         qFromUtf8("系统事件的记录级别：info=信息 / warning=警告 / error=错误"));
+        defs << checkDef("sound", qFromUtf8("声音"),
+                         qFromUtf8("系统事件到达时是否播放提示音"));
     } else if (type == kTopicType) {
-        defs << lineDef("subreddit", qFromUtf8("分区"), QString());
-        defs << checkDef("pinned", qFromUtf8("置顶"));
+        defs << lineDef("subreddit", qFromUtf8("分区"), QString(),
+                        qFromUtf8("REDDIT 话题订阅的分区名（subreddit）"));
+        defs << checkDef("pinned", qFromUtf8("置顶"),
+                         qFromUtf8("该话题帖子是否固定在消息列表顶部"));
     } else if (type == kToutiaoHotnewsType
                || type == kZhihuHotnewsType
                || type == kZhihuNotifyType
@@ -797,11 +851,15 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
                || type == kXiaohongshuRecommendType
                || type == kXiaohongshuHotnewsType
                || type == kCoolapkTimelineType) {
-        defs << spinDef("auto_refresh", qFromUtf8("刷新间隔"), 30, 3600, 30, 300);
-        defs << checkDef("only_video", qFromUtf8("仅视频"));
+        defs << spinDef("auto_refresh", qFromUtf8("刷新间隔"), 30, 3600, 30, 300,
+                        qFromUtf8("自动刷新时间线间隔（秒）"));
+        defs << checkDef("only_video", qFromUtf8("仅视频"),
+                         qFromUtf8("仅推送视频类内容，忽略图文"));
     } else if (type == kUnknownType) {
-        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal");
-        defs << lineDef("note", qFromUtf8("备注"), qFromUtf8("给该会话的备注"));
+        defs << comboDef("priority", qFromUtf8("优先级"), pri, "normal",
+                         qFromUtf8("消息优先级：low/normal/high，影响提醒强度"));
+        defs << lineDef("note", qFromUtf8("备注"), qFromUtf8("给该会话的备注"),
+                        qFromUtf8("该会话的本地备注，仅用于查找与展示，不下发"));
         defs << tagsDef("tags", qFromUtf8("标签"));
     }
     // kBookmarkType / kAichatType / kPastebinType / kTranslateType / 其余未注册类型 → 空(隐藏)

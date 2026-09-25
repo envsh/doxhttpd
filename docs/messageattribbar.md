@@ -10,7 +10,7 @@
 
 | 要点 | 决策 |
 |------|------|
-| 发送途径 | **只做 UI 暂不发送**；restapi `ctxAllowedKeys()` 白名单**明确不改** |
+| 发送途径 | **只做 UI 暂不发送**；restapi `ctxAllowedKeys()` 白名单已扩 `localOnly`/`cw`（放行，待发送接线） |
 | 值记忆 | 会话内存按 `type_id` 恢复（`ChatWidget::m_attrMemory`，key = `type+"_"+id`） |
 | schema | 占位示例，键名/选项后续可调 |
 | 命名 | `messageattribbar` → `MessageAttribBar`（原 attribbar 弃用） |
@@ -27,9 +27,12 @@ struct MessageAttrDef {
     QString label;    // 显示文案（CJK 必须 qFromUtf8）
     QStringList opts; // combo 选项
     QString defValue; // 默认值
+    QString hint;     // 全局/简短用法提示
+    QString tooltip;  // 该 key 作用与意义的详细说明
 };
 // MessageAttribBar::values() -> QMap<QString,QString>（key -> 当前值）
 // 值格式：combo=选中项、check="1"/"0"、spin=整数、line=文本、tags="a,b,c"（逗号 join）
+// tooltip 显示规则：hint 与 tooltip 拼接（单行 `hint — tooltip`；hint 空则仅 tooltip；tooltip 空则仅 hint）
 ```
 
 `messageAttribBarDefsForType(const QString& type)` 返回该类型的属性定义表；空表 → 属性条隐藏。
@@ -55,7 +58,7 @@ struct MessageAttrDef {
 | `kGomuksRoomType` | check `notify` + combo `priority` + kTags |
 | `kMtxliteRoomType` | check `notify` + combo `priority` + kTags |
 | `kImapMailType` | check `mark_as_read` + combo `priority` + kTags |
-| `kMisskeyType` | combo `publicity` + line `note` + kTags |
+| `kMisskeyType` | combo `visibility`(public/home/followers/specified 默认public) + check `localOnly` + line `cw` + line `note` + kTags |
 | `kFilesyncType` | line `sync_dir` + check `overwrite` |
 | `kClipboardType` | check `keep_history` + kTags |
 | `kSyseventType` | combo `level` + check `sound` |
@@ -111,11 +114,11 @@ class TagInput : public QLineEdit {          // 输入框(无 Q_OBJECT)
 ## 7. 不动清单
 
 - 发送链路（`ChatWidget::onSendClicked` → `messageSent` → `MainWindow::onMessageSending` → `ToxAPI::sendMessage(..., context)`）。
-- `restapi.cpp ctxAllowedKeys()` 白名单。
+- `restapi.cpp ctxAllowedKeys()` 白名单（已扩 `localOnly`/`cw`，见 §1；发送接线仍待定）。
 - `.pro` 无需新增文件（内部类自包含于 messageattribbar.cpp，仅登记已有的 messageattribbar.*）。
 
 ## 8. 待办 / 后续
 
-- 真值如何附加到发送：待定（白名单字段 vs 拼入正文 vs 服务器消费）。
+- 真值如何附加到发送：待定（白名单字段 vs 拼入正文 vs 服务器消费）。白名单已放行 `visibility`/`localOnly`/`cw`。
 - 占位 schema 键名/选项可按产品需求调整。
 - MessageInput 箭头键防抖（已完成）：一次 press+release = 一次 click，`kClickDebounceMs=120` > X11 连发 ~29ms；日志键名 `kArrowKindNames`。
