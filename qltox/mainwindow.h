@@ -34,6 +34,8 @@
 #include <QMap>
 #endif
 
+class QProcess;   // macOS 异步 screencapture（仅在 .cpp 包含头文件）
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -81,6 +83,7 @@ protected slots:
     void onOpenMediaPlayer(int msgIndex);
     void onFavoriteClicked(int msgIndex);
     void onChatScreenshotRequested();
+    void onMacShotDone();
     void renderHistoryMessages(const std::vector<HistoryMessage>& messages);
     void openSettings();
     void openStickerManager();
@@ -155,6 +158,8 @@ private:
     MenuWidget34* m_etappsMenu;
     SystemTrayIcon* m_tray;   // 系统托盘（关闭时最小化到托盘）
     bool m_forceQuit;         // 退出菜单/托盘退出置 true，绕过 closeEvent 拦截
+    QProcess* m_macShotProc;            // macOS 抓图进程（一次性，完成即销毁）
+    QString m_macShotTmpPath;           // macOS 抓图临时文件路径
 
 #ifdef QT3_BUILD
     QMap<int, int> m_etappItemToIndex;

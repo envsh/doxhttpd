@@ -35,6 +35,11 @@
 #include "screenshotmanager.h"
 #include "screenshotpreview.h"
 #include <qfile.h>
+#ifdef QT3_BUILD
+#include <qprocess.h>
+#else
+#include <QProcess>
+#endif
 #include <unistd.h>     // access()
 #ifdef QT3_BUILD
 #include <qurl.h>
@@ -480,6 +485,7 @@ MainWindow::MainWindow(QWidget* parent)
     m_sleepBlocker = nullptr;
     m_tray = nullptr;
     m_forceQuit = false;
+    m_macShotProc = nullptr;
     
     // 设置窗口
     qSetWindowTitle(this, _("app_title"));
@@ -3747,12 +3753,30 @@ void MainWindow::onFavoriteClicked(int msgIndex) {
 
 void MainWindow::onChatScreenshotRequested() {
 #if defined(Q_OS_MAC) || defined(Q_OS_MACX) || defined(Q_OS_DARWIN)
-    QString shotPath = QDir::tempPath()
+    // 上一次还在选区则忽略本次点击（防连点）
+    if (m_macShotProc && m_macShotProc->isRunning()) { return; }
+
+    m_macShotTmpPath = QDir::tempPath()
         + QString("/qltox_shot_%1.png").arg(QString::number(QDateTime::currentMSecsSinceEpoch()));
-    bool ok = qStartProcessDetached(QString::fromLatin1("screencapture"),
-                                    QStringList() << "-i" << shotPath);
-    if (!ok) {
+
+    QProcess* proc = new QProcess(this);
+    m_macShotProc = proc;
+#ifdef QT3_BUILD
+    proc->setArguments(QStringList() << "-i" << m_macShotTmpPath);
+    connect(proc, SIGNAL(processExited()), this, SLOT(onMacShotDone()));
+    bool started = proc->start();       // Qt3: start() 无参，依赖 setArguments
+#else
+    connect(proc, SIGNAL(finished(int, QProcess::ExitStatus)),
+            this, SLOT(onMacShotDone()));
+    proc->start(QString::fromLatin1("screencapture"),
+                QStringList() << "-i" << m_macShotTmpPath);
+    bool started = proc->waitForStarted(3000);
+#endif
+    if (!started) {
         qWarning("onChatScreenshotRequested: screencapture 启动失败，回退 open -a Screenshot");
+        proc->deleteLater();
+        m_macShotProc = nullptr;
+        m_macShotTmpPath = QString();
         qStartProcessDetached(QString::fromLatin1("open"), QStringList() << "-a" << "Screenshot");
     }
 #else
@@ -3760,6 +3784,24 @@ void MainWindow::onChatScreenshotRequested() {
         qWarning("onChatScreenshotRequested: xfce4-screenshooter 启动失败");
     }
 #endif
+}
+
+void MainWindow::onMacShotDone() {
+    QProcess* proc = m_macShotProc;
+    if (proc) {
+        m_macShotProc = nullptr;
+        proc->deleteLater();
+    }
+    QFileInfo fi(m_macShotTmpPath);
+    if (fi.exists() && fi.size() > 0) {
+        onScreenshotReady(m_macShotTmpPath);   // 复用现有预览流
+        return;
+    }
+    // 用户 Esc 取消（screencapture 未写文件）或抓图失败 → 静默丢弃并清理
+    if (!m_macShotTmpPath.isEmpty()) {
+        QFile::remove(m_macShotTmpPath);
+    }
+    m_macShotTmpPath = QString();
 }
 
 void MainWindow::onSourceClicked(int msgIndex) {

@@ -313,7 +313,7 @@ void EventPoller::run() {
                 }
                 if (httpCode >= 400 && !resp.body.empty()) {
                     std::string snippet = resp.body.substr(0, 99);
-                    ALOG_INFO("<<", httpCode, ctx->urlStr,
+                    ALOG_ERROR("<<", httpCode, ctx->urlStr,
                         resp.elapsedMs, "ms", resp.body.size(), "bytes",
                         "| body:", snippet);
                 } else {
