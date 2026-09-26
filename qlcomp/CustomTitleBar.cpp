@@ -8,14 +8,15 @@ CustomTitleBar::CustomTitleBar(QWidget* parent)
     setMinimumHeight(32);
     setMaximumHeight(32);
 #elif defined(Q_OS_MAC) || defined(Q_OS_MACX) || defined(Q_OS_DARWIN)
-    setMinimumHeight(32);       // macOS：40px 偏高约 50% 空白（原生控件矮），对齐 Qt3 紧凑高度
-    setMaximumHeight(32);
+    setMinimumHeight(36);       // macOS：原生控件矮；32px 偏挤(30px按钮+panel张力)，取 36
+    setMaximumHeight(36);
 #else
     setMinimumHeight(40);       // 其它平台（Linux 等）维持现状
     setMaximumHeight(40);
 #endif
 
     QBoxLayout* layout = qNewBoxLayout(this, QBoxLayout::LeftToRight, 0, 0);
+    qSetMargins(layout, -1, 0, -1, 0);   // 清上下(固定高度纵薄)；左右 -1=保留 style 内边框
 
     appMenuBtn = new QPushButton(qFromUtf8("≡"), this);
     appMenuBtn->setFixedSize(30, 30);

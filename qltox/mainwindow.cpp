@@ -511,6 +511,7 @@ MainWindow::MainWindow(QWidget* parent)
     
     QWidget* centralContainer = new QWidget(this);
     QBoxLayout* mainLayout = qNewBoxLayout(centralContainer, QBoxLayout::TopToBottom, 0, 0);
+    qSetMargins(mainLayout, -1, 0, -1, -1);   // 只清顶部(0)；左/右/底 -1=维持 style 默认
 
     // 主分割器（左右布局）
     splitter = new QSplitter(Qt::Horizontal, centralContainer);
