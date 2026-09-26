@@ -861,7 +861,50 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
         defs << lineDef("note", qFromUtf8("备注"), qFromUtf8("给该会话的备注"),
                         qFromUtf8("该会话的本地备注，仅用于查找与展示，不下发"));
         defs << tagsDef("tags", qFromUtf8("标签"));
+    } else if (type == kTranslateType) {
+        QStringList eng;  eng << "all" << "msedge" << "youdao" << "deepl" << "google" << "yandex";
+        defs << comboDef("engine", qFromUtf8("翻译引擎"), eng, "all",
+                         qFromUtf8("翻译引擎：all=聚合自动选优 / msedge / youdao / deepl / google / yandex（占位属性，暂不生效）"));
+        QStringList lang;
+        lang << qFromUtf8("中文") << qFromUtf8("繁體中文") << qFromUtf8("日本語")
+             << qFromUtf8("한국어") << qFromUtf8("English") << qFromUtf8("Français")
+             << qFromUtf8("Deutsch") << qFromUtf8("Русский") << qFromUtf8("العربية")
+             << qFromUtf8("地球语");
+        defs << comboDef("tolang", qFromUtf8("目标语言"), lang, "中文",
+                         qFromUtf8("翻译目标语言（各语言原生名称）：中文=简体（默认）/ 繁體中文 / 日本語 / 한국어 / English / Français / Deutsch / Русский / العربية / 地球语=国际通用语（占位属性，暂不生效）"));
+    } else if (type == kMobPushType) {
+        QStringList pch;  pch << "all" << "ntfy" << "mozilla";
+        defs << comboDef("ctype", qFromUtf8("类型"), pch, "all",
+                         qFromUtf8("推送通道：all=自动选优 / ntfy / mozilla（占位属性，暂不生效）"));
+        defs << lineDef("server_url", qFromUtf8("服务端 URL"), qFromUtf8("https://ntfy.sh"),
+                        qFromUtf8("自建推送服务端地址（ntfy 自托管 / Mozilla autopush），占位属性暂不生效"));
+    } else if (type == kSnapType) {
+        QStringList pf;  pf << "all" << "instagram" << "snapchat" << "giphy";
+        defs << comboDef("platform", qFromUtf8("平台"), pf, "all",
+                         qFromUtf8("贴图/短视频平台：all=自动选优 / instagram / snapchat / giphy（占位属性，暂不生效）"));
+    } else if (type == kAichatType) {
+        QStringList svc;  svc << "all" << "openai.com" << "deepseek.com"
+                              << "anthropic.com" << "groq.com";
+        defs << comboDef("provider", qFromUtf8("接入服务商"), svc, "all",
+                         qFromUtf8("后台服务商站点：all=聚合自动选优 / openai.com / deepseek.com / anthropic.com / groq.com（占位属性，暂不生效）"));
+        QStringList mdl;  mdl << "all" << "gpt-4o" << "o3-mini" << "deepseek-chat"
+                              << "claude-sonnet-4" << "llama-3.3-70b-versatile";
+        defs << comboDef("model", qFromUtf8("模型"), mdl, "all",
+                         qFromUtf8("AI 模型：all=跟随服务商默认 / gpt-4o / o3-mini / deepseek-chat / claude-sonnet-4 / llama-3.3-70b（占位属性，暂不生效）"));
+    } else if (type == kPastebinType) {
+        QStringList psvc;  psvc << "all" << "pastebin.com" << "0x0.st"
+                                << "transfer.sh" << "dpaste.org";
+        defs << comboDef("provider", qFromUtf8("接入服务商"), psvc, "all",
+                         qFromUtf8("后台粘贴服务站点：all=聚合自动选优 / pastebin.com / 0x0.st / transfer.sh / dpaste.org（占位属性，暂不生效）"));
+        QStringList pexp;  pexp << "1h" << "1d" << "1w" << "1m" << "1y" << "never";
+        defs << comboDef("expire", qFromUtf8("有效期"), pexp, "never",
+                         qFromUtf8("有效期预设：1h / 1d / 1w / 1m / 1y / never=永不过期（默认）（占位属性，暂不生效）"));
+    } else if (type == kBookmarkType) {
+        QStringList bsvc;  bsvc << "all" << "delicious.com" << "pinboard.in"
+                                << "raindrop.io" << "instapaper.com" << "floccus.org";
+        defs << comboDef("provider", qFromUtf8("接入服务商"), bsvc, "all",
+                         qFromUtf8("后台书签服务站点：all=聚合自动选优 / delicious.com / pinboard.in / raindrop.io / instapaper.com / floccus.org=开源自托管同步（占位属性，暂不生效）"));
     }
-    // kBookmarkType / kAichatType / kPastebinType / kTranslateType / 其余未注册类型 → 空(隐藏)
+    // 其余未注册类型 → 空(隐藏)
     return defs;
 }

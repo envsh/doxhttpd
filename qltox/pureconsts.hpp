@@ -15,9 +15,17 @@ constexpr const char* const kFilesyncType       = "filesync";
 constexpr const char* const kClipboardType      = "clipboard";
 constexpr const char* const kUnknownType        = "unknown";
 constexpr const char* const kBookmarkType       = "bookmark";
+constexpr const char* const kBookmarkName       = "Bookmark·收藏夹";
 constexpr const char* const kAichatType         = "aichat";
+constexpr const char* const kAichatName         = "AI·GPT Chat";
 constexpr const char* const kPastebinType       = "pastebin";
+constexpr const char* const kPastebinName       = "Paste Bin·Txt";
 constexpr const char* const kTranslateType      = "translate";
+constexpr const char* const kTranslateName      = "Translate·翻译";
+constexpr const char* const kMobPushType        = "mobpush";
+constexpr const char* const kMobPushName        = "MobPush·发布";
+constexpr const char* const kSnapType            = "snap";
+constexpr const char* const kSnapName            = "Snap·贴图";
 constexpr const char* const kMisskeyType        = "misskey_note";
 constexpr const char* const kToutiaoHotnewsType = "toutiao_hotnews";   // 头条热闻订阅流（type == chatId）
 constexpr int kToutiaoHotnewsId = -107;                                // 头条热闻保留 id（-107，固定不 hash）

@@ -30,6 +30,8 @@ extern const char* EMOJI_BOOKMARK;
 extern const char* EMOJI_AICHAT;
 extern const char* EMOJI_PASTEBIN;
 extern const char* EMOJI_TRANSLATE;
+extern const char* EMOJI_MOBPUSH;
+extern const char* EMOJI_SNAP;
 
 struct Contact {
     int id;

@@ -90,6 +90,8 @@ static const int VIRTUAL_BOOKMARK_ID  = -103;
 static const int VIRTUAL_AICHAT_ID    = -104;
 static const int VIRTUAL_PASTEBIN_ID  = -105;
 static const int VIRTUAL_TRANSLATE_ID = -106;
+static const int VIRTUAL_MOBPUSH_ID  = -121;
+static const int VIRTUAL_SNAP_ID     = -122;
 
 // sticonShowStatusMessage 使用的托盘实例（MainWindow 创建/销毁时维护，不导出）
 static SystemTrayIcon* s_trayIcon = 0;
@@ -662,17 +664,19 @@ MainWindow::MainWindow(QWidget* parent)
         // 追加虚拟联系人（不查 DB，纯硬编码 UI 占位符）
         auto addSeed = [&](int id, const char* name, const char* type) {
             Contact* c = new Contact();
-            c->id = id; c->name = name; c->type = type;
+            c->id = id; c->name = qFromUtf8(name); c->type = type;
             c->status = "online"; c->chat_id = ""; c->is_connected = false;
             list.append(c);
         };
         addSeed(VIRTUAL_UNKNOWN_ID, "Unknown", kUnknownType);
         addSeed(VIRTUAL_SYSEVENT_ID, "Sysevent", kSyseventType);
         addSeed(VIRTUAL_REDDIT_ID, "Reddit", kTopicType);
-        addSeed(VIRTUAL_BOOKMARK_ID, "Bookmark", kBookmarkType);
-        addSeed(VIRTUAL_AICHAT_ID, "AI Chat", kAichatType);
-        addSeed(VIRTUAL_PASTEBIN_ID, "Paste Bin", kPastebinType);
-        addSeed(VIRTUAL_TRANSLATE_ID, "Translate", kTranslateType);
+        addSeed(VIRTUAL_BOOKMARK_ID, kBookmarkName, kBookmarkType);
+        addSeed(VIRTUAL_AICHAT_ID, kAichatName, kAichatType);
+        addSeed(VIRTUAL_PASTEBIN_ID, kPastebinName, kPastebinType);
+        addSeed(VIRTUAL_TRANSLATE_ID, kTranslateName, kTranslateType);
+        addSeed(VIRTUAL_MOBPUSH_ID, kMobPushName, kMobPushType);
+        addSeed(VIRTUAL_SNAP_ID, kSnapName, kSnapType);
         contactListWidget->setContacts(list);
     }
     
@@ -1170,50 +1174,74 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 {
                     Contact* c = new Contact();
                     c->id = VIRTUAL_BOOKMARK_ID;
-                    c->name = "Bookmark";
+                    c->name = qFromUtf8(kBookmarkName);
                     c->type = kBookmarkType;
                     c->status = "online";
                     c->chat_id = "";
                     c->is_connected = false;
                     cl.append(c);
                     updateContactDb(std::string(kBookmarkType) + "_" + std::to_string(VIRTUAL_BOOKMARK_ID),
-                                    "Bookmark", "online", -1, "", "", kBookmarkType);
+                                    kBookmarkName, "online", -1, "", "", kBookmarkType);
                 }
                 {
                     Contact* c = new Contact();
                     c->id = VIRTUAL_AICHAT_ID;
-                    c->name = "AI Chat";
+                    c->name = qFromUtf8(kAichatName);
                     c->type = kAichatType;
                     c->status = "online";
                     c->chat_id = "";
                     c->is_connected = false;
                     cl.append(c);
                     updateContactDb(std::string(kAichatType) + "_" + std::to_string(VIRTUAL_AICHAT_ID),
-                                    "AI Chat", "online", -1, "", "", kAichatType);
+                                    kAichatName, "online", -1, "", "", kAichatType);
                 }
                 {
                     Contact* c = new Contact();
                     c->id = VIRTUAL_PASTEBIN_ID;
-                    c->name = "Paste Bin";
+                    c->name = qFromUtf8(kPastebinName);
                     c->type = kPastebinType;
                     c->status = "online";
                     c->chat_id = "";
                     c->is_connected = false;
                     cl.append(c);
                     updateContactDb(std::string(kPastebinType) + "_" + std::to_string(VIRTUAL_PASTEBIN_ID),
-                                    "Paste Bin", "online", -1, "", "", kPastebinType);
+                                    kPastebinName, "online", -1, "", "", kPastebinType);
                 }
                 {
                     Contact* c = new Contact();
                     c->id = VIRTUAL_TRANSLATE_ID;
-                    c->name = "Translate";
+                    c->name = qFromUtf8(kTranslateName);
                     c->type = kTranslateType;
                     c->status = "online";
                     c->chat_id = "";
                     c->is_connected = false;
                     cl.append(c);
                     updateContactDb(std::string(kTranslateType) + "_" + std::to_string(VIRTUAL_TRANSLATE_ID),
-                                    "Translate", "online", -1, "", "", kTranslateType);
+                                    kTranslateName, "online", -1, "", "", kTranslateType);
+                }
+                {
+                    Contact* c = new Contact();
+                    c->id = VIRTUAL_MOBPUSH_ID;
+                    c->name = qFromUtf8(kMobPushName);
+                    c->type = kMobPushType;
+                    c->status = "online";
+                    c->chat_id = "";
+                    c->is_connected = false;
+                    cl.append(c);
+                    updateContactDb(std::string(kMobPushType) + "_" + std::to_string(VIRTUAL_MOBPUSH_ID),
+                                    kMobPushName, "online", -1, "", "", kMobPushType);
+                }
+                {
+                    Contact* c = new Contact();
+                    c->id = VIRTUAL_SNAP_ID;
+                    c->name = qFromUtf8(kSnapName);
+                    c->type = kSnapType;
+                    c->status = "online";
+                    c->chat_id = "";
+                    c->is_connected = false;
+                    cl.append(c);
+                    updateContactDb(std::string(kSnapType) + "_" + std::to_string(VIRTUAL_SNAP_ID),
+                                    kSnapName, "online", -1, "", "", kSnapType);
                 }
                 contactListWidget->setContacts(cl);
             }
@@ -1687,6 +1715,12 @@ void MainWindow::onContactSelected(int id, const QString& type, const QString& n
     } else if (type == kTranslateType) {
         emoji = EMOJI_TRANSLATE;
         headerText = emoji + " " + name;
+    } else if (type == kMobPushType) {
+        emoji = EMOJI_MOBPUSH;
+        headerText = emoji + " " + name;
+    } else if (type == kSnapType) {
+        emoji = EMOJI_SNAP;
+        headerText = emoji + " " + name;
     } else if (type == kGomuksRoomType) {
         emoji = EMOJI_MATRIX;
         headerText = emoji + " " + name;
@@ -1893,7 +1927,8 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
         backEl.sendState = ChatElement::SendSending;
         backEl.sendmsgseq = sendmsgseq;
         if (type == kBookmarkType || type == kAichatType
-            || type == kPastebinType || type == kTranslateType) {
+            || type == kPastebinType || type == kTranslateType
+            || type == kMobPushType || type == kSnapType) {
             backEl.sendState = ChatElement::SendSent;
         }
     }
@@ -2654,13 +2689,17 @@ void MainWindow::retranslateUi() {
         } else if (currentChatType == kSyseventType) {
             headerText = QString("System Events") + " " + QString::number(currentChatId);
         } else if (currentChatType == kBookmarkType) {
-            headerText = QString("Bookmark") + " " + QString::number(currentChatId);
+            headerText = qFromUtf8(kBookmarkName) + " " + QString::number(currentChatId);
         } else if (currentChatType == kAichatType) {
-            headerText = QString("AI Chat") + " " + QString::number(currentChatId);
+            headerText = qFromUtf8(kAichatName) + " " + QString::number(currentChatId);
         } else if (currentChatType == kPastebinType) {
-            headerText = QString("Paste Bin") + " " + QString::number(currentChatId);
+            headerText = qFromUtf8(kPastebinName) + " " + QString::number(currentChatId);
         } else if (currentChatType == kTranslateType) {
-            headerText = QString("Translate") + " " + QString::number(currentChatId);
+            headerText = qFromUtf8(kTranslateName) + " " + QString::number(currentChatId);
+        } else if (currentChatType == kMobPushType) {
+            headerText = qFromUtf8(kMobPushName) + " " + QString::number(currentChatId);
+        } else if (currentChatType == kSnapType) {
+            headerText = qFromUtf8(kSnapName) + " " + QString::number(currentChatId);
         } else if (!protoStreamEmoji(currentChatType).isEmpty()) {
             QString label;
             std::string type = std::string(qToUtf8(currentChatType).data());

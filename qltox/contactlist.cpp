@@ -33,6 +33,8 @@ const char* EMOJI_BOOKMARK  = "🔖";
 const char* EMOJI_AICHAT    = "🤖";
 const char* EMOJI_PASTEBIN  = "📦";
 const char* EMOJI_TRANSLATE = "🔤";
+const char* EMOJI_MOBPUSH  = "🔔";
+const char* EMOJI_SNAP     = "🎞️";
 const char* STATUS_ONLINE = "●";
 const char* STATUS_OFFLINE = "○";
 
@@ -58,6 +60,8 @@ static uint32_t typeToEmojiCp(const QString& type) {
     if (type == kAichatType)    return 0x1F916;
     if (type == kPastebinType)  return 0x1F4E6;
     if (type == kTranslateType) return 0x1F524;
+    if (type == kMobPushType)   return 0x1F4E2;   // 📢
+    if (type == kSnapType)      return 0x1F39E;   // 🎞️
     if (type == kToutiaoHotnewsType)       return 0x1F4F0;  // 📰
     if (type == kZhihuNotifyType
         || type == kZhihuHotnewsType)      return 0x1F4D8;  // 📘

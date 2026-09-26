@@ -94,7 +94,7 @@ const VirtualSeed kVirtualSeeds[] = {
     { VIRTUAL_SEARCH_UNKNOWN_ID,  "Unknown",  kUnknownType },
     { VIRTUAL_SEARCH_SYSEVENT_ID, "Sysevent", kSyseventType },
     { VIRTUAL_SEARCH_REDDIT_ID,   "Reddit",   kTopicType },
-    { VIRTUAL_SEARCH_BOOKMARK_ID, "Bookmark", kBookmarkType },
+    { VIRTUAL_SEARCH_BOOKMARK_ID, kBookmarkName, kBookmarkType },
 };
 
 const EventType34 SearchReadyType = toEventType34(QEvent::User + 107);
