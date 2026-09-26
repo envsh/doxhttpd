@@ -3754,7 +3754,11 @@ void MainWindow::onFavoriteClicked(int msgIndex) {
 void MainWindow::onChatScreenshotRequested() {
 #if defined(Q_OS_MAC) || defined(Q_OS_MACX) || defined(Q_OS_DARWIN)
     // 上一次还在选区则忽略本次点击（防连点）
-    if (m_macShotProc && m_macShotProc->isRunning()) { return; }
+#ifdef QT3_BUILD
+    if (m_macShotProc && m_macShotProc->isRunning()) { return; }   // Qt3 全系均有 isRunning()
+#else
+    if (m_macShotProc && m_macShotProc->state() == QProcess::Running) { return; }  // Qt4 用 state()
+#endif
 
     m_macShotTmpPath = QDir::tempPath()
         + QString("/qltox_shot_%1.png").arg(QString::number(QDateTime::currentMSecsSinceEpoch()));
