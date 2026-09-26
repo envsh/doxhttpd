@@ -731,6 +731,17 @@ static bool tryParseMisskeyNote(const std::string& rawStr, ParseResult& ret) {
     std::string chatName = jsonGetString(root, "account_name"); // "Misskey时间线";
 	if (chatName.empty()) { chatName = chatId; }
 	assert(!chatId.empty());
+    static const std::string kAvatarSuffix = "&avatar=1";
+    if (!avatarUrl.empty()
+        && avatarUrl.size() >= kAvatarSuffix.size()
+        && avatarUrl.compare(avatarUrl.size() - kAvatarSuffix.size(),
+                             kAvatarSuffix.size(), kAvatarSuffix) == 0) {
+        // with suffix it will be webp, or png/jpg
+        // https://p.misskey.gg/avatar.webp?url=https%3A%2F%2Fxxxxxbe9aee0.png&avatar=1
+        // 但是需要保留p.misskey.gg的转发,可能后端的url可能直接无法访问
+        avatarUrl.erase(avatarUrl.size() - kAvatarSuffix.size(),
+                        kAvatarSuffix.size());
+    }
 
     ContactData cd;
     cd.id          = (int)(std::hash<std::string>{}(chatId + kMisskeyType) & 0x7fffffff);
