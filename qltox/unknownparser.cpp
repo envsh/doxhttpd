@@ -1720,6 +1720,27 @@ static bool tryParseXiaohongshuNotify(const std::string& rawStr, ParseResult& re
 //   zhihu_hotnews 要求 card_id，均不命中 → 不与 tryParseToutiaoHotlist/tryParseZhihuHotnews 冲突。
 //   封面为 picasso-static 图床 png，无尺寸信息 → UnkSize。
 
+// 站点板图标（48px 级 PNG 直链）——无用户封面时作板来源头像
+// 必须 PNG/JPG：Qt3 无 ICO 解码器（plugins/imageformats 仅 jpeg/mng），用 .ico 会加载失败
+static const char* kBoardIcon(const std::string& board) {
+    static const struct { const char* board; const char* url; } kMap[] = {
+        {"xiaohongshu",  "https://picasso-static.xiaohongshu.com/fe-platform/f43dc4a8baf03678996c62d8db6ebc01a82256ff.png"},
+        {"douban-group", "https://asset.doubanio.com/cuphead/movie-static/pics/apple-touch-icon.png"},
+        {"douban-movie", "https://asset.doubanio.com/cuphead/movie-static/pics/apple-touch-icon.png"},
+        {"hupu",         "https://w1.hoopchina.com.cn/images/m/hupu_logo_new.png"},
+        {"csdn",         "https://img-home.csdnimg.cn/images/20201124032511.png"},
+        {"weread",       "https://rescdn.qqmail.com/node/wr/wrpage/style/images/independent/favicon/favicon_48h.png"},
+        {"ithome",       "https://www.ithome.com/img/t.png"},
+        {"douyin",       "https://lf1-cdn-tos.bytegoofy.com/goofy/ies/douyin_web/public/favicon.png"},
+        {"tieba",        "https://tb3.bdstatic.com/tb/wise/hybrid-usergrow-base/static/img/logo.aa4c16c1.png"},
+        {"jianshu",      "https://cdn2.jianshu.io/assets/apple-touch-icons/57-a6f1f1ee62ace44f6dc2f6a08575abd3c3b163288881c78dd8d75247682a4b27.png"},
+    };
+    for (const auto& kv : kMap) {
+        if (board == kv.board) return kv.url;
+    }
+    return nullptr;
+}
+
 static bool tryParseXiaohongshuHotnews(const std::string& rawStr, ParseResult& ret) {
     cJSON* root = cJSON_Parse(rawStr.c_str());
     if (!root) return false;
@@ -1728,10 +1749,15 @@ static bool tryParseXiaohongshuHotnews(const std::string& rawStr, ParseResult& r
     std::string title     = jsonGetString(root, "title");
     std::string url       = jsonGetString(root, "url");
     std::string hotValue  = jsonGetString(root, "hot_value");
+    std::string board     = jsonGetString(root, "board");
     if (protoType != "hotlist" || title.empty() || url.empty() || hotValue.empty()) {
         cJSON_Delete(root);
         return false;
     }
+
+    // 板热榜（如 reddit 话题下的 csdn 板）userid/username/nickname 取 board 值；无 board 回退 fedone
+    std::string peerId   = board.empty() ? "fedone"   : board;
+    std::string peerName = board.empty() ? "小红书热闻" : board;
 
     int64_t index = jsonGetInt64(root, "index");
 
@@ -1751,7 +1777,7 @@ static bool tryParseXiaohongshuHotnews(const std::string& rawStr, ParseResult& r
 
     HistoryMessage hm;
     hm.message       = title + "\n" + url + "\n" + meta;
-    hm.sender_pubkey = "fedone";
+    hm.sender_pubkey = peerId;
     hm.sender_number = 0;
     hm.direction     = "received";
     hm.roomId        = kXiaohongshuHotnewsType;
@@ -1771,14 +1797,19 @@ static bool tryParseXiaohongshuHotnews(const std::string& rawStr, ParseResult& r
     ret.messages.push_back(hm);
 
     PeerInfo pi;
-    pi.publicKey  = "fedone";
-    pi.userName   = "fedone";
-    pi.nickname   = "小红书热闻";
-    pi.iconUrl    = cover;
+    pi.publicKey  = peerId;
+    pi.userName   = peerId;
+    pi.nickname   = peerName;
+    // 发送者为“板”或热榜源，用户头像一律用站点图标（PNG 直链），
+    // 绝不使用文章封面（cover 每篇不同且非用户头像，消息内联图已含 cover）
+    {
+        const char* icon = kBoardIcon(board);
+        if (icon) pi.iconUrl = icon;
+    }
     pi.peerNumber = 0;
     ret.peers.push_back(pi);
 
-    ret.senderName  = qFromUtf8("小红书热闻");
+    ret.senderName  = qFromUtf8(peerName);
     ret.handled     = true;
 
     cJSON_Delete(root);
