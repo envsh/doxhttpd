@@ -484,7 +484,7 @@ void DesktopLyrics::testShowTime()
         "星期一","星期二","星期三","星期四","星期五","星期六","星期日"
     };
     QString ts = d.toString("yyyy-MM-dd") + " "
-        + t.toString("HH:mm:ss") + " "
+        + t.toString("hh:mm:ss") + " "
         + tzBuf + " "
         + qFromUtf8(weekDays[d.dayOfWeek() - 1]);
     lrc.text = ts;

@@ -729,7 +729,7 @@ static QString formatAdaptiveMessageTime(const QString& timeStr) {
     if (secs < 3600) { return QString::number(secs / 60) + qFromUtf8(" 分钟前"); }
     QDate today = now.date();
     QDate msgDate = dt.date();
-    if (msgDate == today) { return dt.toString("HH:mm"); }
+    if (msgDate == today) { return dt.toString("hh:mm"); }
     if (msgDate == today.addDays(-1)) { return qFromUtf8("昨天"); }
     if (msgDate.daysTo(today) < 7) {
         static const char* wd[] = { "周一", "周二", "周三", "周四", "周五", "周六", "周日" };

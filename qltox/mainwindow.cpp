@@ -3112,7 +3112,7 @@ void MainWindow::showClockOnLyrics()
     QDate d = QDate::currentDate();
     QTime t = QTime::currentTime();
     QString ts = d.toString("yyyy-MM-dd") + " "
-        + t.toString("HH:mm:ss") + " "
+        + t.toString("hh:mm:ss") + " "
         + tzBuf + " "
         + qFromUtf8(weekDays[d.dayOfWeek() - 1]);
     m_lyrics->setLrcText("[00:00.000]" + ts);

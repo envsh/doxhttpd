@@ -18,6 +18,7 @@
 #include <qapplication.h>
 #ifdef Q_WS_X11
 #include <X11/Xlib.h>
+#include <X11/Xutil.h>
 #include <X11/Xatom.h>
 #endif
 #else
@@ -59,7 +60,10 @@ public:
 	TrayBubble(SystemTrayIcon* owner)
 		: QWidget(0, 0, WStyle_StaysOnTop | WStyle_Customize | WStyle_NoBorder | WStyle_Tool)
 		, m_owner(owner), m_hasCurrent(false), m_timerId(0), m_timerMode(Idle)
-		, m_arrow(ArrowNone) {}
+		, m_arrow(ArrowNone)
+	{
+		setFocusPolicy(NoFocus);   // 气泡不接收键盘焦点，点击仍走 mousePressEvent
+	}
 
 	// 入队策略见类注释；全部在调用方（GUI）线程，无锁
 	void showMessage(int iconType, const QString& title, const QString& message, int msecs)
@@ -163,6 +167,27 @@ private:
 
 	void showMyself()
 	{
+#ifdef Q_WS_X11
+		// Qt3 无 WA_ShowWithoutActivating / WA_X11DoNotAcceptFocus，
+		// 顶级窗默认 XWMHints.input=True → map 时 WM 把键盘焦点交给气泡，抢走原活动窗口焦点。
+		Display* dpy = QPaintDevice::x11Display();
+		Window w = winId();
+		XWMHints* h = XGetWMHints(dpy, w);
+		if (!h) {
+			h = XAllocWMHints();
+		} else {
+			h->flags |= InputHint;
+		}
+		h->input = False;
+		XSetWMHints(dpy, w, h);
+		XFree(h);
+		Atom userTime = XInternAtom(dpy, "_NET_WM_USER_TIME", False);
+		if (userTime != None) {
+			long zero = 0;
+			XChangeProperty(dpy, w, userTime, XA_CARDINAL, 32,
+			                PropModeReplace, (unsigned char*)&zero, 1);
+		}
+#endif
 		QWidget::show();
 		raise();
 	}

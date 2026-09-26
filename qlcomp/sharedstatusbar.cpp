@@ -211,7 +211,7 @@ void SharedStatusBar::doMessage(const QString &msg, int timeout,
 {
     if (!msg.isEmpty()) {
         StatusHistoryEntry e;
-        e.timeStr = QTime::currentTime().toString("HH:mm:ss");
+        e.timeStr = QTime::currentTime().toString("hh:mm:ss");
         e.text = msg;
         e.type = type;
         if (e.text.length() > HISTORY_TEXT_MAX) {

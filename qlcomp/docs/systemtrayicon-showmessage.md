@@ -45,6 +45,15 @@ Qt4 原生气泡 z 序/外观随系统（StatusNotifierItem 下部分 DE 可能�
 `QWidget(0, 0, WStyle_StaysOnTop | WStyle_Customize | WStyle_NoBorder | WStyle_Tool)`，`friend class TrayBubble` 授予 SystemTrayIcon 私有访问。
 `WStyle_Tool` → X11 设 `_NET_WM_WINDOW_TYPE_UTILITY` + `SKIP_TASKBAR/SKIP_PAGER/ABOVE`（已验证），气泡不进任务栏/分页器，与 Qt4 原生、Qt5 QBalloonTip 一致。
 
+防抢焦点：构造体 `setFocusPolicy(NoFocus)`；`showMyself()`（每次 show 前幂等）置 `XWMHints.input=False` + `_NET_WM_USER_TIME=0`，请求 WM 在 map 时不要给气泡键盘焦点（Qt3 无 `WA_ShowWithoutActivating`/`WA_X11DoNotAcceptFocus`，顶级窗默认 `input=True` 导致 WM 抢走原活动窗口焦点；ICCCM §4.1.7 + EWMH 标准做法，对齐 xfce4-notifyd/dunst 属性）。气泡点击仍走 `mousePressEvent`，无键盘需求。
+
+### 版本对照核实（Qt4/Qt5 同机制，2026-09 已核对源码）
+
+- Qt4.8 `qwidget_x11.cpp`：`show_sys()` 遇 `WA_ShowWithoutActivating` 将 `userTime=0`，经 `qt_net_update_user_time()` → `XChangeProperty(_NET_WM_USER_TIME, XA_CARDINAL, 32, PropModeReplace)`；`create_sys()` 中 `WA_X11DoNotAcceptFocus` → `XWMHints.input=False`。
+- Qt5/XCB `qxcbwindow.cpp`：`_q_showWithoutActivating` → `updateNetWmUserTime(0)`；`Qt::WindowDoesNotAcceptFocus` → ICCCM input hint false。
+- KWin（`activation.cpp` 注释）：`_NET_WM_USER_TIME=0` 即"新 map 窗口拒绝激活"的 EWMH 标准值，WM 每新 map 必读。
+- 结论：本实现的两层（`XWMHints.input=False` + `_NET_WM_USER_TIME=0`）正是 Qt4/Qt5 两个官方属性（`WA_X11DoNotAcceptFocus` / `WA_ShowWithoutActivating`）的 X11 落点；Qt3 无上述属性 API，故用原始 Xlib 等价调用（`XGetWMHints`/`XChangeProperty`）。比 Qt4 原生 balloon（仅 `_NET_WM_USER_TIME=0`）多一层 `input=False`，同 dunst/xfce4-notifyd 做法，更稳。
+
 ### 堆叠策略（一次 `showMessage` 事件常见 2~20 条，需合并/排队）
 
 1. **去重合并 ×N**：同 title+message → 计数 +1 显示 `×N`，延长显示计时。
