@@ -15,6 +15,8 @@ public:
     void setLabel(const QString& text);
     QString label() const;
     EmbeddedMenuBar* menuBar() const { return menubar; }
+    // 通用镶入点：插入到标题与右侧系统按钮之间（不做任何业务逻辑）
+    void addTitleWidget(QWidget* w, int stretch = 0);
 
 signals:
     void appMenuClicked();

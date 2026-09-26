@@ -102,6 +102,9 @@ protected slots:
     void openPluginManager();
     void openMdEditor();
     void quitApp();                 // 真正退出应用（绕过 closeEvent 托盘拦截）
+    void onTitleUilang(int index);   // titlebar 外观三件套：语言
+    void onTitleStyle(int index);    // titlebar 外观三件套：皮肤
+    void onTitleDark(bool on);       // titlebar 外观三件套：dark
     void trayShowMainWindow();      // 从托盘恢复并激活主窗口
     void trayActivated(int reason); // 托盘点击：Trigger/DoubleClick 恢复窗口
     void updateTrayBadge(int total);

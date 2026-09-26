@@ -7,8 +7,11 @@ CustomTitleBar::CustomTitleBar(QWidget* parent)
 #ifdef QT3_BUILD
     setMinimumHeight(32);
     setMaximumHeight(32);
+#elif defined(Q_OS_MAC) || defined(Q_OS_MACX) || defined(Q_OS_DARWIN)
+    setMinimumHeight(32);       // macOS：40px 偏高约 50% 空白（原生控件矮），对齐 Qt3 紧凑高度
+    setMaximumHeight(32);
 #else
-    setMinimumHeight(40);
+    setMinimumHeight(40);       // 其它平台（Linux 等）维持现状
     setMaximumHeight(40);
 #endif
 
@@ -72,6 +75,19 @@ void CustomTitleBar::toggleMenu() {
 
 void CustomTitleBar::setLabel(const QString& text) {
     if (titleLabel) { titleLabel->setText(text); }
+}
+
+void CustomTitleBar::addTitleWidget(QWidget* w, int stretch) {
+    if (!w) { return; }
+    QBoxLayout* lay = static_cast<QBoxLayout*>(layout());
+    if (!lay) { return; }
+#ifdef QT3_BUILD
+    int idx = lay->findWidget(sysMenuBtn);          // qlayout.h:415 返回 -1 表示未找到
+#else
+    int idx = lay->indexOf(sysMenuBtn);
+#endif
+    if (idx < 0) { lay->addWidget(w, stretch); return; }
+    lay->insertWidget(idx, w, stretch);             // 插到 sysMenuBtn 之前 = 标题与右侧之间
 }
 
 QString CustomTitleBar::label() const {

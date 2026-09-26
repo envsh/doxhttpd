@@ -7,6 +7,7 @@
 #include "version.h"
 #include "avatar_manager.h"
 #include "translator.h"
+#include "ThemeManager.h"
 #include "logindialog.h"
 #include "conferenceinvitedialog.h"
 #include "groupinvitedialog.h"
@@ -686,6 +687,60 @@ MainWindow::MainWindow(QWidget* parent)
 
     // ≡ 应用菜单：切换 menubar 显隐
     QObject::connect(titleBar, SIGNAL(appMenuClicked()), titleBar, SLOT(toggleMenu()));
+
+    // ── titlebar 外观三件套（仿 chatwidget 顶部：语言→皮肤→dark，功能同步即可，显示不强求）──
+    QWidget* titlePanel = new QWidget(titleBar);
+    QBoxLayout* panelLay = qNewBoxLayout(titlePanel, QBoxLayout::LeftToRight, 2, 0);
+    QComboBox* tLang = new QComboBox(titlePanel);
+    tLang->setFixedHeight(30);   // 与 titlebar 内容高一致
+#ifdef QT3_BUILD
+    tLang->insertItem(qFromUtf8("简体中文"), 0);
+    tLang->insertItem(qFromUtf8("繁體中文"), 1);
+    tLang->insertItem(qFromUtf8("English"), 2);
+    tLang->setCurrentItem(0);
+#else
+    tLang->insertItem(0, qFromUtf8("简体中文"));
+    tLang->insertItem(1, qFromUtf8("繁體中文"));
+    tLang->insertItem(2, qFromUtf8("English"));
+    tLang->setCurrentIndex(0);
+#endif
+    panelLay->addWidget(tLang, 0);
+
+    QComboBox* tStyle = new QComboBox(titlePanel);
+    tStyle->setFixedHeight(30);  // 与 titlebar 内容高一致
+    {
+        const auto& panelStyles = StyleParams::registeredStyles();
+#ifdef QT3_BUILD
+        for (int i = 0; i < (int)panelStyles.size(); ++i) {
+            tStyle->insertItem(_(panelStyles[i].displayKey), i);
+        }
+        int sc = 0;
+        for (int i = 0; i < (int)panelStyles.size(); ++i) {
+            if (QString(panelStyles[i].id) == QString(ThemeManager::styleId())) { sc = i; break; }
+        }
+        tStyle->setCurrentItem(sc);
+#else
+        for (int i = 0; i < (int)panelStyles.size(); ++i) {
+            tStyle->insertItem(i, _(panelStyles[i].displayKey));
+        }
+        int sc = 0;
+        for (int i = 0; i < (int)panelStyles.size(); ++i) {
+            if (QString(panelStyles[i].id) == QString(ThemeManager::styleId())) { sc = i; break; }
+        }
+        tStyle->setCurrentIndex(sc);
+#endif
+    }
+    panelLay->addWidget(tStyle, 0);
+
+    QCheckBox* tDark = new QCheckBox(_("theme_dark"), titlePanel);
+    tDark->setFixedHeight(30);   // 与 titlebar 内容高一致
+    qSetChecked(tDark, ThemeManager::isDarkMode());
+    panelLay->addWidget(tDark, 0);
+
+    QObject::connect(tLang, SIGNAL(activated(int)), this, SLOT(onTitleUilang(int)));
+    QObject::connect(tStyle, SIGNAL(activated(int)), this, SLOT(onTitleStyle(int)));
+    QObject::connect(tDark, SIGNAL(toggled(bool)), this, SLOT(onTitleDark(bool)));
+    titleBar->addTitleWidget(titlePanel, 0);
 
     EmbeddedMenuBar* mb = titleBar->menuBar();
 
@@ -2555,6 +2610,24 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
 void MainWindow::onLanguageChanged(const QString& langCode) {
     Translator::instance().loadLanguage(langCode);
     QtappSetup::installQtTranslations(langCode);
+}
+
+void MainWindow::onTitleUilang(int index) {
+    QString langCode = (index == 1) ? QString("zh-TW")
+                   : (index == 2) ? QString("en-US") : QString("zh-CN");
+    Config::setValue("uilang", langCode);
+    onLanguageChanged(langCode);
+}
+
+void MainWindow::onTitleStyle(int index) {
+    const auto& panelStyles = StyleParams::registeredStyles();
+    if (index >= 0 && index < (int)panelStyles.size()) {
+        ThemeManager::setStyle(panelStyles[index].id, ThemeManager::isDarkMode());
+    }
+}
+
+void MainWindow::onTitleDark(bool on) {
+    ThemeManager::applyTheme(on);
 }
 
 void MainWindow::retranslateUi() {
