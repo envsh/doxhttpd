@@ -267,7 +267,7 @@ void EmojiRenderer::drawText(QPainter& p, const QRect& textRect, const QString& 
         int lineEnd = i;
         for (int j = i; j < n && cps[j] != '\n'; j++) {
             int cw = isEmojiChar(cps[j]) ? (emojiSize > 0 ? lh : fm.height())
-                                         : fm.width(QChar((ushort)cps[j]));
+                                         : qFontWidth(fm, QChar((ushort)cps[j]));
             lineWidth += cw;
             if (cps[j] == ' ') { lastSpace = j; }
             if (lineWidth >= maxW) {
@@ -317,7 +317,7 @@ void EmojiRenderer::drawText(QPainter& p, const QRect& textRect, const QString& 
                 }
                 j--;
                 p.drawText(lx, y + fm.ascent(), seg);
-                lx += fm.width(seg);
+                lx += qFontWidth(fm, seg);
             }
         }
 

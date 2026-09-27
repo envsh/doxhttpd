@@ -23,7 +23,7 @@ ImageInputConfirmDialog::ImageInputConfirmDialog(
     qSetWindowTitle(this, _("paste_image.title"));
 
     QVBoxLayout* root = new QVBoxLayout(this);
-    root->setMargin(8);
+    qSetLayoutMargin(root, 8);
     root->setSpacing(6);
 
     if (!m_source.isEmpty()) {

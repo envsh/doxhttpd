@@ -139,7 +139,7 @@ CombineSearch::CombineSearch(QWidget* parent)
     m_canceled.store(false);
 
     QVBoxLayout* root = new QVBoxLayout(this);
-    root->setMargin(8);
+    qSetLayoutMargin(root, 8);
     root->setSpacing(6);
 
     QHBoxLayout* searchRow = new QHBoxLayout;
@@ -349,7 +349,7 @@ void CombineSearch::goLast() {
 QWidget* CombineSearch::makeRow(const QString& title, const QString& detail, QWidget* host) {
     QWidget* row = new QWidget(host);
     QVBoxLayout* lay = new QVBoxLayout(row);
-    lay->setMargin(6);
+    qSetLayoutMargin(lay, 6);
     lay->setSpacing(2);
 
     QLabel* t = new QLabel(qElideChars(title, 80, ElideRight), row);

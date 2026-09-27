@@ -39,7 +39,7 @@ MdEditor::MdEditor(QWidget* parent)
     }
 
     QVBoxLayout* mainLay = new QVBoxLayout(this);
-    mainLay->setMargin(4);
+    qSetLayoutMargin(mainLay, 4);
     mainLay->setSpacing(4);
 
     m_toolbar = new MdToolbar(this);

@@ -20,8 +20,8 @@ public:
     EmojiLabel(QWidget* parent = 0, const char* name = 0);
     EmojiLabel(const QString& text, QWidget* parent = 0, const char* name = 0);
 #else
-    EmojiLabel(QWidget* parent = 0, Qt::WindowFlags f = 0);
-    EmojiLabel(const QString& text, QWidget* parent = 0, Qt::WindowFlags f = 0);
+    EmojiLabel(QWidget* parent = 0, Qt::WindowFlags f = Qt::WindowFlags());
+    EmojiLabel(const QString& text, QWidget* parent = 0, Qt::WindowFlags f = Qt::WindowFlags());
 #endif
 protected:
 #ifdef QT3_BUILD

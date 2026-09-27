@@ -9,7 +9,9 @@
 #include <qcursor.h>
 #else
 #include <QApplication>
-#include <QDesktopWidget>
+#if QT_VERSION < 0x060000
+#include <QDesktopWidget>  // Qt6 移除 QDesktopWidget（改用 QScreen）
+#endif
 #include <QImage>
 #include <QCursor>
 #endif
@@ -26,8 +28,7 @@ ScreenshotRegionSelector::ScreenshotRegionSelector(const QPixmap& background)
     , m_selecting(false)
     , m_hasSelection(false)
 {
-    QDesktopWidget* desktop = QApplication::desktop();
-    QRect screenRect = desktop->rect();
+    QRect screenRect = qVirtualDesktopRect();
     setGeometry(screenRect);
 
     // 全屏无边框置顶窗口

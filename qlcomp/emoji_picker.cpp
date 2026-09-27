@@ -687,7 +687,7 @@ void EmojiPicker::rebuildSearchPage() {
     QVBoxLayout* innerLayout = new QVBoxLayout(m_searchPage);
     innerLayout->setSpacing(1);
 #ifdef QT3_BUILD
-    innerLayout->setMargin(0);
+    qSetLayoutMargin(innerLayout, 0);
 #else
     innerLayout->setContentsMargins(0, 0, 0, 0);
 #endif

@@ -123,7 +123,7 @@ protected:
     void resizeEvent(QResizeEvent* e);
     void timerEvent(QTimerEvent* e);
     void contextMenuEvent(QContextMenuEvent* e);
-    void enterEvent(QEvent* e);
+    void enterEvent(qEnterEventType* e);
     void leaveEvent(QEvent* e);
 
 private:

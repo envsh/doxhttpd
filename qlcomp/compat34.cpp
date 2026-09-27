@@ -10,7 +10,9 @@
 #include <qdatetime.h>       // QDateTime (qFmtTime, getCurrentTime)
 #include <qapplication.h>    // QApplication::clipboard (LabelDblClickFilter)
 #include <qclipboard.h>      // QClipboard (LabelDblClickFilter)
-
+#include <qlayout.h>         // QLayout (qSetLayoutMargin)
+#include <qpixmap.h>         // QPixmap (qGrabWholeScreen)
+#include <qpaintdevice.h>    // QPaintDevice::x11Display
 #ifdef QT3_BUILD
 #include <qtooltip.h>        // QToolTip::add
 #include <qfileinfo.h>       // QFileInfo (qAppDir)
@@ -28,8 +30,18 @@
 #include <qdesktopwidget.h>  // QApplication::desktop (TipLabel::placeTip)
 #include <qtimer.h>          // QTimer::singleShot (showTempTooltip)
 #else
+#include <QWheelEvent>       // QWheelEvent (qWheelDeltaY/qWheelIsHorizontal)
 #include <QToolTip>          // QToolTip::showText (showTempTooltip)
 #include <QTimer>            // QTimer::singleShot (showTempTooltip)
+#if QT_VERSION < 0x060000
+#include <QDesktopWidget>    // QApplication::desktop (qPrimaryScreenGeometry 等)
+#else
+#include <QGuiApplication>   // QGuiApplication::primaryScreen/screens
+#include <QScreen>           // QScreen (geometry/availableGeometry/grabWindow)
+#endif
+#ifdef Q_OS_LINUX
+#include <X11/Xlib.h>        // XOpenDisplay (qX11Display)
+#endif
 #endif
 
 void qSetWindowTitle(QWidget* w, const QString& title) {
@@ -37,6 +49,15 @@ void qSetWindowTitle(QWidget* w, const QString& title) {
     w->setCaption(title);
 #else
     w->setWindowTitle(title);
+#endif
+}
+
+Display* qX11Display() {
+#ifdef Q_OS_LINUX
+    static Display* dpy = XOpenDisplay(nullptr);
+    return dpy;
+#else
+    return 0;   // 非 X11 平台不可用（调用方均在 Q_OS_LINUX 守卫内）
 #endif
 }
 
@@ -233,6 +254,114 @@ bool qIsAppActive(const QWidget* widget) {
 #endif
     }
     return qApp->activeWindow() != 0;
+}
+
+// Qt5 起 hasPendingEvents() 已 obsolete，Qt6 移除，且无等价 API
+// （事件队列属 Qt 内部细节，官方不提供查询接口）。
+// Qt6 下一律视作「无待处理事件」——调用方只用于首次绘制时序日志。
+bool qHasPendingEvents() {
+#if QT_VERSION < 0x060000
+    return qApp->hasPendingEvents();
+#else
+    return false;
+#endif
+}
+
+// ========== 布局外边距 ==========
+// Qt6 移除了 QLayout::setMargin()，统一改用 contentsMargins（Qt4.6+ 已有）。
+void qSetLayoutMargin(QLayout* layout, int m) {
+    if (!layout) {
+        return;
+    }
+#if QT_VERSION >= 0x040600
+    layout->setContentsMargins(m, m, m, m);
+#else
+    layout->setMargin(m);
+#endif
+}
+
+// ========== 滚轮事件 ==========
+// Qt6 移除了 QWheelEvent::delta() / orientation()。
+// delta() 在 Qt5 中的实现就是 angleDelta().y()（同为 1/8 度单位），
+// orientation() 是比较 pixelDelta() 两轴绝对值 —— 这里逐位复刻，非近似。
+int qWheelDeltaY(QWheelEvent* e) {
+#if QT_VERSION < 0x060000
+    return e->delta();
+#else
+    return e->angleDelta().y();
+#endif
+}
+
+bool qWheelIsHorizontal(QWheelEvent* e) {
+#if QT_VERSION < 0x060000
+    return e->orientation() == Qt::Horizontal;
+#else
+    QPoint pd = e->pixelDelta();
+    return qAbs(pd.x()) > qAbs(pd.y());
+#endif
+}
+
+// Qt5 起 QWheelEvent::x()/y() 已 deprecated，Qt6 移除。
+// pos()（Qt6 为 position()）同为控件局部坐标，逐位等价。
+QPoint qWheelPos(QWheelEvent* e) {
+#if QT_VERSION < 0x060000
+    return e->pos();
+#else
+    return e->position().toPoint();
+#endif
+}
+
+// ========== 屏幕几何 / 整屏截图 ==========
+// Qt6 移除了 QApplication::desktop() 与 QDesktopWidget，改用 QScreen。
+QRect qPrimaryScreenGeometry() {
+#if QT_VERSION < 0x060000
+    return QApplication::desktop()->screenGeometry();
+#else
+    return QGuiApplication::primaryScreen()->geometry();
+#endif
+}
+
+QRect qPrimaryAvailableGeometry() {
+#if QT_VERSION < 0x060000
+    return QApplication::desktop()->availableGeometry(-1);
+#else
+    return QGuiApplication::primaryScreen()->availableGeometry();
+#endif
+}
+
+// QDesktopWidget::rect() 是所有屏幕矩形的并集，Qt6 无直接等价 API，手工求并集
+QRect qVirtualDesktopRect() {
+#if QT_VERSION < 0x060000
+    return QApplication::desktop()->rect();
+#else
+    QRect r;
+    const QList<QScreen*> screens = QGuiApplication::screens();
+    for (int i = 0; i < screens.size(); ++i) {
+        r = r.isNull() ? screens[i]->geometry() : r.united(screens[i]->geometry());
+    }
+    return r;
+#endif
+}
+
+QRect qScreenGeometryFor(QWidget* w) {
+#if QT_VERSION < 0x060000
+    return QApplication::desktop()->screenGeometry(QApplication::desktop()->screenNumber(w));
+#else
+    return w->screen()->geometry();
+#endif
+}
+
+// QPixmap::grabWindow 在 Qt6 中已移除，等价能力迁到 QScreen::grabWindow
+QPixmap qGrabWholeScreen() {
+#if QT_VERSION < 0x060000
+    QDesktopWidget* desktop = QApplication::desktop();
+    QRect r = desktop->rect();
+    return QPixmap::grabWindow(desktop->winId(), r.x(), r.y(), r.width(), r.height());
+#else
+    QScreen* screen = QGuiApplication::primaryScreen();
+    QRect r = screen->geometry();
+    return screen->grabWindow(0, r.x(), r.y(), r.width(), r.height());
+#endif
 }
 
 // ========== URL 打开兼容 ==========

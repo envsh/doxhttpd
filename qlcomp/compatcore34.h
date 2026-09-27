@@ -4,6 +4,12 @@
 // ========== 跨 Qt3/Qt4 通用头文件 ==========
 #include <qstring.h>         // QString, QByteArray, QStringList
 #include <ctime>             // timespec, clock_gettime
+
+// Qt 4.4 起官方提供 QT_VERSION_CHECK；Qt 3.5 没有（只有 QT_VERSION_STR + QT_VERSION）。
+// 按官方同一定义补齐，Qt4/5/6 由 #ifndef 自动跳过。
+#ifndef QT_VERSION_CHECK
+#define QT_VERSION_CHECK(major, minor, patch) ((major<<16)|(minor<<8)|(patch))
+#endif
 #ifdef QT3_BUILD
 #include <qobjectlist.h>     // Qt3 QObjectList（完整定义，用于 children()）
 #include <qevent.h>          // QCustomEvent (Qt3)
@@ -40,6 +46,8 @@ QByteArray qToLocal8Bit(const QString& s);
 int qLastIndexOf(const QString& s, const QString& str);
 QString qToUpper(const QString& s);
 QStringList qSplit(const QString& str, const QString& sep);
+/// split 包装：skipEmpty=true 丢弃空项，false（默认）保留空项
+QStringList qStrSplit(const QString& str, const QString& sep, bool skipEmpty = false);
 
 bool qOpenReadOnly(QFile& file);
 bool qOpenWriteOnly(QFile& file);
@@ -83,6 +91,58 @@ public:
 #endif
 
 void qSleepMs(unsigned long ms);
+
+// ========== Q36RegExp（Qt3/Qt4: QRegExp；Qt5.11+/Qt6: QRegularExpression）==========
+#if QT_VERSION >= 0x050000
+#include <QRegularExpression>
+#else
+#include <qregexp.h>
+#endif
+
+class Q36RegExp {
+public:
+    explicit Q36RegExp(const QString& pattern = QString(), bool caseSensitive = true) {
+#if QT_VERSION >= 0x050000
+        QRegularExpression::PatternOptions opts =
+            caseSensitive ? QRegularExpression::NoPatternOption
+                          : QRegularExpression::CaseInsensitiveOption;
+        m_re = QRegularExpression(pattern, opts);
+#elif QT_VERSION >= 0x040000
+        // Qt4 把 Qt3 的 bool caseSensitive 换成了 Qt::CaseSensitivity 枚举
+        m_re = QRegExp(pattern, caseSensitive ? Qt::CaseSensitive : Qt::CaseInsensitive);
+#else
+        m_re = QRegExp(pattern, caseSensitive);
+#endif
+    }
+    int search(const QString& text, int offset = 0) { return doIndexIn(text, offset); }
+    int indexIn(const QString& text, int offset = 0) { return doIndexIn(text, offset); }
+    int matchedLength() const {
+#if QT_VERSION >= 0x050000
+        return m_last.capturedLength(0);
+#else
+        return m_re.matchedLength();
+#endif
+    }
+private:
+    // 三个分支语义一致：返回匹配起始位置，未匹配返回 -1
+    // （Qt3 的 search() 就是 Qt4 改名的 indexIn()）
+    int doIndexIn(const QString& text, int offset) {
+#if QT_VERSION >= 0x050000
+        m_last = m_re.match(text, offset);
+        return m_last.hasMatch() ? m_last.capturedStart() : -1;
+#elif QT_VERSION >= 0x040000
+        return m_re.indexIn(text, offset);
+#else
+        return m_re.search(text, offset);
+#endif
+    }
+#if QT_VERSION >= 0x050000
+    QRegularExpression m_re;
+    QRegularExpressionMatch m_last;
+#else
+    QRegExp m_re;
+#endif
+};
 
 QByteArray base64Decode(const std::string& b64);
 

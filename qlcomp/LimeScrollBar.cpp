@@ -281,7 +281,7 @@ void LimeScrollBar::paintEvent(QPaintEvent* event) {
 
 // ========== Events ==========
 
-void LimeScrollBar::enterEvent(QEvent* event) {
+void LimeScrollBar::enterEvent(qEnterEventType* event) {
     m_hovered = true;
     m_hideTimer->stop();
 

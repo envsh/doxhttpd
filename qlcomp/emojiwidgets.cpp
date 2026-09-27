@@ -228,7 +228,7 @@ void EmojiGroupBox::paintEvent(QPaintEvent* event) {
     if (textHasEmoji(title())) {
         QPainter p(this);
         QFontMetrics fm = p.fontMetrics();
-        QRect tr(10, 0, fm.width(title()), fm.height());
+        QRect tr(10, 0, qFontWidth(fm, title()), fm.height());
         EmojiRenderer::instance().drawText(p, tr, title());
     }
 }

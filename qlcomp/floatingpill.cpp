@@ -14,7 +14,7 @@ void FloatingPill::paint(QPainter& p, const QRect& parentRect, const QColor& bgC
     p.setFont(f);
 
     QString label = QString::fromUtf8("↓↓ %1").arg(m_count);
-    int textW = p.fontMetrics().width(label);
+    int textW = qFontWidth(p.fontMetrics(), label);
 
     int btnH = 28;
     int btnW = textW + 22;
@@ -34,11 +34,19 @@ void FloatingPill::paint(QPainter& p, const QRect& parentRect, const QColor& bgC
 #else
     p.setBrush(QColor(180, 180, 185));
 #endif
+#ifdef QT3_BUILD
     p.drawRoundRect(shadowRect, 40, 100);
+#else
+    p.drawRoundedRect(shadowRect, 40, 100);
+#endif
 
     // Background matches chat area
     p.setBrush(bgColor);
+#ifdef QT3_BUILD
     p.drawRoundRect(m_rect, 40, 100);
+#else
+    p.drawRoundedRect(m_rect, 40, 100);
+#endif
 
     (void)m_hovered;
     p.setPen(textColor);

@@ -37,7 +37,7 @@ static void qComboSetCurrentIndex(QComboBox* combo, int index) {
 MdToolbar::MdToolbar(QWidget* parent)
     : QWidget(parent), m_editor(0) {
     QHBoxLayout* lay = new QHBoxLayout(this);
-    lay->setMargin(2);
+    qSetLayoutMargin(lay, 2);
     lay->setSpacing(2);
 
     lay->addWidget(makeBtn("undo", qFromUtf8("↩"), qFromUtf8("撤销")));

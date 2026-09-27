@@ -16,4 +16,6 @@ if [ x"$1" == x"c" ]; then
 fi
 make
 
+ls -lh q*tox
+
 # qmake-qt4 && make

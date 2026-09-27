@@ -1,5 +1,6 @@
 #include "systemtrayicon.h"
 #include "compatcore34.h"
+#include "compat34.h"
 
 #include <stdio.h>
 #include <qimage.h>
@@ -302,7 +303,7 @@ private:
 		if (m_current.repeat <= 1) {
 			return 0;
 		}
-		return QFontMetrics(font()).width(repeatLabel());
+		return qFontWidth(QFontMetrics(font()), repeatLabel());
 	}
 
 	// 总宽(W_WIDTH) - 图标占位 - 右缘 - (repeat>1 ? "×N"宽+6px 间隙 : 0)
@@ -351,9 +352,9 @@ private:
 			int sp = rest.find(' ');
 			QString w = (sp < 0) ? rest : rest.left(sp);
 			rest = (sp < 0) ? QString() : rest.mid(sp + 1);
-			while (!w.isEmpty() && fm.width(w) > maxW) {
+			while (!w.isEmpty() && qFontWidth(fm, w) > maxW) {
 				int cut = 1;
-				while (cut < (int)w.length() && fm.width(w.left(cut + 1)) <= maxW) {
+				while (cut < (int)w.length() && qFontWidth(fm, w.left(cut + 1)) <= maxW) {
 					++cut;
 				}
 				if (!cur.isEmpty()) {
@@ -390,7 +391,7 @@ private:
 			bodyH = ICON_SIZE + 16;   // 高度下限：保证图标区完整
 		}
 		QRect tg = m_owner->d->tray->trayIconGeometry();
-		QRect scr = QApplication::desktop()->availableGeometry(-1);
+		QRect scr = qPrimaryAvailableGeometry();
 		int h, x, y;
 		if (tg.isEmpty()) {
 			m_arrow = ArrowNone;
@@ -663,7 +664,7 @@ QPixmap SystemTrayIcon::renderBadgeIcon(const QPixmap& base, int count) const
 	f.setPixelSize(px);
 	p.setFont(f);
 	QFontMetrics fm(f);
-	int tw = fm.width(t);
+	int tw = qFontWidth(fm, t);
 	int th = fm.height();
 	int bw = tw + 6;
 	if (bw > 15) {

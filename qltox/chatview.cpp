@@ -1,3 +1,4 @@
+#include "compat34.h"
 #include "identicon.h"
 #include "avatar_manager.h"
 #include "chatview.h"
@@ -81,7 +82,6 @@ QPixmap makeScaledThumb(const QPixmap& src, int mediaW, int mediaH, int maxConta
 #include <QVBoxLayout>
 #include <QDesktopServices>
 #include <QUrl>
-#include <QRegExp>
 #include <QToolTip>
 #endif
 
@@ -225,12 +225,12 @@ static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRe
 
         // 标签宽度按 "100%" 全程预算，% 增长不会推动任何元素移位
         QString label = unknown ? qFromUtf8("…") : (QString::number(pct) + "%");
-        int labelW = bfm.width("100%") + 6;
+        int labelW = qFontWidth(bfm, "100%") + 6;
         QString speedText;
         int speedW = 0;
         if (speedBps > 0 && !unknown) {
             speedText = formatSpeed(speedBps);
-            speedW = bfm.width(speedText);
+            speedW = qFontWidth(bfm, speedText);
         }
         int labelX = parentRect.right() - kPad - labelW
                    - (speedText.isEmpty() ? 0 : speedW + kPad);
@@ -310,10 +310,10 @@ static DownloadBarInfo paintDownloadStatusBar(QPainter& p, const QRect& parentRe
     }
 
     // ── Compute widths ──
-    int statusW = statusText.isEmpty() ? 0 : bfm.width(statusText) + 8;
-    int dlW     = bfm.width(dlText) + 20;
-    int retryW  = retryText.isEmpty() ? 0 : bfm.width(retryText) + 16;
-    int errW    = errText.isEmpty() ? 0 : bfm.width(errText);
+    int statusW = statusText.isEmpty() ? 0 : qFontWidth(bfm, statusText) + 8;
+    int dlW     = qFontWidth(bfm, dlText) + 20;
+    int retryW  = retryText.isEmpty() ? 0 : qFontWidth(bfm, retryText) + 16;
+    int errW    = errText.isEmpty() ? 0 : qFontWidth(bfm, errText);
 
     // ── Right-to-left layout ──
     int cursor = parentRect.right() - kPad;
@@ -559,7 +559,7 @@ static void paintMediaContent(QPainter& p, const QRect& bubbleRect,
             char buf[16];
             snprintf(buf, sizeof(buf), "%d:%02d", durationSec / 60, durationSec % 60);
             QString dur = qFromUtf8(buf);
-            int bw = fm.width(dur) + 12, bh = fm.lineSpacing() + 4;
+            int bw = qFontWidth(fm, dur) + 12, bh = fm.lineSpacing() + 4;
             QRect badgeR(imgRect.right() - bw - 4, imgRect.bottom() - bh - 4, bw, bh);
 #ifdef QT3_BUILD
             p.setBrush(QColor(50, 50, 50));
@@ -682,7 +682,7 @@ static void drawGroupedTime(QPainter& p, const QFont& baseFont,
     f.setPointSize(10);
     p.setFont(f);
     p.setPen(pal.textMuted);
-    int tw = fm.width(at);
+    int tw = qFontWidth(fm, at);
     p.drawText(bubbleRect.right() - tw - ChatView::kBubbleHPad,
                bubbleRect.bottom() - ChatView::kBubbleVPad - fm.lineSpacing(),
                tw, fm.lineSpacing(),
@@ -752,7 +752,7 @@ static int wrappedLineCount(const QString& text, int maxW,
         if (cps[pos] == '\n') { lineCount++; pos++; continue; }
         int lineWidth = 0, lastSpace = -1, end = pos;
         while (end < tLen && cps[end] != '\n') {
-            int cw = isEmojiChar(cps[end]) ? emojiW : fm.width(QChar(cps[end]));
+            int cw = isEmojiChar(cps[end]) ? emojiW : qFontWidth(fm, QChar(cps[end]));
             lineWidth += cw;
             if (cps[end] == ' ') { lastSpace = end; }
             if (lineWidth >= maxW) {
@@ -771,7 +771,7 @@ static int wrappedLineCount(const QString& text, int maxW,
         if (text[pos] == '\n') { lineCount++; pos++; continue; }
         int lineWidth = 0, lastSpace = -1, end = pos;
         while (end < tLen && text[end] != '\n') {
-            lineWidth += fm.width(text[end]);
+            lineWidth += qFontWidth(fm, QChar(text[end]));
             if (text[end].isSpace()) { lastSpace = end; }
             if (lineWidth >= maxW) {
                 if (lastSpace > pos && end - pos > 10) { end = lastSpace + 1; }
@@ -826,7 +826,7 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
             if (cps[pos] == '\n') { lineCount++; pos++; continue; }
             int lineWidth = 0, lastSpace = -1, end = pos;
             while (end < tLen && cps[end] != '\n') {
-                int cw = isEmojiChar(cps[end]) ? emojiW : fm.width(QChar(cps[end]));
+                int cw = isEmojiChar(cps[end]) ? emojiW : qFontWidth(fm, QChar(cps[end]));
                 lineWidth += cw;
                 if (cps[end] == ' ') { lastSpace = end; }
                 if (lineWidth >= bubbleTextWidth) {
@@ -852,7 +852,7 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
             int lastSpace = -1;
             int end = i;
             while (end < textLen && messageText[end] != '\n') {
-                lineWidth += fm.width(messageText[end]);
+                lineWidth += qFontWidth(fm, QChar(messageText[end]));
                 if (messageText[end].isSpace()) lastSpace = end;
                 if (lineWidth >= bubbleTextWidth) {
                     if (lastSpace > i && end - i > 10) {
@@ -888,7 +888,7 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
                 int lastSpace = -1;
                 int end = tPos;
                 while (end < tLen2 && translatedText[end] != '\n') {
-                    lineWidth += sfm.width(translatedText[end]);
+                    lineWidth += qFontWidth(sfm, QChar(translatedText[end]));
                     if (translatedText[end].isSpace()) lastSpace = end;
                     if (lineWidth >= bubbleTextWidth) {
                         if (lastSpace > tPos && end - tPos > 10) {
@@ -978,7 +978,7 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
                 if (displayText[pos] == '\n') { nameLines++; pos++; continue; }
                 int lineW = 0, lastSpace = -1, end = pos;
                 while (end < tLen && displayText[end] != '\n') {
-                    lineW += fm.width(displayText[end]);
+                    lineW += qFontWidth(fm, QChar(displayText[end]));
                     if (displayText[end] == ' ') { lastSpace = end; }
                     if (lineW >= textW) {
                         if (lastSpace > pos && end - pos > 3) { end = lastSpace + 1; }
@@ -1031,7 +1031,7 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
                 if (displayText[pos] == '\n') { nameLines++; pos++; continue; }
                 int lineWidth = 0, lastSpace = -1, end = pos;
                 while (end < tLen && displayText[end] != '\n') {
-                    lineWidth += fm.width(displayText[end]);
+                    lineWidth += qFontWidth(fm, QChar(displayText[end]));
                     if (displayText[end] == ' ') { lastSpace = end; }
                     if (lineWidth >= textW) {
                         if (lastSpace > pos && end - pos > 3) {
@@ -1133,7 +1133,7 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
                 else
                     displayName = "?";
                 displayName = qElideChars(displayName, 23, ElideMiddle);
-                int nameW = fm.width(displayName) + fm.width("  ");
+                int nameW = qFontWidth(fm, displayName) + qFontWidth(fm, "  ");
                 p.drawText(hdrTextRight - nameW, y + kPad, nameW, headerH, Qt::AlignRight | Qt::AlignVCenter, displayName);
 
                 int ipW = 0;
@@ -1141,7 +1141,7 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
                     f.setPointSize(10);
                     p.setFont(f);
                     p.setPen(QColor(130, 140, 150));
-                    ipW = fm.width(ipAddress);
+                    ipW = qFontWidth(fm, ipAddress);
                     p.drawText(hdrTextRight - nameW - ipW - kPad/2, y + kPad,
                                ipW, headerH, Qt::AlignLeft | Qt::AlignVCenter, ipAddress);
                 }
@@ -1150,12 +1150,12 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
                 p.setFont(f);
                 p.setPen(pal.textMuted);
                 QString at = formatAdaptiveMessageTime(time);
-                p.drawText(hdrTextRight - nameW - ipW - kPad/2 - fm.width(at) - kPad/2, y + kPad,
-                           fm.width(at), headerH, Qt::AlignRight | Qt::AlignVCenter, at);
+                p.drawText(hdrTextRight - nameW - ipW - kPad/2 - qFontWidth(fm, at) - kPad/2, y + kPad,
+                           qFontWidth(fm, at), headerH, Qt::AlignRight | Qt::AlignVCenter, at);
 
                 // send status
                 if (category == "self") {
-                    int statusX = hdrTextRight - nameW - ipW - kPad/2 - fm.width(at) - kPad/2 - 20;
+                    int statusX = hdrTextRight - nameW - ipW - kPad/2 - qFontWidth(fm, at) - kPad/2 - 20;
                     resendIconRect = QRect(statusX, y + kPad + (headerH - hdrBtnSize) / 2,
                                             hdrBtnSize, hdrBtnSize);
                     if (sendState == SendSending) {
@@ -1232,17 +1232,17 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
 
                 f.setPointSize(10);
                 p.setFont(f);
-                int ipEnd = contentX + fm.width(displayName) + kPad;
+                int ipEnd = contentX + qFontWidth(fm, displayName) + kPad;
                 if (!ipAddress.isEmpty()) {
                     p.setPen(QColor(130, 140, 150));
-                    int ipW = fm.width(ipAddress);
+                    int ipW = qFontWidth(fm, ipAddress);
                     int ipMax = hdrTextRight - ipEnd;
                     if (ipMax > ipW) { ipMax = ipW; }
                     if (ipMax > 0) {
                         p.drawText(ipEnd, y + kPad, ipMax, headerH,
                                    Qt::AlignLeft | Qt::AlignVCenter, ipAddress);
                     }
-                    ipEnd += fm.width(ipAddress) + kPad/2;
+                    ipEnd += qFontWidth(fm, ipAddress) + kPad/2;
                 }
 
                 p.setPen(pal.textMuted);
@@ -1327,7 +1327,7 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
                 if (cps[pos] == '\n') { origLineCount++; pos++; continue; }
                 int lineWidth = 0, lastSpace = -1, end = pos;
                 while (end < tLen && cps[end] != '\n') {
-                    int cw = isEmojiChar(cps[end]) ? emojiW : fm.width(QChar(cps[end]));
+                    int cw = isEmojiChar(cps[end]) ? emojiW : qFontWidth(fm, QChar(cps[end]));
                     lineWidth += cw;
                     if (cps[end] == ' ') { lastSpace = end; }
                     if (lineWidth >= textW) {
@@ -1348,7 +1348,7 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
                 if (messageText[pos] == '\n') { origLineCount++; pos++; continue; }
                 int lineWidth = 0, lastSpace = -1, end = pos;
                 while (end < tLen3 && messageText[end] != '\n') {
-                    lineWidth += fm.width(messageText[end]);
+                    lineWidth += qFontWidth(fm, QChar(messageText[end]));
                     if (messageText[end].isSpace()) lastSpace = end;
                     if (lineWidth >= textW) {
                         if (lastSpace > pos && end - pos > 10) {
@@ -1425,22 +1425,22 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
                               : !senderName.isEmpty() ? senderName
                               : (peerNumber >= 0 ? QString("Peer %1").arg(peerNumber) : "?");
                 dname = qElideChars(dname, 23, ElideMiddle);
-                int nameW = fm.width(dname);
+                int nameW = qFontWidth(fm, dname);
                 p.drawText(hdrTextRight - nameW, y + kPad, nameW, headerH,
                            Qt::AlignRight | Qt::AlignVCenter, dname);
                 int ipW = 0;
                 if (!ipAddress.isEmpty()) {
                     f.setPointSize(10); p.setFont(f);
                     p.setPen(QColor(130, 140, 150));
-                    ipW = fm.width(ipAddress);
+                    ipW = qFontWidth(fm, ipAddress);
                     p.drawText(hdrTextRight - nameW - ipW - kPad/2, y + kPad,
                                ipW, headerH, Qt::AlignLeft | Qt::AlignVCenter, ipAddress);
                 }
                 QString at = formatAdaptiveMessageTime(time);
                 f.setPointSize(10); p.setFont(f);
                 p.setPen(pal.textMuted);
-                p.drawText(hdrTextRight - nameW - ipW - kPad/2 - fm.width(at) - kPad/2,
-                           y + kPad, fm.width(at), headerH,
+                p.drawText(hdrTextRight - nameW - ipW - kPad/2 - qFontWidth(fm, at) - kPad/2,
+                           y + kPad, qFontWidth(fm, at), headerH,
                            Qt::AlignRight | Qt::AlignVCenter, at);
                 p.setFont(baseFont);
 
@@ -1494,17 +1494,17 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
                 p.drawText(contentX, y + kPad, maxNameW, headerH,
                            Qt::AlignLeft | Qt::AlignVCenter, dname);
                 f.setPointSize(10); p.setFont(f);
-                int ipEnd = contentX + fm.width(dname) + kPad;
+                int ipEnd = contentX + qFontWidth(fm, dname) + kPad;
                 if (!ipAddress.isEmpty()) {
                     p.setPen(QColor(130, 140, 150));
-                    int ipW = fm.width(ipAddress);
+                    int ipW = qFontWidth(fm, ipAddress);
                     int ipMax = hdrTextRight - ipEnd;
                     if (ipMax > ipW) { ipMax = ipW; }
                     if (ipMax > 0) {
                         p.drawText(ipEnd, y + kPad, ipMax, headerH,
                                    Qt::AlignLeft | Qt::AlignVCenter, ipAddress);
                     }
-                    ipEnd += fm.width(ipAddress) + kPad/2;
+                    ipEnd += qFontWidth(fm, ipAddress) + kPad/2;
                 }
                 p.setPen(pal.textMuted);
                 int timeMaxW = hdrTextRight - ipEnd;
@@ -1604,22 +1604,22 @@ paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
                               : !senderName.isEmpty() ? senderName
                               : (peerNumber >= 0 ? QString("Peer %1").arg(peerNumber) : "?");
                 dname = qElideChars(dname, 23, ElideMiddle);
-                int nameW = fm.width(dname);
+                int nameW = qFontWidth(fm, dname);
                 p.drawText(hdrTextRight - nameW, y + kPad, nameW, headerH,
                            Qt::AlignRight | Qt::AlignVCenter, dname);
                 int ipW = 0;
                 if (!ipAddress.isEmpty()) {
                     f.setPointSize(10); p.setFont(f);
                     p.setPen(QColor(130, 140, 150));
-                    ipW = fm.width(ipAddress);
+                    ipW = qFontWidth(fm, ipAddress);
                     p.drawText(hdrTextRight - nameW - ipW - kPad/2, y + kPad,
                                ipW, headerH, Qt::AlignLeft | Qt::AlignVCenter, ipAddress);
                 }
                 QString at = formatAdaptiveMessageTime(time);
                 f.setPointSize(10); p.setFont(f);
                 p.setPen(pal.textMuted);
-                p.drawText(hdrTextRight - nameW - ipW - kPad/2 - fm.width(at) - kPad/2,
-                           y + kPad, fm.width(at), headerH,
+                p.drawText(hdrTextRight - nameW - ipW - kPad/2 - qFontWidth(fm, at) - kPad/2,
+                           y + kPad, qFontWidth(fm, at), headerH,
                            Qt::AlignRight | Qt::AlignVCenter, at);
                 p.setFont(baseFont);
 
@@ -1673,17 +1673,17 @@ paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
                 p.drawText(contentX, y + kPad, maxNameW, headerH,
                            Qt::AlignLeft | Qt::AlignVCenter, dname);
                 f.setPointSize(10); p.setFont(f);
-                int ipEnd = contentX + fm.width(dname) + kPad;
+                int ipEnd = contentX + qFontWidth(fm, dname) + kPad;
                 if (!ipAddress.isEmpty()) {
                     p.setPen(QColor(130, 140, 150));
-                    int ipW = fm.width(ipAddress);
+                    int ipW = qFontWidth(fm, ipAddress);
                     int ipMax = hdrTextRight - ipEnd;
                     if (ipMax > ipW) { ipMax = ipW; }
                     if (ipMax > 0) {
                         p.drawText(ipEnd, y + kPad, ipMax, headerH,
                                    Qt::AlignLeft | Qt::AlignVCenter, ipAddress);
                     }
-                    ipEnd += fm.width(ipAddress) + kPad/2;
+                    ipEnd += qFontWidth(fm, ipAddress) + kPad/2;
                 }
                 p.setPen(pal.textMuted);
                 int timeMaxW = hdrTextRight - ipEnd;
@@ -1782,7 +1782,7 @@ paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
                               : !senderName.isEmpty() ? senderName
                               : (peerNumber >= 0 ? QString("Peer %1").arg(peerNumber) : "?");
                 dname = qElideChars(dname, 23, ElideMiddle);
-                int nameW = fm.width(dname);
+                int nameW = qFontWidth(fm, dname);
                 p.drawText(hdrTextRight - nameW, y + kPad, nameW, headerH,
                            Qt::AlignRight | Qt::AlignVCenter, dname);
 
@@ -1791,7 +1791,7 @@ paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
                 if (!ipAddress.isEmpty()) {
                     f.setPointSize(10); p.setFont(f);
                     p.setPen(QColor(130, 140, 150));
-                    ipW = fm.width(ipAddress);
+                    ipW = qFontWidth(fm, ipAddress);
                     p.drawText(hdrTextRight - nameW - ipW - kPad/2, y + kPad,
                                ipW, headerH, Qt::AlignLeft | Qt::AlignVCenter, ipAddress);
                 }
@@ -1799,11 +1799,11 @@ paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
                 QString at = formatAdaptiveMessageTime(time);
                 f.setPointSize(10); p.setFont(f);
                 p.setPen(pal.textMuted);
-                p.drawText(hdrTextRight - nameW - ipW - kPad/2 - fm.width(at) - kPad/2,
-                           y + kPad, fm.width(at), headerH,
+                p.drawText(hdrTextRight - nameW - ipW - kPad/2 - qFontWidth(fm, at) - kPad/2,
+                           y + kPad, qFontWidth(fm, at), headerH,
                            Qt::AlignRight | Qt::AlignVCenter, at);
                  // send status
-                resendIconRect = QRect(hdrTextRight - nameW - ipW - kPad/2 - fm.width(at) - kPad/2 - 20,
+                resendIconRect = QRect(hdrTextRight - nameW - ipW - kPad/2 - qFontWidth(fm, at) - kPad/2 - 20,
                                        y + kPad + (headerH - hdrBtnSize) / 2,
                                        hdrBtnSize, hdrBtnSize);
                 if (sendState == SendSending) {
@@ -1882,13 +1882,13 @@ paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
 #ifdef QT3_BUILD
                 // Qt3 手动 elide
                 QString elide = displayName;
-                if (fm.width(elide) > textW) {
+                if (qFontWidth(fm, elide) > textW) {
                     for (int ei = elide.length(); ei > 0; ei--) {
-                        if (fm.width(elide.left(ei) + "...") <= textW) {
+                        if (qFontWidth(fm, elide.left(ei) + "...") <= textW) {
                             elide = elide.left(ei) + "..."; break;
                         }
                     }
-                    if (fm.width(elide) > textW) { elide = "..."; }
+                    if (qFontWidth(fm, elide) > textW) { elide = "..."; }
                 }
                 p.drawText(textX, iconY, textW, fm.lineSpacing(),
                            Qt::AlignLeft | Qt::AlignVCenter, elide);
@@ -1946,17 +1946,17 @@ paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
 
                 // IP
                 f.setPointSize(10); p.setFont(f);
-                int ipEnd = contentX + fm.width(dname) + kPad;
+                int ipEnd = contentX + qFontWidth(fm, dname) + kPad;
                 if (!ipAddress.isEmpty()) {
                     p.setPen(QColor(130, 140, 150));
-                    int ipW = fm.width(ipAddress);
+                    int ipW = qFontWidth(fm, ipAddress);
                     int ipMax = hdrTextRight - ipEnd;
                     if (ipMax > ipW) { ipMax = ipW; }
                     if (ipMax > 0) {
                         p.drawText(ipEnd, y + kPad, ipMax, headerH,
                                    Qt::AlignLeft | Qt::AlignVCenter, ipAddress);
                     }
-                    ipEnd += fm.width(ipAddress) + kPad/2;
+                    ipEnd += qFontWidth(fm, ipAddress) + kPad/2;
                 }
                 // time
                 p.setPen(pal.textMuted);
@@ -2032,13 +2032,13 @@ paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
                 p.setFont(f);
 #ifdef QT3_BUILD
                 QString elide = displayName;
-                if (fm.width(elide) > textW) {
+                if (qFontWidth(fm, elide) > textW) {
                     for (int ei = elide.length(); ei > 0; ei--) {
-                        if (fm.width(elide.left(ei) + "...") <= textW) {
+                        if (qFontWidth(fm, elide.left(ei) + "...") <= textW) {
                             elide = elide.left(ei) + "..."; break;
                         }
                     }
-                    if (fm.width(elide) > textW) { elide = "..."; }
+                    if (qFontWidth(fm, elide) > textW) { elide = "..."; }
                 }
                 p.drawText(textX, iconY, textW, fm.lineSpacing(),
                            Qt::AlignLeft | Qt::AlignVCenter, elide);
@@ -2303,7 +2303,7 @@ ChatView::ChatView(QWidget* parent)
     m_totalHeight = 0;
     m_scrollPos = 0;
     for (int i = 0; i < 128; i++) {
-        m_ascW[i] = (uint8_t)std::min(m_fm.width(QChar(i)), 255);
+        m_ascW[i] = (uint8_t)std::min(qFontWidth(m_fm, QChar(i)), 255);
     }
     m_emojiW = emojiCharWidth(m_fm);
 
@@ -2702,21 +2702,17 @@ int ChatView::charWidth(uint32_t cp) {
     if (cp < 0x10000) {
         if (!m_bmpW) m_bmpW = new uint8_t[65536]();
         if (!m_bmpW[cp]) {
-            m_bmpW[cp] = (uint8_t)std::min(m_fm.width(QChar((ushort)cp)), 255);
+            m_bmpW[cp] = (uint8_t)std::min(qFontWidth(m_fm, QChar((ushort)cp)), 255);
         }
         return m_bmpW[cp];
     }
-    return m_fm.width(QChar((ushort)cp));
+    return qFontWidth(m_fm, QChar((ushort)cp));
 }
 
 // Extract URLs from text
 std::vector<LinkSpan> ChatView::extractLinks(const QString& text) {
     std::vector<LinkSpan> spans;
-#ifdef QT3_BUILD
-    QRegExp urlRe("https?://[^\\s<>\"']+", false);
-#else
-    QRegExp urlRe("https?://[^\\s<>\"']+", Qt::CaseInsensitive);
-#endif
+Q36RegExp urlRe("https?://[^\\s<>\"']+", false);
     int pos = 0;
     while (true) {
 #ifdef QT3_BUILD
@@ -2847,7 +2843,7 @@ int ChatView::charPosAt(int msgIndex, int localX, int localY) {
         }
         int lineWidth = 0, lastSpace = -1, end = pos;
         while (end < textLen && text[end] != '\n') {
-            lineWidth += fm.width(text[end]);
+            lineWidth += qFontWidth(fm, QChar(text[end]));
             if (text[end].isSpace()) lastSpace = end;
             if (lineWidth >= bubbleTextWidth) {
                 if (lastSpace > pos && end - pos > 10) {
@@ -2875,7 +2871,7 @@ int ChatView::charPosAt(int msgIndex, int localX, int localY) {
     // Find character at x position
     int xOffset = 0;
     for (int i = lineStart; i < lineEnd; i++) {
-        int chW = fm.width(text[i]);
+        int chW = qFontWidth(fm, QChar(text[i]));
         if (localX <= xOffset + chW / 2) {
             return i;
         }
@@ -2940,7 +2936,7 @@ std::vector<QRect> ChatView::selectionRects(int msgIndex) {
         }
         int lineWidth = 0, lastSpace = -1, end = cpos;
         while (end < textLen && msg.messageText[end] != '\n') {
-            lineWidth += fm.width(msg.messageText[end]);
+            lineWidth += qFontWidth(fm, QChar(msg.messageText[end]));
             if (msg.messageText[end].isSpace()) lastSpace = end;
             if (lineWidth >= bubbleTextWidth) {
                 if (lastSpace > cpos && end - cpos > 10) {
@@ -2963,10 +2959,10 @@ std::vector<QRect> ChatView::selectionRects(int msgIndex) {
         if (selStartInLine < selEndInLine) {
             int x1 = 0, x2 = 0;
             for (int i = lineStart; i < selStartInLine; i++) {
-                x1 += fm.width(msg.messageText[i]);
+                x1 += qFontWidth(fm, QChar(msg.messageText[i]));
             }
             for (int i = lineStart; i < selEndInLine; i++) {
-                x2 += fm.width(msg.messageText[i]);
+                x2 += qFontWidth(fm, QChar(msg.messageText[i]));
             }
             QRect selRect(textRect.x() + x1, textRect.y() + li * lineHeight, x2 - x1, lineHeight);
             rects.push_back(selRect);
@@ -3127,7 +3123,7 @@ void ChatView::showRawData(int msgIndex) {
 #endif
     qSetWindowTitle(&dlg, qFromUtf8("原始数据"));
     QVBoxLayout* lay = new QVBoxLayout(&dlg);
-    lay->setMargin(0);
+    qSetLayoutMargin(lay, 0);
     QTextEdit* te = new QTextEdit(&dlg);
     te->setReadOnly(true);
     lay->addWidget(te);
@@ -3162,13 +3158,13 @@ void ChatView::showRawData(int msgIndex) {
 void ChatView::wheelEvent(QWheelEvent* event) {
 #ifndef QT3_BUILD
     // Qt4 macOS sends separate events for horizontal/vertical; ignore horizontal
-    if (event->orientation() != Qt::Vertical) {
+    if (qWheelIsHorizontal(event)) {
         event->ignore();
         return;
     }
 #endif
     // Accumulate delta (macOS smooth scrolling: small values, many events)
-    m_scrollDelta += event->delta();
+    m_scrollDelta += qWheelDeltaY(event);
     int steps = m_scrollDelta / 120;
     if (steps == 0) { return; }
     m_scrollDelta -= steps * 120;

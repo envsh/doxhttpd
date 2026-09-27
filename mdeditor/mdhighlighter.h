@@ -8,11 +8,9 @@
 #include <qsyntaxhighlighter.h>
 #include <qfont.h>
 #include <qcolor.h>
-#include <qregexp.h>
 #else
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
-#include <QRegExp>
 #endif
 
 #ifdef QT3_BUILD
@@ -22,7 +20,7 @@ public:
     int highlightParagraph(const QString& text, int);
 private:
     struct Rule {
-        QRegExp pattern;
+        Q36RegExp pattern;
         QFont font;
         QColor color;
         bool useFont;
@@ -36,7 +34,7 @@ public:
     void highlightBlock(const QString& text);
 private:
     struct Rule {
-        QRegExp pattern;
+        Q36RegExp pattern;
         QTextCharFormat format;
     };
     std::vector<Rule> m_rules;

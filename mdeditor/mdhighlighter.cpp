@@ -6,27 +6,27 @@ MdHighlighter::MdHighlighter(QTextEdit* parent)
     : QSyntaxHighlighter(parent) {
     QFont boldFont;
     boldFont.setBold(true);
-    m_rules.push_back({QRegExp("^#{1,6}\\s+.*"), boldFont, Qt::darkBlue, true});
-    m_rules.push_back({QRegExp("\\*\\*[^*]+\\*\\*"), boldFont, QColor(), true});
-    m_rules.push_back({QRegExp("__[^_]+__"), boldFont, QColor(), true});
+    m_rules.push_back({Q36RegExp("^#{1,6}\\s+.*"), boldFont, Qt::darkBlue, true});
+    m_rules.push_back({Q36RegExp("\\*\\*[^*]+\\*\\*"), boldFont, QColor(), true});
+    m_rules.push_back({Q36RegExp("__[^_]+__"), boldFont, QColor(), true});
 
     QFont italicFont;
     italicFont.setItalic(true);
-    m_rules.push_back({QRegExp("\\*[^*]+\\*"), italicFont, QColor(), true});
-    m_rules.push_back({QRegExp("_[^_]+_"), italicFont, QColor(), true});
+    m_rules.push_back({Q36RegExp("\\*[^*]+\\*"), italicFont, QColor(), true});
+    m_rules.push_back({Q36RegExp("_[^_]+_"), italicFont, QColor(), true});
 
     QFont codeFont;
     codeFont.setFamily("monospace");
-    m_rules.push_back({QRegExp("`[^`]+`"), codeFont, QColor(), true});
+    m_rules.push_back({Q36RegExp("`[^`]+`"), codeFont, QColor(), true});
 
-    m_rules.push_back({QRegExp("\\[[^\\]]+\\]\\([^)]+\\)"), QFont(), Qt::darkMagenta, false});
-    m_rules.push_back({QRegExp("!\\[[^\\]]*\\]\\([^)]+\\)"), QFont(), Qt::darkGreen, false});
-    m_rules.push_back({QRegExp("^>.*"), QFont(), Qt::gray, false});
-    m_rules.push_back({QRegExp("^(-{3,}|\\*{3,}|_{3,})$"), QFont(), Qt::gray, false});
-    m_rules.push_back({QRegExp("^\\s*[-*+]\\s+"), QFont(), Qt::darkRed, false});
-    m_rules.push_back({QRegExp("^\\s*\\d+\\.\\s+"), QFont(), Qt::darkRed, false});
-    m_rules.push_back({QRegExp("^\\s*-\\s+\\[[ x]\\]\\s+"), QFont(), Qt::darkCyan, false});
-    m_rules.push_back({QRegExp("#[\\w]+"), QFont(), Qt::darkYellow, false});
+    m_rules.push_back({Q36RegExp("\\[[^\\]]+\\]\\([^)]+\\)"), QFont(), Qt::darkMagenta, false});
+    m_rules.push_back({Q36RegExp("!\\[[^\\]]*\\]\\([^)]+\\)"), QFont(), Qt::darkGreen, false});
+    m_rules.push_back({Q36RegExp("^>.*"), QFont(), Qt::gray, false});
+    m_rules.push_back({Q36RegExp("^(-{3,}|\\*{3,}|_{3,})$"), QFont(), Qt::gray, false});
+    m_rules.push_back({Q36RegExp("^\\s*[-*+]\\s+"), QFont(), Qt::darkRed, false});
+    m_rules.push_back({Q36RegExp("^\\s*\\d+\\.\\s+"), QFont(), Qt::darkRed, false});
+    m_rules.push_back({Q36RegExp("^\\s*-\\s+\\[[ x]\\]\\s+"), QFont(), Qt::darkCyan, false});
+    m_rules.push_back({Q36RegExp("#[\\w]+"), QFont(), Qt::darkYellow, false});
 }
 
 int MdHighlighter::highlightParagraph(const QString& text, int) {
@@ -53,52 +53,52 @@ MdHighlighter::MdHighlighter(QTextEdit* parent)
     QTextCharFormat headingFmt;
     headingFmt.setFontWeight(QFont::Bold);
     headingFmt.setForeground(Qt::darkBlue);
-    m_rules.push_back({QRegExp("^#{1,6}\\s+.*"), headingFmt});
+    m_rules.push_back({Q36RegExp("^#{1,6}\\s+.*"), headingFmt});
 
     QTextCharFormat boldFmt;
     boldFmt.setFontWeight(QFont::Bold);
-    m_rules.push_back({QRegExp("\\*\\*[^*]+\\*\\*"), boldFmt});
-    m_rules.push_back({QRegExp("__[^_]+__"), boldFmt});
+    m_rules.push_back({Q36RegExp("\\*\\*[^*]+\\*\\*"), boldFmt});
+    m_rules.push_back({Q36RegExp("__[^_]+__"), boldFmt});
 
     QTextCharFormat italicFmt;
     italicFmt.setFontItalic(true);
-    m_rules.push_back({QRegExp("\\*[^*]+\\*"), italicFmt});
-    m_rules.push_back({QRegExp("_[^_]+_"), italicFmt});
+    m_rules.push_back({Q36RegExp("\\*[^*]+\\*"), italicFmt});
+    m_rules.push_back({Q36RegExp("_[^_]+_"), italicFmt});
 
     QTextCharFormat codeFmt;
     codeFmt.setFontFamily("monospace");
     codeFmt.setBackground(QColor(240, 240, 240));
-    m_rules.push_back({QRegExp("`[^`]+`"), codeFmt});
+    m_rules.push_back({Q36RegExp("`[^`]+`"), codeFmt});
 
     QTextCharFormat linkFmt;
     linkFmt.setForeground(Qt::darkMagenta);
-    m_rules.push_back({QRegExp("\\[[^\\]]+\\]\\([^)]+\\)"), linkFmt});
+    m_rules.push_back({Q36RegExp("\\[[^\\]]+\\]\\([^)]+\\)"), linkFmt});
 
     QTextCharFormat imageFmt;
     imageFmt.setForeground(Qt::darkGreen);
-    m_rules.push_back({QRegExp("!\\[[^\\]]*\\]\\([^)]+\\)"), imageFmt});
+    m_rules.push_back({Q36RegExp("!\\[[^\\]]*\\]\\([^)]+\\)"), imageFmt});
 
     QTextCharFormat commentFmt;
     commentFmt.setForeground(Qt::gray);
     commentFmt.setFontItalic(true);
-    m_rules.push_back({QRegExp("^>.*"), commentFmt});
+    m_rules.push_back({Q36RegExp("^>.*"), commentFmt});
 
     QTextCharFormat hrFmt;
     hrFmt.setForeground(Qt::gray);
-    m_rules.push_back({QRegExp("^(-{3,}|\\*{3,}|_{3,})$"), hrFmt});
+    m_rules.push_back({Q36RegExp("^(-{3,}|\\*{3,}|_{3,})$"), hrFmt});
 
     QTextCharFormat listFmt;
     listFmt.setForeground(Qt::darkRed);
-    m_rules.push_back({QRegExp("^\\s*[-*+]\\s+"), listFmt});
-    m_rules.push_back({QRegExp("^\\s*\\d+\\.\\s+"), listFmt});
+    m_rules.push_back({Q36RegExp("^\\s*[-*+]\\s+"), listFmt});
+    m_rules.push_back({Q36RegExp("^\\s*\\d+\\.\\s+"), listFmt});
 
     QTextCharFormat todoFmt;
     todoFmt.setForeground(Qt::darkCyan);
-    m_rules.push_back({QRegExp("^\\s*-\\s+\\[[ x]\\]\\s+"), todoFmt});
+    m_rules.push_back({Q36RegExp("^\\s*-\\s+\\[[ x]\\]\\s+"), todoFmt});
 
     QTextCharFormat tagFmt;
     tagFmt.setForeground(Qt::darkYellow);
-    m_rules.push_back({QRegExp("#[\\w]+"), tagFmt});
+    m_rules.push_back({Q36RegExp("#[\\w]+"), tagFmt});
 }
 
 void MdHighlighter::highlightBlock(const QString& text) {

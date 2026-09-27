@@ -130,7 +130,7 @@ static void paintContactRow(QPainter& p, int x, int y, int w, int h,
 
     if (pinnedIndex != 0) {
         QString pinStr = " 📌";
-        int pw = p.fontMetrics().width(pinStr);
+        int pw = qFontWidth(p.fontMetrics(), pinStr);
         p.setPen(QColor(255, 193, 7));
         p.drawText(cx + nameW - pw, y + 6, pw, lh, Qt::AlignLeft | Qt::AlignVCenter, pinStr);
     }
@@ -142,7 +142,7 @@ static void paintContactRow(QPainter& p, int x, int y, int w, int h,
 #endif
         ));
         p.setFont(smallFont);
-        int tw = QFontMetrics(smallFont).width(timeStr);
+        int tw = qFontWidth(QFontMetrics(smallFont), timeStr);
         p.drawText(x + w - kRightPad - tw, y + 6, tw, lh, Qt::AlignLeft | Qt::AlignVCenter, timeStr);
         p.setFont(normalFont);
     }
@@ -166,7 +166,7 @@ static void paintContactRow(QPainter& p, int x, int y, int w, int h,
     if (unread > 0) {
         QString badge = QString("(%1)").arg(unread);
         p.setPen(QColor(100, 100, 100));
-        int bw = p.fontMetrics().width(badge);
+        int bw = qFontWidth(p.fontMetrics(), badge);
         p.drawText(x + w - kRightPad - bw, msgY, bw, lh,
                    Qt::AlignLeft | Qt::AlignVCenter, badge);
     }
@@ -252,12 +252,12 @@ void ContactListView::truncateRowData(RowData* rd, int w) {
 
     QString displayName = rd->name.isEmpty() ? _("no_name") : rd->name;
     {
-        int ellipsisW = fm.width("...");
-        int total = fm.width(displayName);
+        int ellipsisW = qFontWidth(fm, "...");
+        int total = qFontWidth(fm, displayName);
         if (total > nameW) {
             int accum = 0, lastFit = 0;
             for (int i = 0; i < displayName.length(); ++i) {
-                int cw = fm.width(displayName[i]);
+                int cw = qFontWidth(fm, QChar(displayName[i]));
                 if (accum + cw + ellipsisW > nameW) { break; }
                 accum += cw;
                 lastFit = i + 1;
@@ -272,12 +272,12 @@ void ContactListView::truncateRowData(RowData* rd, int w) {
     int msgW = w - cx - kRightPad - kRightAreaW;
     if (msgW < 20) { msgW = 20; }
     {
-        int ellipsisW = sfm.width("...");
-        int total = sfm.width(msg);
+        int ellipsisW = qFontWidth(sfm, "...");
+        int total = qFontWidth(sfm, msg);
         if (!msg.isEmpty() && total > msgW) {
             int accum = 0, lastFit = 0;
             for (int i = 0; i < msg.length(); ++i) {
-                int cw = sfm.width(msg[i]);
+                int cw = qFontWidth(sfm, QChar(msg[i]));
                 if (accum + cw + ellipsisW > msgW) { break; }
                 accum += cw;
                 lastFit = i + 1;
@@ -581,12 +581,12 @@ void ContactListView::mousePressEvent(QMouseEvent* e) {
 void ContactListView::wheelEvent(QWheelEvent* e) {
 #ifndef QT3_BUILD
     // Qt4 macOS sends separate events for horizontal/vertical; ignore horizontal
-    if (e->orientation() != Qt::Vertical) {
+    if (qWheelIsHorizontal(e)) {
         e->ignore();
         return;
     }
 #endif
-    m_scrollDelta += e->delta();
+    m_scrollDelta += qWheelDeltaY(e);
     int steps = m_scrollDelta / 120;
     if (steps == 0) { return; }
     m_scrollDelta -= steps * 120;
@@ -931,7 +931,11 @@ void ContactListWidget::updateContactLastMessage(int id, const QString& type, co
     if (!rd) return;
     rd->lastMessage = msg;
     rd->timeStr = timeStr;
+#if QT_VERSION >= 0x050800
+    rd->lastActive = (uint)QDateTime::currentDateTime().toSecsSinceEpoch();
+#else
     rd->lastActive = QDateTime::currentDateTime().toTime_t();
+#endif
     rd->cachedWidth = 0;
     m_list.adjustBySort(rd->index);
     m_view->invalidateAllCaches();

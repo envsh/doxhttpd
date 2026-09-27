@@ -226,7 +226,7 @@ QWidget* ConfigDialog::createButtonBox() {
     
 #ifdef QT3_BUILD
     QHBoxLayout* layout = new QHBoxLayout(buttonBox, 2);
-    layout->setMargin(2);
+    qSetLayoutMargin(layout, 2);
 #else
     QHBoxLayout* layout = new QHBoxLayout(buttonBox);
     layout->setSpacing(6);

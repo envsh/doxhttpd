@@ -7,7 +7,9 @@
 #include <qdir.h>
 #include <qbitmap.h>
 #else
-#include <QDesktopWidget>
+#if QT_VERSION < 0x060000
+#include <QDesktopWidget>  // Qt6 移除 QDesktopWidget（改用 QScreen）
+#endif
 #include <QDir>
 #endif
 
@@ -40,15 +42,10 @@ ScreenshotManager::~ScreenshotManager() {
 }
 
 QPixmap ScreenshotManager::grabScreen() {
-    QDesktopWidget* desktop = QApplication::desktop();
-    WId rootWin = desktop->winId();
-
-    // QPixmap::grabWindow(WId, int x, int y, int w, int h):
-    //   Qt3: https://doc.qt.io/archives/3.3/qpixmap.html#grabWindow
-    //   Qt4: https://doc.qt.io/archives/4.2/qpixmap.html#grabWindow
-    return QPixmap::grabWindow(rootWin,
-        desktop->rect().x(), desktop->rect().y(),
-        desktop->rect().width(), desktop->rect().height());
+    // Qt3: https://doc.qt.io/archives/3.3/qpixmap.html#grabWindow
+    // Qt4: https://doc.qt.io/archives/4.2/qpixmap.html#grabWindow
+    // Qt6 移除了 QPixmap::grabWindow，等价能力迁到 QScreen::grabWindow
+    return qGrabWholeScreen();
 }
 
 void ScreenshotManager::captureFullScreen() {

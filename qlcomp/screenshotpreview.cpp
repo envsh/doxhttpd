@@ -17,7 +17,9 @@
 #include <QFileInfo>
 #include <QFileDialog>
 #include <QApplication>
-#include <QDesktopWidget>
+#if QT_VERSION < 0x060000
+#include <QDesktopWidget>  // Qt6 移除 QDesktopWidget（改用 QScreen）
+#endif
 #include <QImage>
 #include <QBuffer>
 #include <QClipboard>
@@ -240,7 +242,7 @@ void ScreenshotPreviewDialog::onSaveClicked() {
     QString savePath;
 
 #ifdef QT3_BUILD
-    savePath = QFileDialog::getSaveFileName(QString::null, "PNG Image (*.png)", this);
+    savePath = QFileDialog::getSaveFileName(QString(), "PNG Image (*.png)", this);
 #else
     savePath = QFileDialog::getSaveFileName(this, "Save Screenshot As",
         QString(), "PNG Image (*.png)");

@@ -1,5 +1,6 @@
 #include "searchlistview.h"
 #include "LimeStyle.h"
+#include "compat34.h"
 #include <qpixmap.h>
 #include <qpainter.h>
 #include <algorithm>
@@ -103,7 +104,7 @@ void SearchListView::paintEvent(QPaintEvent*) {
 
 void SearchListView::wheelEvent(QWheelEvent* e) {
     int step = 88;
-    m_scrollY -= e->delta() / 120 * step;
+    m_scrollY -= qWheelDeltaY(e) / 120 * step;
     clampScrollY();
     scrollTo(m_scrollY);
 }

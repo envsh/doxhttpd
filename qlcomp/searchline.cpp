@@ -216,14 +216,22 @@ void SearchLineEdit::paintEvent(QPaintEvent* event) {
 #endif
     p.setPen(Qt::NoPen);
     p.setBrush(QColor(0xff, 0xff, 0xff));
+#ifdef QT3_BUILD
     p.drawRoundRect(body, 15, 15);
+#else
+    p.drawRoundedRect(body, 15, 15);
+#endif
 
     QColor border = m_edit->hasFocus()
         ? QColor(0x2f, 0x80, 0xed)
         : QColor(0xc9, 0xcd, 0xd1);
     p.setBrush(Qt::NoBrush);
     p.setPen(QPen(border, 1));
+#ifdef QT3_BUILD
     p.drawRoundRect(body, 15, 15);
+#else
+    p.drawRoundedRect(body, 15, 15);
+#endif
 }
 
 bool SearchLineEdit::eventFilter(QObject* watched, QEvent* event) {

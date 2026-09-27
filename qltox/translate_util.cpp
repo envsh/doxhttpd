@@ -1,7 +1,6 @@
 #include "translate_util.h"
 #include "compat34.h"
 #ifdef QT3_BUILD
-#include <qregexp.h>
 #include <qvaluevector.h>
 #else
 #include <vector>
@@ -107,15 +106,9 @@ typedef std::vector<NonTranslatableSpan> SpanVector;
 static SpanVector extractNonTranslatableSpans(const QString& text) {
     SpanVector spans;
 
-#ifdef QT3_BUILD
-    QRegExp urlRe("https?://[^\\s<>\"']+", false);
-    QRegExp mailRe("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", false);
-    QRegExp idRe("@[a-zA-Z0-9._=-]+:[a-zA-Z0-9._=-]+", false);
-#else
-    QRegExp urlRe("https?://[^\\s<>\"']+", Qt::CaseInsensitive);
-    QRegExp mailRe("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", Qt::CaseInsensitive);
-    QRegExp idRe("@[a-zA-Z0-9._=-]+:[a-zA-Z0-9._=-]+", Qt::CaseInsensitive);
-#endif
+Q36RegExp urlRe("https?://[^\\s<>\"']+", false);
+    Q36RegExp mailRe("[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", false);
+    Q36RegExp idRe("@[a-zA-Z0-9._=-]+:[a-zA-Z0-9._=-]+", false);
 
     // URL（最高优先级，避免 URL 内嵌 Matrix ID 重复匹配）
     int pos = 0;

@@ -24,7 +24,9 @@
 #include "appsetup.h"
 #include "assertf.h"
 #include <qmessagebox.h>
+#if QT_VERSION < 0x060000
 #include <qtextcodec.h>
+#endif
 #include <qtextstream.h>
 #include <qradiobutton.h>
 #include <qinputdialog.h>
@@ -505,7 +507,9 @@ MainWindow::MainWindow(QWidget* parent)
     );
 
     // 设置 UTF-8 编解码器
+#if QT_VERSION < 0x060000
     QTextCodec::setCodecForLocale(QTextCodec::codecForName("UTF-8"));
+#endif
     
     // 底部状态栏浮窗
     SharedStatusBar::instance()->show();
@@ -1541,12 +1545,12 @@ bool MainWindow::event(QEvent* event) {
 	}
     if (!m_firstPaintLogged) {
 		if (event->type() == QEvent::Paint) {
-			if (!qApp->hasPendingEvents() || m_paintCounter > 5) {
+			if (!qHasPendingEvents() || m_paintCounter > 5) {
 				m_firstPaintLogged = true;
 				QTimer::singleShot(0, this, SLOT(onFirstPaintComplete()));
 			}
 		} else {
-			if (!qApp->hasPendingEvents() && m_paintCounter > 0) {
+			if (!qHasPendingEvents() && m_paintCounter > 0) {
 				m_firstPaintLogged = true;
 				QTimer::singleShot(0, this, SLOT(onFirstPaintComplete()));
 			}			
@@ -1616,7 +1620,7 @@ void MainWindow::updateTrayBadge(int total) {
 }
 
 void MainWindow::onFirstPaintComplete() {
-    QString status = qApp->hasPendingEvents() ? QString::fromUtf8("true") : QString::fromUtf8("false");
+    QString status = qHasPendingEvents() ? QString::fromUtf8("true") : QString::fromUtf8("false");
     QString msg = QString::fromUtf8("=== UI 首次绘制完成 === pending=") + status;
 #ifdef QT3_BUILD
     qWarning("%s", msg.utf8().data());

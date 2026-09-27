@@ -108,13 +108,13 @@ void StickerManager::init() {
 
     QVBoxLayout* outer = new QVBoxLayout(this);
     outer->setSpacing(4);
-    outer->setMargin(8);
+    qSetLayoutMargin(outer, 8);
 
     // toolbar
     QWidget* toolbar = new QWidget(this);
     QHBoxLayout* tbLayout = new QHBoxLayout(toolbar);
     tbLayout->setSpacing(4);
-    tbLayout->setMargin(0);
+    qSetLayoutMargin(tbLayout, 0);
 
     m_addPackBtn = new QPushButton(_("stickermanager.add_pack"), toolbar);
     connect(m_addPackBtn, SIGNAL(clicked()), this, SLOT(onAddPackClicked()));
@@ -139,7 +139,7 @@ void StickerManager::init() {
     m_packBar = new QWidget(this);
     QHBoxLayout* packLayout = new QHBoxLayout(m_packBar);
     packLayout->setSpacing(2);
-    packLayout->setMargin(0);
+    qSetLayoutMargin(packLayout, 0);
     outer->addWidget(m_packBar);
 
     // grid container with scroll
@@ -151,7 +151,7 @@ void StickerManager::init() {
     m_gridContainer = new QWidget(scroll);
     QVBoxLayout* gl = new QVBoxLayout(m_gridContainer);
     gl->setSpacing(2);
-    gl->setMargin(4);
+    qSetLayoutMargin(gl, 4);
     QLabel* placeholder = new QLabel(_("stickermanager.select_pack"), m_gridContainer);
     placeholder->setAlignment(Qt::AlignCenter);
     gl->addWidget(placeholder);
@@ -169,7 +169,7 @@ void StickerManager::init() {
     QWidget* statusBar = new QWidget(this);
     QHBoxLayout* sbLayout = new QHBoxLayout(statusBar);
     sbLayout->setSpacing(8);
-    sbLayout->setMargin(2);
+    qSetLayoutMargin(sbLayout, 2);
 
     m_statusLabel = new QLabel("", statusBar);
     m_totalLabel = new QLabel("", statusBar);
@@ -209,7 +209,7 @@ void StickerManager::rebuildPackList() {
     if (oldLayout) { delete oldLayout; }
     QHBoxLayout* packLayout = new QHBoxLayout(m_packBar);
     packLayout->setSpacing(2);
-    packLayout->setMargin(0);
+    qSetLayoutMargin(packLayout, 0);
 
     for (size_t i = 0; i < m_packs.size(); i++) {
         QString title = qFromUtf8(m_packs[i].title);
@@ -269,7 +269,7 @@ void StickerManager::buildStickerGrid(const std::vector<StickerRow>& stickers) {
 
     QGridLayout* grid = new QGridLayout(m_gridContainer);
     grid->setSpacing(4);
-    grid->setMargin(4);
+    qSetLayoutMargin(grid, 4);
 
     if (stickers.empty()) {
         QLabel* empty = new QLabel(_("stickermanager.no_stickers"), m_gridContainer);

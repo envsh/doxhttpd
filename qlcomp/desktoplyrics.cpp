@@ -13,7 +13,9 @@
 #include <QDateTime>
 #include <QPainter>
 #include <QApplication>
-#include <QDesktopWidget>
+#if QT_VERSION < 0x060000
+#include <QDesktopWidget>  // Qt6 移除 QDesktopWidget（改用 QScreen）
+#endif
 #include <QPropertyAnimation>
 #include <QEasingCurve>
 #include <QMenu>
@@ -140,7 +142,7 @@ void DesktopLyrics::showLyrics()
 {
     emit aboutToShow();    // 调用端在 slot 中通过 setSetting() 恢复配置
     QWidget::show();
-    QRect screen = QApplication::desktop()->screenGeometry();
+    QRect screen = qPrimaryScreenGeometry();
     move((screen.width() - width()) / 2, 50);
     raise();
     // show() 之后再次发送置顶请求（WM 可能在 map 时重置状态）
@@ -515,7 +517,7 @@ void DesktopLyrics::drawTextWithStroke(QPainter& p, const QString& text,
 
 void DesktopLyrics::drawLine(QPainter& p, const QString& text, int x, int y, float progress)
 {
-    int textWidth = p.fontMetrics().width(text);
+    int textWidth = qFontWidth(p.fontMetrics(), text);
 
     drawTextWithStroke(p, text, x, y, m_unplayedColor);
 
@@ -559,7 +561,7 @@ void DesktopLyrics::paintEvent(QPaintEvent*)
         QString msg = "No Lyrics";
         p.setFont(m_font);
         QFontMetrics fm = p.fontMetrics();
-        int tw = fm.width(msg) + 16;
+        int tw = qFontWidth(fm, msg) + 16;
         int th = fm.height() + 8;
         int tx = (width() - tw) / 2;
         int ty = (height() - th) / 2;
@@ -634,7 +636,7 @@ void DesktopLyrics::paintEvent(QPaintEvent*)
     if (m_lineMode == LineMode::Single || !showNext) {
         const LrcLine& current = m_lines[m_currentLine];
         QString text = current.text;
-        int textWidth = fm.width(text);
+        int textWidth = qFontWidth(fm, text);
         int x = (width() - textWidth) / 2;
         if (x < 4) x = 4;
         int y = height() / 2 + fm.ascent() / 2;
@@ -645,8 +647,8 @@ void DesktopLyrics::paintEvent(QPaintEvent*)
         const LrcLine& next = m_lines[m_nextLine];
         QString curText = current.text;
         QString nextText = next.text;
-        int curTextWidth = fm.width(curText);
-        int nextTextWidth = fm.width(nextText);
+        int curTextWidth = qFontWidth(fm, curText);
+        int nextTextWidth = qFontWidth(fm, nextText);
         int curX = (width() - curTextWidth) / 2;
         if (curX < 4) curX = 4;
         int curY = height() / 4 + fh / 2;
@@ -719,7 +721,7 @@ void DesktopLyrics::paintEvent(QPaintEvent*)
             || !(m_nextLine >= 0 && m_nextLine < (int)m_lines.size()))
         {
             const QString& t = m_lines[m_currentLine].text;
-            int tw = bfm.width(t);
+            int tw = qFontWidth(bfm, t);
             int x = (width() - tw) / 2;
             if (x < 4) x = 4;
             int y = height() / 2 + bfm.ascent() / 2;
@@ -727,7 +729,7 @@ void DesktopLyrics::paintEvent(QPaintEvent*)
         } else {
             const QString& ct = m_lines[m_currentLine].text;
             const QString& nt = m_lines[m_nextLine].text;
-            int cw = bfm.width(ct), nw = bfm.width(nt);
+            int cw = qFontWidth(bfm, ct), nw = qFontWidth(bfm, nt);
             int cx = (width() - cw) / 2;
             if (cx < 4) cx = 4;
             int cy = height() / 4 + fh2 / 2;
@@ -795,7 +797,7 @@ void DesktopLyrics::mouseReleaseEvent(QMouseEvent*)
     m_dragging = false;
 }
 
-void DesktopLyrics::enterEvent(QEvent*)
+void DesktopLyrics::enterEvent(qEnterEventType*)
 {
     if (m_hoverTimerId) {
         killTimer(m_hoverTimerId);

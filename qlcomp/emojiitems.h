@@ -15,9 +15,9 @@
 
 class EmojiListBoxText : public QListBoxText {
 public:
-    EmojiListBoxText(QListBox* listbox, const QString& text = QString::null)
+    EmojiListBoxText(QListBox* listbox, const QString& text = QString())
         : QListBoxText(listbox, text) {}
-    EmojiListBoxText(const QString& text = QString::null)
+    EmojiListBoxText(const QString& text = QString())
         : QListBoxText(text) {}
     void paint(QPainter* p);
 };

@@ -54,7 +54,11 @@ void ToastWidget::paintEvent(QPaintEvent*) {
 #endif
     p.setBrush(bg);
     p.setPen(Qt::NoPen);
+#ifdef QT3_BUILD
     p.drawRoundRect(rect(), 25, 25);
+#else
+    p.drawRoundedRect(rect(), 25, 25);
+#endif
     p.setPen(Qt::white);
     p.drawText(rect(), Qt::AlignCenter, m_text);
 }

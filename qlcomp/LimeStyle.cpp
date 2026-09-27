@@ -1,5 +1,6 @@
 #include "LimeStyle.h"
 #include "ThemeManager.h"
+#include "compat34.h"
 #include <algorithm>
 
 #ifdef QT3_BUILD
@@ -519,8 +520,13 @@ void LimeStyle::drawControl(ControlElement ce, const QStyleOption *opt,
     case CE_CheckBoxLabel:
         break;
     case CE_ItemViewItem: {
+#if QT_VERSION < 0x060000
         if (const QStyleOptionViewItemV4* vopt =
             qstyleoption_cast<const QStyleOptionViewItemV4*>(opt)) {
+#else
+        if (const QStyleOptionViewItem* vopt =
+            qstyleoption_cast<const QStyleOptionViewItem*>(opt)) {
+#endif
             QRect r = opt->rect;
             bool sel = opt->state & State_Selected;
             bool hover = opt->state & State_MouseOver;
@@ -1015,8 +1021,8 @@ void LimeStyle::drawControl(ControlElement ce, QPainter *p,
                 p->drawText(textR, Qt::AlignRight | Qt::AlignVCenter, text.mid(tabPos + 1));
                 if (ampPos >= 0 && ampPos < tabPos) {
                     QFontMetrics fm = p->fontMetrics();
-                    int beforeW = fm.width(label.left(ampPos));
-                    int charW = fm.width(label[ampPos]);
+                    int beforeW = qFontWidth(fm, label.left(ampPos));
+                    int charW = qFontWidth(fm, QChar(label[ampPos]));
                     int baselineY = r.y() + (r.height() + fm.ascent() - fm.descent()) / 2;
                     p->drawLine(textR.x() + beforeW, baselineY + 1,
                                 textR.x() + beforeW + charW, baselineY + 1);
@@ -1025,8 +1031,8 @@ void LimeStyle::drawControl(ControlElement ce, QPainter *p,
                 p->drawText(textR, Qt::AlignLeft | Qt::AlignVCenter, text);
                 if (ampPos >= 0) {
                     QFontMetrics fm = p->fontMetrics();
-                    int beforeW = fm.width(text.left(ampPos));
-                    int charW = fm.width(text[ampPos]);
+                    int beforeW = qFontWidth(fm, text.left(ampPos));
+                    int charW = qFontWidth(fm, QChar(text[ampPos]));
                     int baselineY = r.y() + (r.height() + fm.ascent() - fm.descent()) / 2;
                     p->drawLine(textR.x() + beforeW, baselineY + 1,
                                 textR.x() + beforeW + charW, baselineY + 1);
@@ -1073,9 +1079,9 @@ void LimeStyle::drawControl(ControlElement ce, QPainter *p,
                 text.remove(ampPos, 1);
                 p->drawText(r, Qt::AlignCenter, text);
                 QFontMetrics fm = p->fontMetrics();
-                int beforeW = fm.width(text.left(ampPos));
-                int charW = fm.width(text[ampPos]);
-                int textW = fm.width(text);
+                int beforeW = qFontWidth(fm, text.left(ampPos));
+                int charW = qFontWidth(fm, QChar(text[ampPos]));
+                int textW = qFontWidth(fm, text);
                 int x0 = r.x() + (r.width() - textW) / 2;
                 int baselineY = r.y() + (r.height() + fm.ascent() - fm.descent()) / 2;
                 p->drawLine(x0 + beforeW, baselineY + 1,

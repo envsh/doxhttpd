@@ -197,7 +197,7 @@ StatisticsDialog::StatisticsDialog(QWidget* parent) : QDialog(parent) {
 
     m_tabBar = new QWidget(this);
     QHBoxLayout* barLay = new QHBoxLayout(m_tabBar);
-    barLay->setMargin(0);
+    qSetLayoutMargin(barLay, 0);
     barLay->setSpacing(0);
 
     QString titles[4];

@@ -88,13 +88,13 @@ StickerPicker::StickerPicker(const QString& title, QWidget* parent)
 void StickerPicker::init() {
     QVBoxLayout* outer = new QVBoxLayout(this);
     outer->setSpacing(0);
-    outer->setMargin(0);
+    qSetLayoutMargin(outer, 0);
 
     // tab bar
     m_tabBar = new QWidget(this);
     QHBoxLayout* tabLayout = new QHBoxLayout(m_tabBar);
     tabLayout->setSpacing(0);
-    tabLayout->setMargin(0);
+    qSetLayoutMargin(tabLayout, 0);
     outer->addWidget(m_tabBar);
 
     // page stack
@@ -104,7 +104,7 @@ void StickerPicker::init() {
     // recent section
     m_recentSection = new QWidget(this);
     QVBoxLayout* recentLayout = new QVBoxLayout(m_recentSection);
-    recentLayout->setMargin(4);
+    qSetLayoutMargin(recentLayout, 4);
     QLabel* recentLabel = new QLabel(_("stickerpicker.recent"), m_recentSection);
     recentLabel->setFont(QFont(recentLabel->font().family(), -1, QFont::Bold));
     recentLayout->addWidget(recentLabel);
@@ -138,7 +138,7 @@ void StickerPicker::rebuildTabBar() {
 
         QWidget* page = new QWidget(m_pageStack);
         QVBoxLayout* vl = new QVBoxLayout(page);
-        vl->setMargin(4);
+        qSetLayoutMargin(vl, 4);
         vl->setSpacing(2);
         QLabel* empty = new QLabel(_("stickerpicker.empty"), page);
         empty->setAlignment(Qt::AlignCenter);
@@ -179,7 +179,7 @@ void StickerPicker::rebuildTabBar() {
 
 void StickerPicker::buildPackPage(const std::vector<StickerRow>& stickers, QWidget* page) {
     QVBoxLayout* vl = new QVBoxLayout(page);
-    vl->setMargin(4);
+    qSetLayoutMargin(vl, 4);
     vl->setSpacing(2);
 
     if (stickers.empty()) {
@@ -198,7 +198,7 @@ void StickerPicker::buildPackPage(const std::vector<StickerRow>& stickers, QWidg
 #endif
     QGridLayout* grid = new QGridLayout(gridW);
     grid->setSpacing(2);
-    grid->setMargin(0);
+    qSetLayoutMargin(grid, 0);
 
     int n = (int)stickers.size();
     for (int i = 0; i < n; i++) {
@@ -237,7 +237,7 @@ void StickerPicker::rebuildRecentSection() {
     m_recentGrid = new QWidget(m_recentSection);
     QHBoxLayout* hrow = new QHBoxLayout(m_recentGrid);
     hrow->setSpacing(2);
-    hrow->setMargin(0);
+    qSetLayoutMargin(hrow, 0);
 
     for (size_t i = 0; i < recent.size(); i++) {
         QPushButton* btn = makeStickerBtn(recent[i], 36, m_recentGrid);

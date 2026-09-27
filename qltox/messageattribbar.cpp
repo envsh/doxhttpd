@@ -20,16 +20,16 @@ static const QChar kNewlineChar = QChar(0x0a); // \n
 static QString elideTagText(const QString& s, int maxW, const QFont& f) {
 #ifdef QT3_BUILD
     QFontMetrics fm(f);
-    if (fm.width(s) <= maxW) return s;
+    if (qFontWidth(fm, s) <= maxW) return s;
     QString out = s;
     const QString ell = qFromUtf8("…");
-    while (!out.isEmpty() && fm.width(out + ell) > maxW) {
+    while (!out.isEmpty() && qFontWidth(fm, out + ell) > maxW) {
         out.truncate(out.length() - 1);
     }
     return out + ell;
 #else
     QFontMetrics fm(f);
-    if (fm.width(s) <= maxW) return s;
+    if (qFontWidth(fm, s) <= maxW) return s;
     return fm.elidedText(s, Qt::ElideRight, maxW);
 #endif
 }
@@ -474,7 +474,7 @@ void MessageAttribBar::rebuildChildren() {
         Item it;
         it.kind = (int)d.kind;
         it.label = new QLabel(d.label, this);
-        it.label->setFixedWidth(QFontMetrics(it.label->font()).width(d.label));
+        it.label->setFixedWidth(qFontWidth(QFontMetrics(it.label->font()), d.label));
         it.label->setFixedHeight(QFontMetrics(it.label->font()).height() + 4);
         QWidget* ctl = 0;
         switch (d.kind) {
@@ -698,7 +698,7 @@ void MessageAttribBar::setTypeLabel(const QString& text) {
         return;
     }
     m_typeLabel->setText(text);
-    m_typeLabel->setFixedWidth(QFontMetrics(m_typeLabel->font()).width(text) + 4);
+    m_typeLabel->setFixedWidth(qFontWidth(QFontMetrics(m_typeLabel->font()), text) + 4);
     m_typeLabel->setFixedHeight(QFontMetrics(m_typeLabel->font()).height() + 4);
     m_typeLabel->show();
     layoutItems();

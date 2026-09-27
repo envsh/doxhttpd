@@ -3,7 +3,9 @@
 #include "compat34.h"
 #include <qapplication.h>
 #include <qtextstream.h>
+#if QT_VERSION < 0x060000
 #include <qtextcodec.h>
+#endif
 
 Translator& Translator::instance() {
     static Translator instance;
@@ -79,7 +81,9 @@ bool Translator::loadLanguage(const QString& langCode) {
     }
     
     QTextStream stream(&file);
+#if QT_VERSION < 0x060000
     stream.setCodec(QTextCodec::codecForName("UTF-8"));
+#endif
     QString jsonStr;
     while (!stream.atEnd()) {
         jsonStr += stream.readLine();

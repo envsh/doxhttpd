@@ -51,11 +51,7 @@ QStringList defaultQuickReplies() {
 QStringList quickReplies() {
     QString raw = Config::value("quick_replies");
     if (!raw.isEmpty()) {
-#ifdef QT3_BUILD
-        QStringList split = QStringList::split("\n", raw);
-#else
-        QStringList split = raw.split("\n", QString::SkipEmptyParts);
-#endif
+        QStringList split = qStrSplit(raw, "\n", true);
         if (!split.isEmpty()) { return split; }
     }
     return defaultQuickReplies();
@@ -642,7 +638,7 @@ void ChatWidget::onEmojiInsert(const QString& emoji) {
 void ChatWidget::onFileClicked() {
     QString path;
 #ifdef QT3_BUILD
-    path = QFileDialog::getOpenFileName(QString::null, QString::null, this);
+    path = QFileDialog::getOpenFileName(QString(), QString(), this);
 #else
     path = QFileDialog::getOpenFileName(this, QString(), QString());
 #endif

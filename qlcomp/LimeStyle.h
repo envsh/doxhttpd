@@ -22,7 +22,10 @@
 #include <QScrollBar>
 #include <QComboBox>
 #include <QLineEdit>
+#include <QStyleOptionViewItem>
+#if QT_VERSION < 0x060000
 #include <QStyleOptionViewItemV4>
+#endif
 #endif
 
 QColor lerpColor(const QColor& a, const QColor& b, float t);

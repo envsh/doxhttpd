@@ -160,6 +160,16 @@ QStringList qSplit(const QString& str, const QString& sep) {
 #endif
 }
 
+QStringList qStrSplit(const QString& str, const QString& sep, bool skipEmpty) {
+#ifdef QT3_BUILD
+    return QStringList::split(sep, str, !skipEmpty);   // Qt3 语义是 allowEmptyEntries，取反
+#elif QT_VERSION >= 0x050e00
+    return str.split(sep, skipEmpty ? Qt::SkipEmptyParts : Qt::KeepEmptyParts);
+#else
+    return str.split(sep, skipEmpty ? QString::SkipEmptyParts : QString::KeepEmptyParts);
+#endif
+}
+
 bool qOpenReadOnly(QFile& file) {
 #ifdef QT3_BUILD
     return file.open(IO_ReadOnly);

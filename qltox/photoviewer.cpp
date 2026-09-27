@@ -313,7 +313,7 @@ void PhotoCanvas::paintEvent(QPaintEvent*) {
             int y0 = (height() - textH) / 2 + fm.ascent();
             for (int i = 0; i < numLines; i++) {
                 QString s = qFromUtf8(helpLines[i]);
-                int tw = fm.width(s);
+                int tw = qFontWidth(fm, s);
                 bp.drawText((width() - tw) / 2, y0 + i * lineH, s);
             }
         }
@@ -324,7 +324,7 @@ void PhotoCanvas::paintEvent(QPaintEvent*) {
 
 void PhotoCanvas::wheelEvent(QWheelEvent* event) {
     if (m_pixmap.isNull()) { return; }
-    int delta = event->delta();
+    int delta = qWheelDeltaY(event);
     if (delta == 0) { return; }
 
     // 缩放幅度与滚动角度成比例（120 = 一个标准齿格），Qt 官方推荐的
@@ -337,10 +337,11 @@ void PhotoCanvas::wheelEvent(QWheelEvent* event) {
     double newScale = max(0.05, m_scale * factor);
     if (newScale > kMaxZoomScale) { newScale = kMaxZoomScale; }
 
-    double cx = (double)event->x() - m_offX;
-    double cy = (double)event->y() - m_offY;
-    m_offX = (double)event->x() - cx * (newScale / oldScale);
-    m_offY = (double)event->y() - cy * (newScale / oldScale);
+    QPoint pos = qWheelPos(event);
+    double cx = (double)pos.x() - m_offX;
+    double cy = (double)pos.y() - m_offY;
+    m_offX = (double)pos.x() - cx * (newScale / oldScale);
+    m_offY = (double)pos.y() - cy * (newScale / oldScale);
 
     m_scale = newScale;
     m_fitMode = false;
@@ -425,7 +426,7 @@ PhotoViewer::PhotoViewer(QWidget* parent, const QPixmap& pixmap,
     connect(m_canvas, SIGNAL(viewChanged()), this, SLOT(onViewChanged()));
 
     QVBoxLayout* lay = new QVBoxLayout(this);
-    lay->setMargin(0);
+    qSetLayoutMargin(lay, 0);
     lay->setSpacing(0);
 
     lay->addWidget(m_canvas, 1);
@@ -434,7 +435,7 @@ PhotoViewer::PhotoViewer(QWidget* parent, const QPixmap& pixmap,
 
     m_statusBar = new QWidget(this);
     QHBoxLayout* sbar = new QHBoxLayout(m_statusBar);
-    sbar->setMargin(0);
+    qSetLayoutMargin(sbar, 0);
     sbar->setSpacing(0);
     m_statusBar->setFixedHeight(24);
     m_statusLabel = new QLabel(m_statusBar);
@@ -451,7 +452,7 @@ PhotoViewer::PhotoViewer(QWidget* parent, const QPixmap& pixmap,
 void PhotoViewer::setupToolbar(QVBoxLayout* lay) {
     m_toolbar = new QWidget(this);
     QHBoxLayout* h = new QHBoxLayout(m_toolbar);
-    h->setMargin(0);
+    qSetLayoutMargin(h, 0);
     h->setSpacing(2);
 
     struct BtnDef {

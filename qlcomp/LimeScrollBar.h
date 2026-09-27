@@ -26,7 +26,7 @@ public:
 
 protected:
     void paintEvent(QPaintEvent* event);
-    void enterEvent(QEvent* event);
+    void enterEvent(qEnterEventType* event);
     void leaveEvent(QEvent* event);
 #ifdef QT3_BUILD
     void valueChange();

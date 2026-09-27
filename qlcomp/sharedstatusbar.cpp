@@ -1,5 +1,6 @@
 #include "sharedstatusbar.h"
 #include "compatcore34.h"
+#include "compat34.h"
 #ifdef QT3_BUILD
 #include <qpainter.h>
 #include <qpen.h>
@@ -18,7 +19,9 @@
 #include <QDateTime>
 #include <QMenu>
 #ifdef Q_OS_LINUX
+#if QT_VERSION < 0x060000
 #include <QX11Info>
+#endif
 #include <X11/Xlib.h>
 #endif
 #endif
@@ -80,10 +83,10 @@ static QPixmap makeTypePixmap(StatusMessageType type)
 
 static QString elideTextForMenu(const QFontMetrics &fm, const QString &s, int maxPx)
 {
-    if (fm.width(s) <= maxPx) { return s; }
+    if (qFontWidth(fm, s) <= maxPx) { return s; }
     const QString ell = QString(QChar(0x2026));
     QString r = s;
-    while (!r.isEmpty() && fm.width(r) > maxPx - fm.width(ell)) {
+    while (!r.isEmpty() && qFontWidth(fm, r) > maxPx - qFontWidth(fm, ell)) {
         r = r.left(r.length() - 1);
     }
     if (r.isEmpty()) { r = s.left(1); }
@@ -131,7 +134,7 @@ SharedStatusBar::SharedStatusBar()
     m_historyBtn->setText(qFromUtf8("▽ W"));
     m_historyBtn->setAutoRaise(true);
     // 按文本实际宽度自适应（△ 是测试符号，字体差异大，用固定宽易裁切）
-    int btnW = m_historyBtn->fontMetrics().width(m_historyBtn->text()) + 12;
+    int btnW = qFontWidth(m_historyBtn->fontMetrics(), m_historyBtn->text()) + 12;
     m_historyBtn->setFixedSize(btnW, 18);
 #ifdef QT3_BUILD
     QToolTip::add(m_historyBtn, qFromUtf8("查看消息历史"));
@@ -590,11 +593,7 @@ void SharedStatusBar::reposition()
 
 #ifdef Q_OS_LINUX
     {
-#ifdef QT3_BUILD
-        Display *dpy = QPaintDevice::x11Display();
-#else
-        Display *dpy = QX11Info::display();
-#endif
+        Display *dpy = qX11Display();
         XSetTransientForHint(dpy, winId(), m_activeWindow->winId());
         XFlush(dpy);
     }
