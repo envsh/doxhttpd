@@ -56,7 +56,7 @@ uint64_t qCrc64Str(const QString& s)
                   bytes.length(), static_cast<qcrc64_t>(0));
 #else
     const QByteArray bytes = s.toUtf8();
-    return qcrc64(reinterpret_cast<const uint8_t*>(bytes.constData()),
+    return qcrc64(reinterpret_cast<const uint8_t*>(bytes.data()),
                   size_t(bytes.size()), static_cast<qcrc64_t>(0));
 #endif
 }

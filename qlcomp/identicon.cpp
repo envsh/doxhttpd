@@ -88,7 +88,7 @@ QPixmap generateIdenticon(const QString& seed, int size) {
 #else
     QByteArray digestBA = QCryptographicHash::hash(
         seed.toUtf8(), QCryptographicHash::Md5);
-    const uint8_t* digest = (const uint8_t*)digestBA.constData();
+    const uint8_t* digest = (const uint8_t*)digestBA.data();
 #endif
 
     int fgR, fgG, fgB;

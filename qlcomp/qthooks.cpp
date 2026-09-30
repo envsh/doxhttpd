@@ -178,7 +178,7 @@ static void qt5MsgHandler(QtMsgType type, const QMessageLogContext&, const QStri
     strftime(tbuf, sizeof(tbuf), "%H:%M:%S", t);
      QByteArray qToUtf8(const QString&); // must link compatcore34.cpp
     fprintf(stderr, "%s[%s]%s %s[%s]\033[0m %s\n",
-            dimOn, tbuf, dimOff, labelColor, level, qToUtf8(msg).constData());
+            dimOn, tbuf, dimOff, labelColor, level, qToUtf8(msg).data());
     fflush(stderr);
     if (type == QtFatalMsg) { abort(); }
 }

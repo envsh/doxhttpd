@@ -10,6 +10,10 @@ fi
 
 sed -i 's/\-O2/\-O1/g' Makefile
 sed -i 's/\-std=c++11/\-std=c++17/g' Makefile
+sed -i 's/\-std=gnu++11/\-std=c++17/g' Makefile
+#for bsd sed
+#sed -i '.bak' 's/\-std=c++11/\-std=c++17/g' Makefile
+#sed -i '.bak' 's/\-std=gnu++11/\-std=c++17/g' Makefile
 
 if [ x"$1" == x"c" ]; then
 	make clean

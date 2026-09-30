@@ -410,7 +410,7 @@ int qRuncmdCaptureOuterr(const QString& program, const QStringList& args, QStrin
     proc.waitForFinished(-1);
     QByteArray all = proc.readAllStandardOutput();
     all += proc.readAllStandardError();
-    if (outErr) { *outErr = QString::fromUtf8(all.constData(), all.size()); }
+    if (outErr) { *outErr = QString::fromUtf8(all.data(), all.size()); }
     return proc.exitCode();
 #endif
 }
