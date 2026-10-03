@@ -37,6 +37,9 @@ private:
     QPushButton* connectBtn;
     QPushButton* qrBtn;
 
+    /// 「连接网络」按钮 tooltip：当前连接的服务器地址(ToxAPI base url)
+    void updateConnectTooltip();
+
     QString selfAddress;
 };
 

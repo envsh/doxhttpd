@@ -226,6 +226,7 @@ void ToxAPI::onHttpDone(const HttpResponse& resp, void* udata) {
 
 void ToxAPI::setEventTarget(QObject* target) { s_target = target; }
 void ToxAPI::setBaseUrl(const std::string& url) { s_baseUrl = url; }
+std::string ToxAPI::baseUrl() { return s_baseUrl; }
 
 void ToxAPI::resetLastEventId() { s_lastEventId = 0; }
 

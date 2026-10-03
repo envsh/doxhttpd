@@ -74,6 +74,7 @@ SelfInfoWidget::SelfInfoWidget(QWidget* parent) : QWidget(parent), selfAddress("
     connectBtn = new QPushButton(_("buttons.connect_network"), this);
     connectBtn->setFixedHeight(24);
     connect(connectBtn, SIGNAL(clicked()), this, SLOT(onBootstrap()));
+    updateConnectTooltip();
     btnLayout->addWidget(connectBtn);
     
     qrBtn = new QPushButton(_("buttons.qrcode"), this);
@@ -156,6 +157,13 @@ void SelfInfoWidget::updateInfo(const QString& name, const QString& statusMsg,
     }
     // 设置工具提示
     qSetToolTip(addressLabel, address);
+    // 切换服务器后 base url 会变，借这次自身信息刷新同步按钮 tooltip
+    updateConnectTooltip();
+}
+
+void SelfInfoWidget::updateConnectTooltip() {
+    if (!connectBtn) { return; }
+    qSetToolTip(connectBtn, qFromUtf8(ToxAPI::baseUrl().c_str()));
 }
 
 void SelfInfoWidget::onEditInfo() {
