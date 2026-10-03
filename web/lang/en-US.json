@@ -59,7 +59,8 @@
         "emoji": "Emoji",
         "file": "Send file",
         "sticker": "Stickers",
-        "quickreply": "Quick reply"
+        "quickreply": "Quick reply",
+        "paste": "Paste"
     },
     "placeholders": {
         "add_friend": "Enter Tox ID to add friend",

@@ -44,37 +44,6 @@ static const int kRightAreaW = 55;
 static const int kDotR = 5;
 static const int kAvatarSz = 36;
 
-static uint32_t typeToEmojiCp(const QString& type) {
-    if (type == "friend" || type == kUnktoxFriendType)       return 0x1F464;
-    if (type == "group" || type == kUnktoxGroupType)         return 0x1F465;
-    if (type == "conference" || type == kUnktoxConferenceType) return 0x1F399;
-    if (type == kSyseventType)  return 0x2699;
-    if (type == kUnknownType)   return 0x2753;
-    if (type == kTopicType)     return 0x1F4CC;
-    if (type == kFilesyncType)  return 0x1F4C1;
-    if (type == kClipboardType) return 0x1F4CB;
-    if (type == kGomuksRoomType) return 0x1F9EE;
-    if (type == kMtxliteRoomType) return 0x264F;
-    if (type == kImapMailType)  return 0x2709;
-    if (type == kBookmarkType)  return 0x1F516;
-    if (type == kAichatType)    return 0x1F916;
-    if (type == kPastebinType)  return 0x1F4E6;
-    if (type == kTranslateType) return 0x1F524;
-    if (type == kMobPushType)   return 0x1F4E2;   // 📢
-    if (type == kSnapType)      return 0x1F39E;   // 🎞️
-    if (type == kToutiaoHotnewsType)       return 0x1F4F0;  // 📰
-    if (type == kZhihuNotifyType
-        || type == kZhihuHotnewsType)      return 0x1F4D8;  // 📘
-    if (type == kBiliNotifyType)           return 0x1F4FA;  // 📺
-    if (type == kWeiboHotnewsType)         return 0x1F525;  // 🔥
-    if (type == kXiaohongshuRecommendType) return 0x1F4D5;  // 📕
-    if (type == kXiaohongshuNotifyType)    return 0x1F514;  // 🔔
-    if (type == kXiaohongshuHotnewsType)   return 0x1F4C8;  // 📈
-    if (type == kCoolapkTimelineType)      return 0x1F4F1;  // 📱
-    if (type == kMisskeyType)              return 0x1F431;  // 🐱
-    return 0x1F464;
-}
-
 static void paintContactRow(QPainter& p, int x, int y, int w, int h,
     bool selected, const QString& type, const QString& name,
     const QString& status, bool isConnected, int unread,

@@ -54,7 +54,8 @@
         "emoji": "表情",
         "file": "發送檔案",
         "sticker": "貼圖",
-        "quickreply": "快速回覆"
+        "quickreply": "快速回覆",
+        "paste": "貼上"
     },
     "placeholders": {
         "add_friend": "輸入 Tox ID 添加好友",

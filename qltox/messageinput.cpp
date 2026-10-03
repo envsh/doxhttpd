@@ -31,6 +31,7 @@
 #include <QKeyEvent>
 #include <QFocusEvent>
 #include <QPainter>
+#include <QApplication>   // pasteFromClipboard() 用 QApplication::clipboard()
 #endif
 
 int MessageInput::s_pasteCounter = 0;
@@ -493,6 +494,19 @@ bool MessageInput::handleMimeData(const QMimeData* data, int srcMode) {
 }
 
 #endif
+
+// 按钮触发的粘贴：严格复刻 Ctrl+V 的分支顺序（keyPressEvent / insertFromMimeData）——
+// 先尝试文件/图片（弹确认对话框并当附件发），未命中再回落标准文本粘贴。
+void MessageInput::pasteFromClipboard() {
+#ifdef QT3_BUILD
+    QMimeSource* src = QApplication::clipboard()->data();
+    if (src && handleMimeSource(src, kModePaste)) { return; }
+#else
+    const QMimeData* src = QApplication::clipboard()->mimeData();
+    if (src && handleMimeData(src, kModePaste)) { return; }
+#endif
+    QTextEdit::paste();
+}
 
 void MessageInput::saveToHistory(const QString& text) {
     if (text.isEmpty()) return;

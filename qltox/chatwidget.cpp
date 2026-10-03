@@ -5,6 +5,7 @@
 #include "restapi.h"
 #include "translate_util.h"
 #include "translation_cache.h"
+#include "pureconsts.hpp"
 #ifdef QT3_BUILD
 #include <qtimer.h>
 #else
@@ -224,98 +225,124 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     
     // 输入区域 (2行 x 3列)
 #ifdef QT3_BUILD
-    QGridLayout* inputGrid = new QGridLayout(2, 6, 2);
+    QGridLayout* inputGrid = new QGridLayout(2, 7, 2);
+    // 输入框左侧竖排两键：上=粘贴，下=当前联系人类型图标（指示器）
+    pasteBtn = new EmojiPushButton(qFromUtf8("📋"), this);
+    pasteBtn->setFixedSize(24, 24);
+    pasteBtn->setEmojiInset(3);
+    qSetToolTip(pasteBtn, _("tooltips.paste"));
+    inputGrid->addWidget(pasteBtn, 0, 0);
+    typeIconBtn = new EmojiPushButton(qFromUtf8("❓"), this);
+    typeIconBtn->setFixedSize(24, 24);
+    typeIconBtn->setEmojiInset(3);
+    inputGrid->addWidget(typeIconBtn, 1, 0);
+    typeIconBtn->hide();
     inputEdit = new MessageInput(this);
-    inputGrid->addMultiCellWidget(inputEdit, 0, 1, 0, 0);
+    // Qt3 的 addMultiCellWidget 形参是 (fromRow, toRow, fromCol, toCol) —— 起止坐标，
+    // 不是 Qt4 addWidget 的 rowSpan/colSpan。这里必须填列 1..1，若写 0..1 会横跨
+    // 列 0，把上面新加的粘贴/类型图标两个按钮整列盖住。
+    inputGrid->addMultiCellWidget(inputEdit, 0, 1, 1, 1);
     emojiBtn = new EmojiPushButton(qFromUtf8("😊"), this);
     emojiBtn->setFixedSize(24, 24);
     emojiBtn->setEmojiInset(3);
     qSetToolTip(emojiBtn, _("tooltips.emoji"));
-    inputGrid->addWidget(emojiBtn, 0, 1);
+    inputGrid->addWidget(emojiBtn, 0, 2);
     fileBtn = new EmojiPushButton(qFromUtf8("📎"), this);
     fileBtn->setFixedSize(24, 24);
     fileBtn->setEmojiInset(3);
     qSetToolTip(fileBtn, _("tooltips.file"));
-    inputGrid->addWidget(fileBtn, 1, 1);
+    inputGrid->addWidget(fileBtn, 1, 2);
     stickerBtn = new EmojiPushButton(qFromUtf8("🧸"), this);
     stickerBtn->setFixedSize(24, 24);
     stickerBtn->setEmojiInset(3);
     qSetToolTip(stickerBtn, _("tooltips.sticker"));
-    inputGrid->addWidget(stickerBtn, 0, 2);
+    inputGrid->addWidget(stickerBtn, 0, 3);
     quickReplyBtn = new EmojiPushButton(qFromUtf8("⚡"), this);
     quickReplyBtn->setFixedSize(24, 24);
     quickReplyBtn->setEmojiInset(3);
     qSetToolTip(quickReplyBtn, _("tooltips.quickreply"));
-    inputGrid->addWidget(quickReplyBtn, 1, 2);
+    inputGrid->addWidget(quickReplyBtn, 1, 3);
     historyBtn = new EmojiPushButton(qFromUtf8("🕘"), this);
     historyBtn->setFixedSize(24, 24);
     historyBtn->setEmojiInset(3);
     qSetToolTip(historyBtn, qFromUtf8("显示历史消息"));
-    inputGrid->addWidget(historyBtn, 0, 3);
+    inputGrid->addWidget(historyBtn, 0, 4);
     screenshotBtn = new EmojiPushButton(qFromUtf8("📷"), this);
     screenshotBtn->setFixedSize(24, 24);
     screenshotBtn->setEmojiInset(3);
     qSetToolTip(screenshotBtn, screenshotShortcutHint());
-    inputGrid->addWidget(screenshotBtn, 1, 3);
+    inputGrid->addWidget(screenshotBtn, 1, 4);
     sendBtn = new QPushButton(_("buttons.send"), this);
     QFontMetrics fm = inputEdit->fontMetrics();
     int twoLineH = fm.lineSpacing() * 2 + fm.lineSpacing() / 2 + 6;
     inputEdit->setMaximumHeight(twoLineH);
     sendBtn->setFixedSize(twoLineH, twoLineH);
-    inputGrid->addMultiCellWidget(sendBtn, 0, 1, 4, 4);
-    inputGrid->setColStretch(0, 1);
+    inputGrid->addMultiCellWidget(sendBtn, 0, 1, 5, 5);
+    inputGrid->setColStretch(1, 1);
 
     m_sendEnBtn = new QPushButton("Send EN", this);
     m_sendEnBtn->setFixedWidth(60);
     m_sendEnBtn->setFixedHeight(twoLineH);
-    inputGrid->addMultiCellWidget(m_sendEnBtn, 0, 1, 5, 5);
+    inputGrid->addMultiCellWidget(m_sendEnBtn, 0, 1, 6, 6);
 #else
     QGridLayout* inputGrid = new QGridLayout();
     inputGrid->setSpacing(2);
+    // 输入框左侧竖排两键：上=粘贴，下=当前联系人类型图标（指示器）
+    pasteBtn = new EmojiPushButton(qFromUtf8("📋"), this);
+    pasteBtn->setFixedSize(24, 24);
+    pasteBtn->setEmojiInset(3);
+    qSetToolTip(pasteBtn, _("tooltips.paste"));
+    inputGrid->addWidget(pasteBtn, 0, 0, 1, 1);
+    typeIconBtn = new EmojiPushButton(qFromUtf8("❓"), this);
+    typeIconBtn->setFixedSize(24, 24);
+    typeIconBtn->setEmojiInset(3);
+    inputGrid->addWidget(typeIconBtn, 1, 0, 1, 1);
+    typeIconBtn->hide();
     inputEdit = new MessageInput(this);
-    inputGrid->addWidget(inputEdit, 0, 0, 2, 1);
+    inputGrid->addWidget(inputEdit, 0, 1, 2, 1);
     emojiBtn = new EmojiPushButton(qFromUtf8("😊"), this);
     emojiBtn->setFixedSize(24, 24);
     emojiBtn->setEmojiInset(3);
     qSetToolTip(emojiBtn, _("tooltips.emoji"));
-    inputGrid->addWidget(emojiBtn, 0, 1);
+    inputGrid->addWidget(emojiBtn, 0, 2);
     fileBtn = new EmojiPushButton(qFromUtf8("📎"), this);
     fileBtn->setFixedSize(24, 24);
     fileBtn->setEmojiInset(3);
     qSetToolTip(fileBtn, _("tooltips.file"));
-    inputGrid->addWidget(fileBtn, 1, 1);
+    inputGrid->addWidget(fileBtn, 1, 2);
     stickerBtn = new EmojiPushButton(qFromUtf8("🧸"), this);
     stickerBtn->setFixedSize(24, 24);
     stickerBtn->setEmojiInset(3);
     qSetToolTip(stickerBtn, _("tooltips.sticker"));
-    inputGrid->addWidget(stickerBtn, 0, 2);
+    inputGrid->addWidget(stickerBtn, 0, 3);
     quickReplyBtn = new EmojiPushButton(qFromUtf8("⚡"), this);
     quickReplyBtn->setFixedSize(24, 24);
     quickReplyBtn->setEmojiInset(3);
     qSetToolTip(quickReplyBtn, _("tooltips.quickreply"));
-    inputGrid->addWidget(quickReplyBtn, 1, 2);
+    inputGrid->addWidget(quickReplyBtn, 1, 3);
     historyBtn = new EmojiPushButton(qFromUtf8("🕘"), this);
     historyBtn->setFixedSize(24, 24);
     historyBtn->setEmojiInset(3);
     qSetToolTip(historyBtn, qFromUtf8("显示历史消息"));
-    inputGrid->addWidget(historyBtn, 0, 3);
+    inputGrid->addWidget(historyBtn, 0, 4);
     screenshotBtn = new EmojiPushButton(qFromUtf8("📷"), this);
     screenshotBtn->setFixedSize(24, 24);
     screenshotBtn->setEmojiInset(3);
     qSetToolTip(screenshotBtn, screenshotShortcutHint());
-    inputGrid->addWidget(screenshotBtn, 1, 3);
+    inputGrid->addWidget(screenshotBtn, 1, 4);
     sendBtn = new QPushButton(_("buttons.send"), this);
     QFontMetrics fm = inputEdit->fontMetrics();
     int twoLineH = fm.lineSpacing() * 2 + fm.lineSpacing() / 2 + 6;
     inputEdit->setMaximumHeight(twoLineH);
     sendBtn->setFixedSize(twoLineH, twoLineH);
     sendBtn->setAttribute(Qt::WA_LayoutUsesWidgetRect, true);
-    inputGrid->addWidget(sendBtn, 0, 4, 2, 1);
-    inputGrid->setColumnStretch(0, 1);
+    inputGrid->addWidget(sendBtn, 0, 5, 2, 1);
+    inputGrid->setColumnStretch(1, 1);
 
     inputGrid->setColumnMinimumWidth(1, 24);
     inputGrid->setColumnMinimumWidth(2, 24);
     inputGrid->setColumnMinimumWidth(3, 24);
+    inputGrid->setColumnMinimumWidth(4, 24);
     inputGrid->setRowMinimumHeight(0, 24);
     inputGrid->setRowMinimumHeight(1, 24);
     inputGrid->setRowMinimumHeight(0, 24);
@@ -325,7 +352,7 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     m_sendEnBtn->setFixedWidth(60);
     m_sendEnBtn->setFixedHeight(twoLineH);
     m_sendEnBtn->setAttribute(Qt::WA_LayoutUsesWidgetRect, true);
-    inputGrid->addWidget(m_sendEnBtn, 0, 5, 2, 1);
+    inputGrid->addWidget(m_sendEnBtn, 0, 6, 2, 1);
 #endif
 
         inputEdit->setPlaceholderText(_("placeholders.type_message"));
@@ -342,6 +369,7 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     connect(stickerBtn, SIGNAL(clicked()), this, SLOT(onStickerClicked()));
     connect(quickReplyBtn, SIGNAL(clicked()), this, SLOT(onQuickReplyClicked()));
     connect(screenshotBtn, SIGNAL(clicked()), this, SLOT(onScreenshotClicked()));
+    connect(pasteBtn, SIGNAL(clicked()), this, SLOT(onPasteClicked()));
     connect(inputEdit, SIGNAL(filePasteRequested(const QString&, const QString&)), this, SLOT(onFilePaste(const QString&, const QString&)));
     
     mainLayout->addLayout(inputGrid);
@@ -469,12 +497,24 @@ void ChatWidget::onSendEnClicked() {
     emit translateForSendRequested(msg, "en");
 }
 
+// 类型显示名：主类型复用既有 i18n key，其余回落原始 type 串
+static QString chatTypeDisplayName(const QString& type) {
+    if (type == "friend") { return _("friend"); }
+    if (type == "conference") { return _("conference_item"); }
+    if (type == "group") { return _("tabs.groups"); }
+    return type;
+}
+
 void ChatWidget::retranslateUi() {
     // 更新聊天头
     // 注意：headerText 的更新由 MainWindow::retranslateUi() 处理
     
     // 更新按钮文字
     if (sendBtn) { sendBtn->setText(_("buttons.send")); }
+    if (pasteBtn) { qSetToolTip(pasteBtn, _("tooltips.paste")); }
+    if (typeIconBtn && !typeIconBtn->isHidden()) {
+        qSetToolTip(typeIconBtn, chatTypeDisplayName(m_currentChatType));
+    }
     
     // 更新主题复选框文本
     if (themeCheckBox) { themeCheckBox->setText(_("theme_dark")); }
@@ -916,6 +956,7 @@ void ChatWidget::resetPendingContext() {
 }
 
 void ChatWidget::setAttrForChat(const QString& type, int id) {
+    updateChatTypeIcon(type);   // 必须在下面两处 early return 之前
     if (!m_attrKey.isEmpty()) {
         m_attrMemory.insert(m_attrKey, m_attrBar->values());
     }
@@ -986,4 +1027,25 @@ void ChatWidget::onForwardRequested(int msgIndex) {
 
 void ChatWidget::onScreenshotClicked() {
     emit screenshotRequested();
+}
+
+void ChatWidget::onPasteClicked() {
+    if (inputEdit) { inputEdit->pasteFromClipboard(); }
+}
+
+// 类型显示名：主类型复用既有 i18n key，其余回落原始 type 串
+static QString chatTypeDisplayName(const QString& type);
+
+// 当前会话类型图标（纯指示器，无点击行为）。type 为空=未选中会话，隐藏按钮，
+// 网格列随之收起，粘贴键贴到最左。
+void ChatWidget::updateChatTypeIcon(const QString& type) {
+    if (!typeIconBtn) { return; }
+    m_currentChatType = type;
+    if (type.isEmpty()) {
+        typeIconBtn->hide();
+        return;
+    }
+    typeIconBtn->setText(qFromUtf8(typeToEmojiUtf8(type)));
+    qSetToolTip(typeIconBtn, chatTypeDisplayName(type));
+    typeIconBtn->show();
 }

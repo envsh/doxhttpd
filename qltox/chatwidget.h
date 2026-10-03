@@ -100,6 +100,7 @@ private slots:
     void onRedactRequested(int msgIndex);
     void onForwardRequested(int msgIndex);
     void onScreenshotClicked();
+    void onPasteClicked();
     void onReplyStripClose();
     void hideUnreadBanner();
 
@@ -131,6 +132,10 @@ private:
     EmojiPushButton* quickReplyBtn;
     EmojiPushButton* historyBtn;
     EmojiPushButton* screenshotBtn;
+    EmojiPushButton* pasteBtn;      // 输入框左侧上：粘贴（与 Ctrl+V 同路径）
+    EmojiPushButton* typeIconBtn;   // 输入框左侧下：当前联系人类型图标（纯指示器，不接 slot）
+    void updateChatTypeIcon(const QString& type);
+    QString m_currentChatType;
     QPushButton* sendBtn;
     QPushButton* m_sendEnBtn;
     EmojiPicker* emojiPicker;

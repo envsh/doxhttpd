@@ -17,6 +17,9 @@ public:
     QString placeholderText() const;
     void clearPlaceholder();
     void saveToHistory(const QString& text);
+    /// 按钮触发的粘贴：与 Ctrl+V 走同一条分支（文件/图片走确认对话框，
+    /// 纯文本回落到 QTextEdit::paste()）
+    void pasteFromClipboard();
 
 signals:
     void sendRequested();

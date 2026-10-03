@@ -59,7 +59,8 @@
         "emoji": "表情",
         "file": "发送文件",
         "sticker": "贴纸",
-        "quickreply": "快速回复"
+        "quickreply": "快速回复",
+        "paste": "粘贴"
     },
     "placeholders": {
         "add_friend": "输入 Tox ID 添加好友",
