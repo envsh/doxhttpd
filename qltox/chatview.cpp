@@ -3148,7 +3148,11 @@ void ChatView::showRawData(int msgIndex) {
     setTePlain(te, buildRawDataText((*m_history)[msgIndex]));
     auto* updSlot = new LambdaSlot(updateBtn, [this, te, msgIndex]() {
         if (msgIndex < 0 || msgIndex >= (int)m_history->size()) { return; }
-        setTePlain(te, buildRawDataText((*m_history)[msgIndex]));
+        // 对话框同样是嵌套事件循环：期间到达的新消息可能触发 ChatHistory::trimOverflow
+        // 队首裁剪(容量 200)，msgIndex 会整体平移 → 按 localId 重定位回原消息。
+        const int i = indexOfLocalId((*m_history)[msgIndex].localId);
+        if (i < 0) { return; }
+        setTePlain(te, buildRawDataText((*m_history)[i]));
     });
     connect(updateBtn, SIGNAL(clicked()), updSlot, SLOT(call()));
     auto* copySlot = new LambdaSlot(copyBtn, [te]() {
@@ -3744,50 +3748,21 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
 #endif
 #ifdef QT3_BUILD
     // 菜单 exec() 是嵌套事件循环：期间到达的新消息会触发 ChatHistory::trimOverflow
-    // 队首裁剪(容量 200)，使 msgIndex 整体平移。先按 localId 记住身份，选中后再重定位。
-    const int64_t retryLocalId = (msgIndex >= 0 && msgIndex < (int)m_history->size())
-                                 ? (*m_history)[msgIndex].localId : 0;
+    // 队首裁剪使 msgIndex 整体平移。先按 localId 记住身份，选中后重定位回原消息。
+    const int64_t menuLocalId = (msgIndex >= 0 && msgIndex < (int)m_history->size())
+                                ? (*m_history)[msgIndex].localId : 0;
     int choice = menu.exec(event->globalPos());
-    if (choice == copyMsgId) {
-        copyFullMessage(msgIndex);
-    } else if (hasShowRaw && choice == showRawId) {
-        showRawData(msgIndex);
-    } else if (hasRetry && choice == retryMsgId) {
-        const int idx = indexOfLocalId(retryLocalId);
-        if (idx < 0) { return; }
-        (*m_history)[idx].sendState = ChatElement::SendSending;
-        updateRect((*m_history)[idx].resendIconRect);
-        emit resendMessage(idx);
+    // 原消息若已被裁出缓冲(idx<0)，只剩与具体消息无关的动作仍成立(复制昵称/全选/搜索选中文字)，
+    // 其余一律放弃：宁可不操作，也不用陈旧索引去动别的消息(删除/撤回/编辑/转发)。
+    const int idx = indexOfLocalId(menuLocalId);
+    if (hasNick && choice == copyNickId) {
+        QApplication::clipboard()->setText(displayName);
     } else if (choice == selectAllId) {
         // Select all text in all messages
         m_selMsgIndex = 0;
         m_selStart = 0;
         m_selEnd = m_history->empty() ? 0 : m_history->back().messageText.length();
         updateFull();
-    } else if (hasSource && choice == sourceMsgId) {
-        emit sourceClicked(msgIndex);
-    } else if (hasTranslate && choice == translateMsgId) {
-        emit translateClicked(msgIndex);
-    } else if (hasFav && choice == favMsgId) {
-        emit favoriteClicked(msgIndex);
-    } else if (hasForward && choice == forwardMsgId) {
-        emit forwardClicked(msgIndex);
-    } else if (hasNick && choice == copyNickId) {
-        QApplication::clipboard()->setText(displayName);
-    } else if (hasNick && choice == mentionId) {
-        emit mentionClicked((*m_history)[msgIndex].senderName, displayName);
-    } else if (hasNick && choice == viewInfoId) {
-        emit peerInfoRequested((*m_history)[msgIndex].peerNumber,
-                               (*m_history)[msgIndex].senderName,
-                               (*m_history)[msgIndex].senderPubkey);
-    } else if (hasMsgActions && choice == replyMsgId) {
-        emit replyRequested(msgIndex);
-    } else if (hasMsgActions && choice == editMsgId) {
-        emit editRequested(msgIndex);
-    } else if (hasMsgActions && choice == deleteMsgId) {
-        emit deleteRequested(msgIndex);
-    } else if (canRedact && choice == redactMsgId) {
-        emit redactRequested(msgIndex);
     } else if (choice == searchGoogleId) {
         openSearchInBrowser(this, searchOk, searchSel, "https://www.google.com/search?q=");
     } else if (choice == searchBingId) {
@@ -3796,51 +3771,52 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         openSearchInBrowser(this, searchOk, searchSel, "https://duckduckgo.com/?q=");
     } else if (choice == searchYandexId) {
         openSearchInBrowser(this, searchOk, searchSel, "https://yandex.com/search/?text=");
-    }
-#else
-    // 同上：按 localId 重定位，避免菜单期间队首裁剪导致重试到别的消息
-    const int64_t retryLocalId = (msgIndex >= 0 && msgIndex < (int)m_history->size())
-                                 ? (*m_history)[msgIndex].localId : 0;
-    QAction* chosen = menu.exec(event->globalPos());
-    if (chosen == copyMsgAction) {
-        copyFullMessage(msgIndex);
-    } else if (chosen == showRawAction) {
-        showRawData(msgIndex);
-    } else if (canRetry && chosen == retryMsgAction) {
-        const int idx = indexOfLocalId(retryLocalId);
-        if (idx < 0) { return; }
+    } else if (idx < 0) {
+        return;
+    } else if (choice == copyMsgId) {
+        copyFullMessage(idx);
+    } else if (hasShowRaw && choice == showRawId) {
+        showRawData(idx);
+    } else if (hasRetry && choice == retryMsgId) {
         (*m_history)[idx].sendState = ChatElement::SendSending;
         updateRect((*m_history)[idx].resendIconRect);
         emit resendMessage(idx);
+    } else if (hasSource && choice == sourceMsgId) {
+        emit sourceClicked(idx);
+    } else if (hasTranslate && choice == translateMsgId) {
+        emit translateClicked(idx);
+    } else if (hasFav && choice == favMsgId) {
+        emit favoriteClicked(idx);
+    } else if (hasForward && choice == forwardMsgId) {
+        emit forwardClicked(idx);
+    } else if (hasNick && choice == mentionId) {
+        emit mentionClicked((*m_history)[idx].senderName, displayName);
+    } else if (hasNick && choice == viewInfoId) {
+        emit peerInfoRequested((*m_history)[idx].peerNumber,
+                               (*m_history)[idx].senderName,
+                               (*m_history)[idx].senderPubkey);
+    } else if (hasMsgActions && choice == replyMsgId) {
+        emit replyRequested(idx);
+    } else if (hasMsgActions && choice == editMsgId) {
+        emit editRequested(idx);
+    } else if (hasMsgActions && choice == deleteMsgId) {
+        emit deleteRequested(idx);
+    } else if (canRedact && choice == redactMsgId) {
+        emit redactRequested(idx);
+    }
+#else
+    // 同上：按 localId 重定位，避免菜单期间队首裁剪作用到别的消息
+    const int64_t menuLocalId = (msgIndex >= 0 && msgIndex < (int)m_history->size())
+                                ? (*m_history)[msgIndex].localId : 0;
+    QAction* chosen = menu.exec(event->globalPos());
+    const int idx = indexOfLocalId(menuLocalId);
+    if (chosen == copyNickAction) {
+        QApplication::clipboard()->setText(displayName);
     } else if (chosen == selectAllAction) {
         m_selMsgIndex = 0;
         m_selStart = 0;
         m_selEnd = m_history->empty() ? 0 : m_history->back().messageText.length();
         updateFull();
-    } else if (sourceMsgAction && chosen == sourceMsgAction) {
-        emit sourceClicked(msgIndex);
-    } else if (translateMsgAction && chosen == translateMsgAction) {
-        emit translateClicked(msgIndex);
-    } else if (favMsgAction && chosen == favMsgAction) {
-        emit favoriteClicked(msgIndex);
-    } else if (forwardMsgAction && chosen == forwardMsgAction) {
-        emit forwardClicked(msgIndex);
-    } else if (chosen == copyNickAction) {
-        QApplication::clipboard()->setText(displayName);
-    } else if (chosen == mentionAction) {
-        emit mentionClicked((*m_history)[msgIndex].senderName, displayName);
-    } else if (chosen == viewInfoAction) {
-        emit peerInfoRequested((*m_history)[msgIndex].peerNumber,
-                               (*m_history)[msgIndex].senderName,
-                               (*m_history)[msgIndex].senderPubkey);
-    } else if (replyMsgAction && chosen == replyMsgAction) {
-        emit replyRequested(msgIndex);
-    } else if (editMsgAction && chosen == editMsgAction) {
-        emit editRequested(msgIndex);
-    } else if (deleteMsgAction && chosen == deleteMsgAction) {
-        emit deleteRequested(msgIndex);
-    } else if (redactMsgAction && chosen == redactMsgAction) {
-        emit redactRequested(msgIndex);
     } else if (chosen == searchGoogleAction) {
         openSearchInBrowser(this, searchOk, searchSel, "https://www.google.com/search?q=");
     } else if (chosen == searchBingAction) {
@@ -3849,6 +3825,38 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         openSearchInBrowser(this, searchOk, searchSel, "https://duckduckgo.com/?q=");
     } else if (chosen == searchYandexAction) {
         openSearchInBrowser(this, searchOk, searchSel, "https://yandex.com/search/?text=");
+    } else if (idx < 0) {
+        return;
+    } else if (chosen == copyMsgAction) {
+        copyFullMessage(idx);
+    } else if (chosen == showRawAction) {
+        showRawData(idx);
+    } else if (canRetry && chosen == retryMsgAction) {
+        (*m_history)[idx].sendState = ChatElement::SendSending;
+        updateRect((*m_history)[idx].resendIconRect);
+        emit resendMessage(idx);
+    } else if (sourceMsgAction && chosen == sourceMsgAction) {
+        emit sourceClicked(idx);
+    } else if (translateMsgAction && chosen == translateMsgAction) {
+        emit translateClicked(idx);
+    } else if (favMsgAction && chosen == favMsgAction) {
+        emit favoriteClicked(idx);
+    } else if (forwardMsgAction && chosen == forwardMsgAction) {
+        emit forwardClicked(idx);
+    } else if (chosen == mentionAction) {
+        emit mentionClicked((*m_history)[idx].senderName, displayName);
+    } else if (chosen == viewInfoAction) {
+        emit peerInfoRequested((*m_history)[idx].peerNumber,
+                               (*m_history)[idx].senderName,
+                               (*m_history)[idx].senderPubkey);
+    } else if (replyMsgAction && chosen == replyMsgAction) {
+        emit replyRequested(idx);
+    } else if (editMsgAction && chosen == editMsgAction) {
+        emit editRequested(idx);
+    } else if (deleteMsgAction && chosen == deleteMsgAction) {
+        emit deleteRequested(idx);
+    } else if (redactMsgAction && chosen == redactMsgAction) {
+        emit redactRequested(idx);
     }
 #endif
 }
