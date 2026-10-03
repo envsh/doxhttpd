@@ -1328,34 +1328,21 @@ void MainWindow::customEvent(CustomEventBase* event) {
             if (targetName.isEmpty())
                 targetName = qFromUtf8(evt->chatType) + " " + QString::number(evt->chatId);
             {
-                bool found = false;
+                // 不变量：任何 SendSending 的 self 元素都持有本次请求的真实 sendmsgseq
+                // （文本 :1932 / 文件 :3842 / 重试 onResendMessage 三处写齐），且
+                // ++s_sendMsgSeq 全局唯一，故 seq↔元素一一对应，精确匹配即完备。
+                // 未命中 = 旧尝试的迟到响应或重复响应（seq 已被重试覆盖），忽略即可。
                 for (int i = chatWidget->messageCount() - 1; i >= 0; i--) {
                     ChatElement& el = chatWidget->mutableMessageAt(i);
-                    if (el.category == "self" && el.sendmsgseq == evt->sendmsgseq) {
+                    if (el.category != "self" || el.sendmsgseq != evt->sendmsgseq) { continue; }
                     if (evt->success) {
                         el.sendState = ChatElement::SendSent;
                         el.messageId = qFromUtf8(evt->messageId);
                     } else {
-                            el.sendState = ChatElement::SendFailed;
-                            el.sendErrorMsg = qFromUtf8(evt->errorMessage);
-                        }
-                        found = true;
-                        break;
+                        el.sendState = ChatElement::SendFailed;
+                        el.sendErrorMsg = qFromUtf8(evt->errorMessage);
                     }
-                }
-                if (!found) {
-                    for (int i = chatWidget->messageCount() - 1; i >= 0; i--) {
-                        ChatElement& el = chatWidget->mutableMessageAt(i);
-                        if (el.category == "self" && el.sendState == ChatElement::SendSending) {
-                            if (evt->success) {
-                                el.sendState = ChatElement::SendSent;
-                            } else {
-                                el.sendState = ChatElement::SendFailed;
-                                el.sendErrorMsg = qFromUtf8(evt->errorMessage);
-                            }
-                            break;
-                        }
-                    }
+                    break;
                 }
             }
             if (!evt->success) {
@@ -1924,6 +1911,7 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
         el.senderName = "Me";
         el.peerNumber = -1;
         el.time = getCurrentTime();
+        el.sendCtx = context;   // 失败重试据此还原可见性/CW/引用（仅内存态）
         m_chatbuf.append(currentChatId, typeStr, el);
         db_writeMessage(currentChatId, typeStr, el);
         ChatHistory& hist = m_chatbuf.getOrCreate(currentChatId, typeStr);
@@ -3467,9 +3455,15 @@ void MainWindow::onRetryClicked(int msgIndex, const QString& mediaUrl, const QSt
 
 void MainWindow::onResendMessage(int msgIndex) {
     if (msgIndex < 0 || msgIndex >= chatWidget->messageCount()) { return; }
-    if (currentChatId == -1 || currentChatType.isEmpty()) { return; }
-    QString msgText = chatWidget->messageAt(msgIndex).messageText;
-    if (msgText.isEmpty()) { return; }
+    ChatElement& el = chatWidget->mutableMessageAt(msgIndex);
+    // chatview 的重试入口已把元素置 SendSending；这里任何"未真正发起请求"的分支
+    // 都必须还原 SendFailed，否则元素永久卡在发送中、重试按钮消失（响应匹配无兜底）。
+    if (currentChatId == -1 || currentChatType.isEmpty()) {
+        el.sendState = ChatElement::SendFailed;
+        return;
+    }
+    // 附件消息正文存 caption(messageText 为空，见文件发送块的 el.caption)
+    QString msgText = el.messageText.isEmpty() ? el.caption : el.messageText;
 #ifdef USE_UNIFIED_SEND_API
     std::string type = std::string(qToUtf8(currentChatType).data());
     std::string idOverride;
@@ -3484,19 +3478,63 @@ void MainWindow::onResendMessage(int msgIndex) {
         }
     }
     if (type == kBookmarkType) {
+        // 与首发(乐观更新块)一致：这类不经 ToxAPI 发送，直接置 SendSent；
+        // 先置状态再调用，避免 handler 追加元素致 vector 扩容后 el 悬空。
+        el.sendState = ChatElement::SendSent;
         handleBookmarkMessage(msgText);
     } else if (type == kAichatType) {
+        el.sendState = ChatElement::SendSent;
         handleAichatMessage(msgText);
     } else if (type == kPastebinType) {
+        el.sendState = ChatElement::SendSent;
         handlePastebinMessage(msgText);
     } else if (type == kTranslateType) {
+        el.sendState = ChatElement::SendSent;
         handleTranslateMessage(msgText);
     } else {
-        int sendmsgseq = ToxAPI::sendMessage(currentChatId, type, std::string(qToUtf8(msgText)), idOverride);
-        (void)sendmsgseq;
+        // 扩展上下文：首发内存态优先(可见性/CW/引用与原消息一致，沿用原引用目标)；
+        // 缺失(重载/重启后从 DB 恢复)则退化为当前属性栏取值，且不带待发引用/提及
+        // ——那属于用户正在编辑的新消息，混入旧消息重发是错的。
+        QMap<QString,QString> ctx = el.sendCtx.isEmpty() ? chatWidget->attribContext()
+                                                          : el.sendCtx;
+        std::string fileData;
+        std::string fileName;
+        if (el.etype == ChatElement::File) {
+            const long kMaxFileSize = 5 * 1024 * 1024;   // 与文件发送路径同一上限
+            QFile f(el.localPath);
+            bool ok = !el.localPath.isEmpty();
+            if (ok) {
+#ifdef QT3_BUILD
+                ok = f.open(IO_ReadOnly);
+#else
+                ok = f.open(QIODevice::ReadOnly);
+#endif
+            }
+            QByteArray data;
+            if (ok) { data = f.readAll(); f.close(); ok = (data.size() <= kMaxFileSize); }
+            if (!ok) {
+                // 附件已移动/删除或超限：降级为只发文字，并明确告知（不再静默空转）
+                QMessageBox::warning(this, _("file_gone"), _("file_gone_resend"));
+            } else {
+#ifdef QT3_BUILD
+                fileData.assign(data.data(), data.size());
+#else
+                fileData.assign(data.constData(), data.size());
+#endif
+                fileName = std::string(qToUtf8(el.fileName).data());
+            }
+        }
+        if (msgText.isEmpty() && fileData.empty()) {
+            el.sendState = ChatElement::SendFailed;
+            return;
+        }
+        const int seq = ToxAPI::sendMessage(currentChatId, type,
+                         std::string(qToUtf8(msgText)), idOverride, fileData, fileName, ctx);
+        // 覆盖旧 seq：本次尝试独占该元素的状态归属
+        if (seq > 0) { el.sendmsgseq = seq; } else { el.sendState = ChatElement::SendFailed; }
     }
 #else
-    ToxAPI::sendMessage(currentChatId, "friend", std::string(qToUtf8(msgText)));
+    el.sendmsgseq = ToxAPI::sendMessage(currentChatId, "friend", std::string(qToUtf8(msgText)));
 #endif
 }
 
@@ -3828,6 +3866,7 @@ void MainWindow::onFileSendRequested(const QString& filePath, const QString& cap
     el.localPath = filePath;
     el.fileName = fn;
     el.fileSize = (int)sz;
+    el.caption = caption;      // 附件正文原本未存，重试取不到（显示不受影响：chatview 只对 Video/Gif 用 caption）
     el.sendState = ChatElement::SendSending;
     std::string typeStr = std::string(qToUtf8(currentChatType).data());
     {
@@ -3838,10 +3877,15 @@ void MainWindow::onFileSendRequested(const QString& filePath, const QString& cap
                          std::string(qToUtf8(caption).data()), fileIdOverride,
                          std::string(data.data(), data.size()),
                          std::string(qToUtf8(fn)));
-    if (sendmsgseq > 0) {
+    {
         ChatHistory& hist = m_chatbuf.getOrCreate(currentChatId, typeStr);
         if (!hist.empty()) {
-            hist.back().sendmsgseq = sendmsgseq;
+            // 不变量：SendSending 元素必须持有真实 seq，否则响应找不到 owner（匹配无兜底）
+            if (sendmsgseq > 0) {
+                hist.back().sendmsgseq = sendmsgseq;
+            } else {
+                hist.back().sendState = ChatElement::SendFailed;
+            }
         }
     }
 }

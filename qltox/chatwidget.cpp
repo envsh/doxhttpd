@@ -428,7 +428,7 @@ void ChatWidget::onSendClicked() {
     if (msg.isEmpty()) return;
     
     inputEdit->saveToHistory(msg);
-    emit messageSent(msg, m_pendingCtx);
+    emit messageSent(msg, currentSendContext());
     m_pendingCtx.clear();
     m_pendingMentionDisplay.clear();
     m_replyMentionedName.truncate(0);
@@ -875,6 +875,33 @@ void ChatWidget::onChipClose(const QString& senderName) {
 void ChatWidget::updateCtxBarVisibility() {
     bool visible = !m_replySnippetText.isEmpty() || m_chipWidgets.count() > 0;
     if (visible) m_ctxBar->show(); else m_ctxBar->hide();
+}
+
+QMap<QString,QString> ChatWidget::attribContext() const {
+    QMap<QString,QString> out;
+    const QMap<QString,QString> attrVals = m_attrBar->transmittableValues();
+    for (QMap<QString,QString>::const_iterator it = attrVals.begin(); it != attrVals.end(); ++it) {
+        if (!ToxAPI::isAllowedContextKey(it.key())) { continue; }   // 白名单为唯一裁决
+#ifdef QT3_BUILD
+        out.insert(it.key(), it.data());
+#else
+        out.insert(it.key(), it.value());
+#endif
+    }
+    return out;
+}
+
+QMap<QString,QString> ChatWidget::currentSendContext() const {
+    QMap<QString,QString> out = m_pendingCtx;
+    const QMap<QString,QString> attrVals = attribContext();
+    for (QMap<QString,QString>::const_iterator it = attrVals.begin(); it != attrVals.end(); ++it) {
+#ifdef QT3_BUILD
+        out.insert(it.key(), it.data());
+#else
+        out.insert(it.key(), it.value());
+#endif
+    }
+    return out;
 }
 
 void ChatWidget::resetPendingContext() {

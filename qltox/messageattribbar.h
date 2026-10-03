@@ -40,6 +40,9 @@ public:
     void setDefs(const MessageAttrDefList& defs);
     void setValues(const QMap<QString,QString>& values);
     QMap<QString,QString> values() const;   // UI 读取接口(占位阶段暂不回填发送)
+    // 可下发取值：剔除 UI 行首标签 proto_type、空值、未勾选的勾选项("0")。
+    // 是否真的下发仍由 ToxAPI 白名单裁决(见 restapi.cpp ctxAllowedKeys)。
+    QMap<QString,QString> transmittableValues() const;
     void setTypeLabel(const QString& text); // 行首固定类型标签(key 固定为 proto_type)
     void clear();
     void requestRelayout();   // kTags 增删后重排属性条,避免压到下一行

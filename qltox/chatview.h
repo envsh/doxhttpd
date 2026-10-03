@@ -103,7 +103,13 @@ struct ChatElement {
     uchar firstInGroup : 1;
     SendState sendState;
     int sendmsgseq = -1;
+    // 首发随消息上送的扩展上下文(visibility/localOnly/cw/tags/relates_to/mentions)，
+    // 供发送失败重试精确还原(见 MainWindow::onResendMessage)。仅内存态：重载/重启后
+    // 从 DB 恢复的消息为空，此时重试退化为使用当前属性栏取值(attribContext)。
+    QMap<QString,QString> sendCtx;
     int64_t dbRowid = 0;      // SQLite rowid，由 DB 加载时填充
+    int64_t localId = 0;      // 进程内单调递增，append/prepend 时分配；队首裁剪后仍稳定，
+                              // 供重试等"按元素"定位（msgIndex 会被 trimOverflow 整体平移）
     QString messageId;        // 服务端消息 ID（暂未填充）
     QString sendErrorMsg;
     QString mediaErrorMsg;   // 媒体下载失败原因（仅 Failed 时展示，tooltip 用）
@@ -238,6 +244,8 @@ private:
     /// 头像命中矩形（与 paint 绘制几何一致）；未绘制头像时返回空矩形
     QRect avatarRectFor(int msgIndex) const;
     int findByAbsY(int absY) const;
+    /// 按 localId 反查下标（从尾反向）；找不到返回 -1。用于跨事件循环的稳定定位
+    int indexOfLocalId(int64_t localId) const;
     /// 全量刷新：切换上下文、滚动、resetCanvas、relayout、全选等结构变化场景
     void updateFull();
     /// 增量刷新：appendMessage、pill 悬浮/计数、selection 拖拽等局部脏矩形场景

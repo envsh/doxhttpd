@@ -337,9 +337,14 @@ static const QMap<QString, bool>& ctxAllowedKeys() {
         m.insert("visibility", true);
         m.insert("localOnly",  true);
         m.insert("cw",         true);
+        m.insert("tags",       true); // 属性栏标签，Misskey 侧解析为笔记哈希标签
         initialized = true;
     }
     return m;
+}
+
+bool ToxAPI::isAllowedContextKey(const QString& key) {
+    return ctxAllowedKeys().contains(key);
 }
 
 int ToxAPI::sendMessage(int chatId, const std::string& type, const std::string& message,

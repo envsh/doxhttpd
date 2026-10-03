@@ -669,6 +669,17 @@ QMap<QString,QString> MessageAttribBar::values() const {
     return out;
 }
 
+QMap<QString,QString> MessageAttribBar::transmittableValues() const {
+    QMap<QString,QString> out;
+    for (int i = 0; i < m_items.size(); ++i) {
+        const QString v = itemValue(i);
+        if (v.isEmpty()) { continue; }
+        if (m_defs[i].kind == MessageAttrDef::kCheck && v == "0") { continue; }
+        out.insert(m_defs[i].key, v);
+    }
+    return out;
+}
+
 void MessageAttribBar::clear() {
     for (int i = 0; i < m_items.size(); ++i) {
         delete m_items[i].label;

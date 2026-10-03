@@ -165,6 +165,8 @@
     "theme_light": "淺色主題",
     "confirm": "確認",
     "confirm_send_file": "確認發送該檔案？（大小：{1}）\n{0}",
+    "file_gone": "附件已失效",
+    "file_gone_resend": "原檔案已移動、刪除或超出大小限制，本次重發只發送文字內容。",
     "confirm_delete_friend": "確定刪除好友 {0} 嗎？",
     "confirm_leave_conference": "確定離開會議 {0} 嗎？",
     "invite_to_conference": "邀請進會議",

@@ -49,6 +49,7 @@ private:
     void prepend(const std::vector<ChatElement>& els);
     void trimOverflow();
     static int m_capacity;
+    static int64_t s_nextLocalId;   // localId 分配器（进程内单调，跨裁剪稳定）
 };
 
 // ChatBuffer — 所有聊天的环形消息缓冲区。

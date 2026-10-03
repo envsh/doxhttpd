@@ -5,6 +5,7 @@
 #endif
 
 int ChatHistory::m_capacity = 200;
+int64_t ChatHistory::s_nextLocalId = 1;
 
 ChatHistory ChatHistory::kEmpty;
 
@@ -37,7 +38,9 @@ void ChatBuffer::clearDisplayCacheFor(int chatId, const std::string& chatType) {
 }
 
 void ChatHistory::append(const ChatElement& el) {
-    m_items.push_back(el);
+    ChatElement e = el;
+    if (e.localId == 0) { e.localId = s_nextLocalId++; }   // 拷贝后分配，调用方对象不被改
+    m_items.push_back(e);
     trimOverflow();
     if (el.dbRowid > newestRowid) {
         newestRowid = el.dbRowid;
@@ -52,6 +55,9 @@ void ChatHistory::prepend(const std::vector<ChatElement>& els) {
     if (space <= 0) { return; }
     int toInsert = std::min((int)els.size(), space);
     m_items.insert(m_items.begin(), els.end() - toInsert, els.end());
+    for (int i = 0; i < toInsert; ++i) {
+        if (m_items[i].localId == 0) { m_items[i].localId = s_nextLocalId++; }
+    }
     for (int i = 0; i < toInsert; ++i) {
         const ChatElement& e = m_items[i];
         if (e.dbRowid > 0) {

@@ -215,6 +215,8 @@
     "theme_light": "浅色主题",
     "confirm": "确认",
     "confirm_send_file": "确认发送该文件？（大小：{1}）\n{0}",
+    "file_gone": "附件已失效",
+    "file_gone_resend": "原文件已移动、删除或超出大小限制，本次重发只发送文字内容。",
     "confirm_delete_friend": "确定删除好友 {0} 吗？",
     "confirm_leave_conference": "确定离开会议 {0} 吗？",
     "invite_to_conference": "邀请进会议",

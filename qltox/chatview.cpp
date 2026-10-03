@@ -2243,6 +2243,14 @@ QRect ChatView::avatarRectFor(int msgIndex) const {
     return QRect(ax, ay, kAvatarSize, kAvatarSize);
 }
 
+int ChatView::indexOfLocalId(int64_t localId) const {
+    if (!m_history || localId == 0) { return -1; }
+    for (int i = (int)m_history->size() - 1; i >= 0; i--) {
+        if ((*m_history)[i].localId == localId) { return i; }
+    }
+    return -1;
+}
+
 int ChatView::findByAbsY(int absY) const {
     if (m_blocks.empty()) { return -1; }
     if (absY < kPad) { return 0; }
@@ -3735,15 +3743,21 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
     }
 #endif
 #ifdef QT3_BUILD
+    // 菜单 exec() 是嵌套事件循环：期间到达的新消息会触发 ChatHistory::trimOverflow
+    // 队首裁剪(容量 200)，使 msgIndex 整体平移。先按 localId 记住身份，选中后再重定位。
+    const int64_t retryLocalId = (msgIndex >= 0 && msgIndex < (int)m_history->size())
+                                 ? (*m_history)[msgIndex].localId : 0;
     int choice = menu.exec(event->globalPos());
     if (choice == copyMsgId) {
         copyFullMessage(msgIndex);
     } else if (hasShowRaw && choice == showRawId) {
         showRawData(msgIndex);
     } else if (hasRetry && choice == retryMsgId) {
-        (*m_history)[msgIndex].sendState = ChatElement::SendSending;
-        updateRect((*m_history)[msgIndex].resendIconRect);
-        emit resendMessage(msgIndex);
+        const int idx = indexOfLocalId(retryLocalId);
+        if (idx < 0) { return; }
+        (*m_history)[idx].sendState = ChatElement::SendSending;
+        updateRect((*m_history)[idx].resendIconRect);
+        emit resendMessage(idx);
     } else if (choice == selectAllId) {
         // Select all text in all messages
         m_selMsgIndex = 0;
@@ -3784,15 +3798,20 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         openSearchInBrowser(this, searchOk, searchSel, "https://yandex.com/search/?text=");
     }
 #else
+    // 同上：按 localId 重定位，避免菜单期间队首裁剪导致重试到别的消息
+    const int64_t retryLocalId = (msgIndex >= 0 && msgIndex < (int)m_history->size())
+                                 ? (*m_history)[msgIndex].localId : 0;
     QAction* chosen = menu.exec(event->globalPos());
     if (chosen == copyMsgAction) {
         copyFullMessage(msgIndex);
     } else if (chosen == showRawAction) {
         showRawData(msgIndex);
     } else if (canRetry && chosen == retryMsgAction) {
-        (*m_history)[msgIndex].sendState = ChatElement::SendSending;
-        updateRect((*m_history)[msgIndex].resendIconRect);
-        emit resendMessage(msgIndex);
+        const int idx = indexOfLocalId(retryLocalId);
+        if (idx < 0) { return; }
+        (*m_history)[idx].sendState = ChatElement::SendSending;
+        updateRect((*m_history)[idx].resendIconRect);
+        emit resendMessage(idx);
     } else if (chosen == selectAllAction) {
         m_selMsgIndex = 0;
         m_selStart = 0;

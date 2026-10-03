@@ -53,6 +53,11 @@ public:
     void setAutoTranslateEnabled(bool enabled) { m_autoTranslateEnabled = enabled; }
     void resetPendingContext();                       // 会话切换/发送后清空待发扩展上下文
     void setAttrForChat(const QString& type, int id); // 切换联系人时重建底部属性条
+    // 仅属性栏可下发取值(白名单过滤)。失败重试兜底用：不含待发引用/提及
+    // ——那属于用户正在编辑的新消息，混入旧消息重发是错的。
+    QMap<QString,QString> attribContext() const;
+    // 首发用：待发引用/提及(m_pendingCtx) + 属性栏取值。
+    QMap<QString,QString> currentSendContext() const;
     void setFavRowids(const std::vector<int64_t>& favRowids) { messageArea->setFavRowids(favRowids); }
     bool isFavRowid(int64_t rowid) const { return messageArea->isFavRowid(rowid); }
     void setFavRowid(int64_t rowid, bool fav) { messageArea->setFavRowid(rowid, fav); }
