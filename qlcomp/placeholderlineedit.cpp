@@ -40,7 +40,9 @@ void PlaceholderLineEdit::showPlaceholder() {
 
 void PlaceholderLineEdit::clearIfPlaceholder() {
     if (m_showingPlaceholder) {
+        blockSignals(true);
         clear();
+        blockSignals(false);
         m_showingPlaceholder = false;
     }
 }
