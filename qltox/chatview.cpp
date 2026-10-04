@@ -32,6 +32,9 @@
 static const int kMaxMediaDim = 260;
 static const int kMinMediaH = 50;
 
+// ── 气泡宽度占可用宽度的百分比 ──
+static const int kBubbleWidthPct = 85;
+
 static bool isSameSender(const ChatElement& a, const ChatElement& b) {
     return a.category == b.category
         && a.senderName == b.senderName;
@@ -812,7 +815,7 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
         int kMsgSpacing = ChatView::kMsgSpacing;
 
         int contentW = viewWidth - 3 * kPad - kAvatarSize;
-        int bubbleW = (contentW * 80) / 100;
+        int bubbleW = (contentW * kBubbleWidthPct) / 100;
         if (bubbleW < 100) { bubbleW = contentW; }
         int bubbleTextWidth = bubbleW - 2 * kBubbleHPad;
         if (bubbleTextWidth < 20) { bubbleTextWidth = 20; }
@@ -922,7 +925,7 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
         int kBubbleVPad = ChatView::kBubbleVPad;
 
         int contentW = viewWidth - 3 * kPad - kAvatarSize;
-        int bubbleW = (contentW * 80) / 100;
+        int bubbleW = (contentW * kBubbleWidthPct) / 100;
         if (bubbleW < 100) { bubbleW = contentW; }
         int imgMaxW = bubbleW - 2 * kBubbleHPad;
         int imgDispW, imgDispH;
@@ -965,7 +968,7 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
         int kBubbleVPad = ChatView::kBubbleVPad;
 
         int contentW = viewWidth - 3 * kPad - kAvatarSize;
-        int bubbleW = (contentW * 80) / 100;
+        int bubbleW = (contentW * kBubbleWidthPct) / 100;
         if (bubbleW < 100) { bubbleW = contentW; }
         int iconSize = 48;
         int textW = bubbleW - 2 * kBubbleHPad - iconSize - kPad;
@@ -1012,7 +1015,7 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
         if (viewWidth <= 0) { viewWidth = 400; }
 
         int contentW = viewWidth - 3 * kPad - kAvatarSize;
-        int bubbleW = (contentW * 80) / 100;
+        int bubbleW = (contentW * kBubbleWidthPct) / 100;
         if (bubbleW < 100) { bubbleW = contentW; }
         int innerW = bubbleW - 2 * kBubbleHPad;
 
@@ -1111,7 +1114,7 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
             int contentRight = viewWidth - 2 * kPad - kAvatarSize;
             int contentLeft = kPad;
             int bubbleMaxW = contentRight - contentLeft;
-            int bubbleW = std::min(bubbleMaxW, (bubbleMaxW * 80) / 100);
+            int bubbleW = std::min(bubbleMaxW, (bubbleMaxW * kBubbleWidthPct) / 100);
 
             if (firstInGroup) {
                 int ax = viewWidth - kPad - kAvatarSize;
@@ -1202,7 +1205,7 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
         } else {
             int contentX = 2 * kPad + kAvatarSize;
             int contentW = viewWidth - kPad - contentX;
-            int bubbleW = (contentW * 80) / 100;
+            int bubbleW = (contentW * kBubbleWidthPct) / 100;
             if (bubbleW < 100) { bubbleW = contentW; }
             int bubbleRight = contentX + bubbleW;
 
@@ -1411,7 +1414,7 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
             int contentRight = viewWidth - 2 * kPad - kAvatarSize;
             int contentLeft = kPad;
             int bubbleMaxW = contentRight - contentLeft;
-            int bubbleW = std::min(bubbleMaxW, (bubbleMaxW * 80) / 100);
+            int bubbleW = std::min(bubbleMaxW, (bubbleMaxW * kBubbleWidthPct) / 100);
 
             if (firstInGroup) {
                 int ax = viewWidth - kPad - kAvatarSize;
@@ -1473,7 +1476,7 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
         } else {
             int contentX = 2 * kPad + kAvatarSize;
             int contentW = viewWidth - kPad - contentX;
-            int bubbleW = (contentW * 80) / 100;
+            int bubbleW = (contentW * kBubbleWidthPct) / 100;
             if (bubbleW < 100) { bubbleW = contentW; }
             int bubbleRight = contentX + bubbleW;
 
@@ -1590,7 +1593,7 @@ paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
             int contentRight = viewWidth - 2 * kPad - kAvatarSize;
             int contentLeft = kPad;
             int bubbleMaxW = contentRight - contentLeft;
-            int bubbleW = std::min(bubbleMaxW, (bubbleMaxW * 80) / 100);
+            int bubbleW = std::min(bubbleMaxW, (bubbleMaxW * kBubbleWidthPct) / 100);
 
             if (firstInGroup) {
                 int ax = viewWidth - kPad - kAvatarSize;
@@ -1652,7 +1655,7 @@ paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
         } else {
             int contentX = 2 * kPad + kAvatarSize;
             int contentW = viewWidth - kPad - contentX;
-            int bubbleW = (contentW * 80) / 100;
+            int bubbleW = (contentW * kBubbleWidthPct) / 100;
             if (bubbleW < 100) { bubbleW = contentW; }
             int bubbleRight = contentX + bubbleW;
 
@@ -1766,7 +1769,7 @@ paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
             int contentRight = viewWidth - 2 * kPad - kAvatarSize;
             int contentLeft = kPad;
             int bubbleMaxW = contentRight - contentLeft;
-            int bubbleW = std::min(bubbleMaxW, (bubbleMaxW * 80) / 100);
+            int bubbleW = std::min(bubbleMaxW, (bubbleMaxW * kBubbleWidthPct) / 100);
 
             if (firstInGroup) {
                 int ax = viewWidth - kPad - kAvatarSize;
@@ -1922,7 +1925,7 @@ paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
         } else {
             int contentX = 2 * kPad + kAvatarSize;
             int contentW = viewWidth - kPad - contentX;
-            int bubbleW = (contentW * 80) / 100;
+            int bubbleW = (contentW * kBubbleWidthPct) / 100;
             if (bubbleW < 100) { bubbleW = contentW; }
             int bubbleRight = contentX + bubbleW;
 
@@ -2810,7 +2813,7 @@ int ChatView::charPosAt(int msgIndex, int localX, int localY) {
 
     // Compute bubble text width (same as calcMessageHeight)
     int contentW = viewW - 3 * kPad - kAvatarSize;
-    int bubbleW = (contentW * 80) / 100;
+    int bubbleW = (contentW * kBubbleWidthPct) / 100;
     if (bubbleW < 100) { bubbleW = contentW; }
     int bubbleTextWidth = bubbleW - 2 * kBubbleHPad;
     if (bubbleTextWidth < 20) { bubbleTextWidth = 20; }
@@ -2821,13 +2824,13 @@ int ChatView::charPosAt(int msgIndex, int localX, int localY) {
         int contentRight = viewW - 2 * kPad - kAvatarSize;
         int contentLeft = kPad;
         int bubbleMaxW = contentRight - contentLeft;
-        int bubbleW2 = std::min(bubbleMaxW, (bubbleMaxW * 80) / 100);
+        int bubbleW2 = std::min(bubbleMaxW, (bubbleMaxW * kBubbleWidthPct) / 100);
         int bubbleX = contentRight - bubbleW2;
         areaX = bubbleX + kBubbleHPad;
     } else {
         int contentX = 2 * kPad + kAvatarSize;
         int contentW2 = viewW - kPad - contentX;
-        int bubbleW3 = (contentW2 * 80) / 100;
+        int bubbleW3 = (contentW2 * kBubbleWidthPct) / 100;
         if (bubbleW3 < 100) { bubbleW3 = contentW2; }
         areaX = contentX + kBubbleHPad;
     }
@@ -2911,7 +2914,7 @@ std::vector<QRect> ChatView::selectionRects(int msgIndex) {
         int contentRight = viewW - 2 * kPad - kAvatarSize;
         int contentLeft = kPad;
         int bubbleMaxW = contentRight - contentLeft;
-        int bubbleW = std::min(bubbleMaxW, (bubbleMaxW * 80) / 100);
+        int bubbleW = std::min(bubbleMaxW, (bubbleMaxW * kBubbleWidthPct) / 100);
         int bubbleX = contentRight - bubbleW;
         int bubbleY = kPad + headerH + kPad; // relative to message top
         textRect = QRect(bubbleX + kBubbleHPad, bubbleY + kBubbleVPad,
@@ -2919,7 +2922,7 @@ std::vector<QRect> ChatView::selectionRects(int msgIndex) {
     } else {
         int contentX = 2 * kPad + kAvatarSize;
         int contentW = viewW - kPad - contentX;
-        int bubbleW = (contentW * 80) / 100;
+        int bubbleW = (contentW * kBubbleWidthPct) / 100;
         if (bubbleW < 100) { bubbleW = contentW; }
         textRect = QRect(contentX + kBubbleHPad, kPad + headerH + kPad + kBubbleVPad,
                          bubbleW - 2 * kBubbleHPad, msg.height - (2*kPad + headerH + kMsgSpacing) - 2*kBubbleVPad);
@@ -2927,7 +2930,7 @@ std::vector<QRect> ChatView::selectionRects(int msgIndex) {
 
     // Get line breaks
     int contentW = viewW - 3 * kPad - kAvatarSize;
-    int bubbleW2 = (contentW * 80) / 100;
+    int bubbleW2 = (contentW * kBubbleWidthPct) / 100;
     if (bubbleW2 < 100) { bubbleW2 = contentW; }
     int bubbleTextWidth = bubbleW2 - 2 * kBubbleHPad;
     if (bubbleTextWidth < 20) { bubbleTextWidth = 20; }
