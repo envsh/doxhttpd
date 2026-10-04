@@ -114,6 +114,8 @@ private:
     void handlePastebinMessage(int64_t localId, const QString& text);
     // 翻译直译（客户端直连翻译服务，不经后端）：参数语义同 handlePastebinMessage
     void handleTranslateMessage(int64_t localId, const QString& text);
+    // AI GPT Chat 客户端直连处理（不走后端，完全本项目实现）
+    void handleAigptChatMessage(int64_t localId, const QString& text);
     // 媒体本机播放：实体化缓存字节 → 探测/转码（worker） → 播放
     void scheduleMediaPlayback(int msgIndex, bool pendingPlay,
                                const std::vector<uint8_t>* preloaded = nullptr,

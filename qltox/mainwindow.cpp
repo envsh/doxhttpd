@@ -22,6 +22,7 @@
 #include "msgdb_helper.h"
 #include "pasteuploader.h"
 #include "fanyibot.h"
+#include "aigptbot.h"
 #include "jsonview.h"
 #include "appsetup.h"
 #include "assertf.h"
@@ -1206,6 +1207,69 @@ void MainWindow::customEvent(CustomEventBase* event) {
         return;
     }
 
+    // AI GPT 对话结果：成功时追加 AI 回复消息（self），失败时标记原提问失败
+    if (event->type() == AigptbotDoneType) {
+        AigptbotDoneEvent* evt = static_cast<AigptbotDoneEvent*>(event);
+        chatWidget->loadingBar()->hideLoading(kLoadSendMsg);
+        const std::string typeStr = evt->chatType;
+        const QString typeQ = qFromUtf8(typeStr.c_str());
+        ChatHistory* h = m_chatbuf.ptr(evt->chatId, typeStr);
+        ChatElement* elp = nullptr;
+        if (h) {
+            for (size_t i = h->size(); i > 0; --i) {
+                if ((*h)[i - 1].localId == evt->localId) {
+                    elp = &(*h)[i - 1];
+                    break;
+                }
+            }
+        }
+        if (!elp) {
+            qWarning("aigptbot: 找不到 localId=%lld chatId=%d type=%s",
+                     (long long)evt->localId, evt->chatId, typeStr.c_str());
+            return;
+        }
+        if (evt->success) {
+            // 原提问置为 SendSent
+            elp->sendState = ChatElement::SendSent;
+            // 追加一条 AI 回复消息（self）
+            ChatElement ack;
+            ack.messageText = qFromUtf8(evt->reply.c_str());
+            ack.category = "self";
+            ack.senderName = "Me";
+            ack.peerNumber = -1;
+            ack.time = getCurrentTime();
+            ack.sendState = ChatElement::SendSent;  // 显式置位
+            m_chatbuf.append(evt->chatId, typeStr, ack);
+            db_writeMessage(evt->chatId, typeStr, ack);
+            contactListWidget->updateContactLastMessage(evt->chatId, typeQ, ack.messageText, timenowhm());
+            db_writeLastMessage(evt->chatId, typeQ, ack.messageText, timenowhm());
+            ToastWidget::show(chatWidget, qFromUtf8("AI 回复已送达"), 2000);
+            stbarShowStatusMessage(qFromUtf8("AI 回复已送达"), SticonInfo, 2000);
+            sticonShowStatusMessage(qFromUtf8("AI 回复已送达"), SticonInfo, 2000);
+        } else {
+            // 失败：标记原提问为 SendFailed
+            elp->sendState = ChatElement::SendFailed;
+            elp->sendErrorMsg = qFromUtf8(evt->errorMsg.c_str());
+            const QString failText = qFromUtf8("AI 请求失败：") + elp->sendErrorMsg;
+            ToastWidget::show(chatWidget, failText, 6000);
+            stbarShowStatusMessage(failText, SticonCritical, 5000);
+            sticonShowStatusMessage(failText, SticonCritical, 5000);
+            m_lyrics->setPlayedColor(QColor(0xFF,0x44,0x44));
+            m_lyrics->setLrcText(qFromUtf8("[00:00.000]AI 请求失败"));
+            m_lyrics->setPosition(0);
+            m_hintActive = true;
+#ifdef QT3_BUILD
+            m_msgTimer->start(5000, true);
+#else
+            m_msgTimer->start(5000);
+#endif
+        }
+        // 强制重算高度（chatview 在 cachedWidth==contentWidth 时会早退）
+        elp->cachedWidth = -1;
+        chatWidget->updateElement(chatWidget->indexOfLocalId(evt->localId));
+        return;
+    }
+
     // 翻译结果：就地内嵌进原消息元素（不追加译文消息）
     if (event->type() == FanyibotDoneType) {
         FanyibotDoneEvent* evt = static_cast<FanyibotDoneEvent*>(event);
@@ -2025,9 +2089,8 @@ void MainWindow::onContactSelected(int id, const QString& type, const QString& n
 
 // ── 虚拟联系人消息截留 stub ──
 static void handleBookmarkMessage(const QString&) {}
-static void handleAichatMessage(const QString&) {}
 
-// Qt3 QMap 无 value()，统一按版本取键值（缺键返回空串）
+// AI GPT Chat 客户端直连处理（成员函数，不走后端，完全本项目实现）
 static QString mapValue(const QMap<QString,QString>& m, const QString& key) {
     QMap<QString,QString>::const_iterator it = m.find(key);
     if (it == m.end()) { return QString(); }
@@ -2038,6 +2101,35 @@ static QString mapValue(const QMap<QString,QString>& m, const QString& key) {
 #endif
 }
 
+
+
+void MainWindow::handleAigptChatMessage(int64_t localId, const QString& text) {
+    const std::string typeStr = std::string(qToUtf8(currentChatType).data());
+    ChatHistory* h = m_chatbuf.ptr(currentChatId, typeStr);
+    ChatElement* elp = nullptr;
+    if (h) {
+        for (size_t i = h->size(); i > 0; --i) {
+            if ((*h)[i - 1].localId == localId) {
+                elp = &(*h)[i - 1];
+                break;
+            }
+        }
+    }
+    // 首发内存态优先，缺失回落当前属性栏
+    const QMap<QString,QString> ctx = (elp && !elp->sendCtx.isEmpty())
+            ? elp->sendCtx : chatWidget->attribContext();
+    AigptbotRequest req;
+    req.text     = std::string(qToUtf8(text).data());
+    req.provider = std::string(qToUtf8(mapValue(ctx, "provider")).data());
+    req.model    = std::string(qToUtf8(mapValue(ctx, "model")).data());
+    req.localId  = localId;
+    req.chatId   = currentChatId;
+    req.chatType = typeStr;
+    aigptbotChatStart(req, this);
+}
+
+
+// Qt3 QMap 无 value()，统一按版本取键值（缺键返回空串）
 void MainWindow::handlePastebinMessage(int64_t localId, const QString& text) {
     const std::string typeStr = std::string(qToUtf8(currentChatType).data());
     ChatHistory& hist = m_chatbuf.getOrCreate(currentChatId, typeStr);
@@ -2123,7 +2215,12 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
     if (type == kBookmarkType) {
         handleBookmarkMessage(message);
     } else if (type == kAichatType) {
-        handleAichatMessage(message);
+        int64_t lidA = 0;
+        ChatHistory* h = m_chatbuf.ptr(currentChatId, type);
+        if (h && !h->empty()) {
+            lidA = h->back().localId;
+        }
+        handleAigptChatMessage(lidA, message);
     } else if (type == kPastebinType) {
         // 客户端直传：不调 ToxAPI::sendMessage（sendmsgseq 保持 0），
         // 真正启动在乐观插入拿到 localId 之后（见块外调用）。
@@ -2190,6 +2287,7 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
     // 乐观更新：先写入 buffer，再显示在界面
     int64_t pasteLocalId = 0;       // 块外要用（append 时由 ChatHistory 分配）
     int64_t translateLocalId = 0;   // 同上：翻译启动需要 localId 定位元素
+    int64_t aigptLocalId = 0;       // 同上：AI GPT Chat 启动需要 localId 定位元素
     {
         std::string typeStr = std::string(qToUtf8(currentChatType).data());
         ChatElement el;
@@ -2205,7 +2303,7 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
         ChatElement& backEl = hist.back();
         backEl.sendState = ChatElement::SendSending;
         backEl.sendmsgseq = sendmsgseq;
-        if (type == kBookmarkType || type == kAichatType
+        if (type == kBookmarkType
             || type == kMobPushType || type == kSnapType) {
             backEl.sendState = ChatElement::SendSent;
         }
@@ -2215,12 +2313,18 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
         if (type == kTranslateType) {
             translateLocalId = backEl.localId;   // 保持 SendSending，等待翻译结果事件
         }
+        if (type == kAichatType) {
+            aigptLocalId = backEl.localId;   // 保持 SendSending，等待 AI 结果事件
+        }
     }
     if (type == kPastebinType) {
         handlePastebinMessage(pasteLocalId, message);
     }
     if (type == kTranslateType) {
         handleTranslateMessage(translateLocalId, message);
+    }
+    if (type == kAichatType) {
+        handleAigptChatMessage(aigptLocalId, message);
     }
     contactListWidget->updateContactLastMessage(currentChatId, currentChatType, message, timenowhm());
     db_writeLastMessage(currentChatId, currentChatType, message, timenowhm());
@@ -3857,8 +3961,9 @@ void MainWindow::onResendMessage(int msgIndex) {
         el.sendState = ChatElement::SendSent;
         handleBookmarkMessage(msgText);
     } else if (type == kAichatType) {
-        el.sendState = ChatElement::SendSent;
-        handleAichatMessage(msgText);
+        const int64_t lid = el.localId;
+        el.sendState = ChatElement::SendSending;  // 等待 AI 结果事件
+        handleAigptChatMessage(lid, msgText);
     } else if (type == kPastebinType) {
         // 保持 SendSending（chatview 入口已置）；先拷出 localId，避免扩容后 el 悬空
         const int64_t lid = el.localId;
