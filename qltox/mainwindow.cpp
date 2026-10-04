@@ -21,6 +21,7 @@
 #include "cJSON.h"
 #include "msgdb_helper.h"
 #include "pasteuploader.h"
+#include "fanyibot.h"
 #include "jsonview.h"
 #include "appsetup.h"
 #include "assertf.h"
@@ -1134,6 +1135,137 @@ void MainWindow::customEvent(CustomEventBase* event) {
         return;
     }
 
+    // 以下两个 handler 必须待在 ApiResultReadyType 块之外：
+    // PastebinResultType=User+108 / FanyibotDoneType=User+109 均 != User+102，
+    // 嵌在 ApiResultReadyType 分支里条件恒假，事件会被静默丢弃。
+
+    // 粘贴/临时文件上传结果：原消息置终态，并追加一条 URL 回执消息（走既有落库路径）
+    if (event->type() == PastebinResultType) {
+        PasteResultEvent* evt = static_cast<PasteResultEvent*>(event);
+        chatWidget->loadingBar()->hideLoading(kLoadSendMsg);
+        const std::string typeStr = evt->chatType;
+        const QString typeQ = qFromUtf8(typeStr.c_str());
+        ChatHistory* h = m_chatbuf.ptr(evt->chatId, typeStr);
+        int idx = -1;
+        if (h) {
+            for (size_t i = 0; i < h->size(); ++i) {
+                if ((*h)[i].localId == evt->localId) { idx = (int)i; break; }
+            }
+        }
+        if (idx >= 0) {
+            ChatElement& el = (*h)[idx];
+            if (evt->success) {
+                el.sendState = ChatElement::SendSent;
+                const QString url = qFromUtf8(evt->url.c_str());
+                ChatElement ack;
+                ack.messageText = url;
+                ack.category = "self";
+                ack.senderName = "Me";
+                ack.peerNumber = -1;
+                ack.time = getCurrentTime();
+                ack.sendState = ChatElement::SendSent;   // 必须显式置位，默认 SendSending 会一直转圈
+                m_chatbuf.append(evt->chatId, typeStr, ack);
+                db_writeMessage(evt->chatId, typeStr, ack);
+                contactListWidget->updateContactLastMessage(evt->chatId, typeQ, url, timenowhm());
+                db_writeLastMessage(evt->chatId, typeQ, url, timenowhm());
+                const QString okText = qFromUtf8("已上传 · ") + qFromUtf8(evt->providerUsed.c_str());
+                ToastWidget::show(chatWidget, okText, 2500);
+                stbarShowStatusMessage(okText, SticonInfo, 2500);
+                sticonShowStatusMessage(okText, SticonInfo, 2500);
+                m_lyrics->setPlayedColor(QColor(0x00,0xB4,0xD8));
+                m_lyrics->setLrcText(qFromUtf8("[00:00.000]已上传"));
+                m_lyrics->setPosition(0);
+                m_hintActive = true;
+#ifdef QT3_BUILD
+                m_msgTimer->start(5000, true);
+#else
+                m_msgTimer->start(5000);
+#endif
+            } else {
+                el.sendState = ChatElement::SendFailed;
+                el.sendErrorMsg = qFromUtf8(evt->errorMsg.c_str());
+                const QString failText = qFromUtf8("上传失败：") + el.sendErrorMsg;
+                ToastWidget::show(chatWidget, failText, 6000);
+                stbarShowStatusMessage(failText, SticonCritical, 5000);
+                sticonShowStatusMessage(failText, SticonCritical, 5000);
+                m_lyrics->setPlayedColor(QColor(0xFF,0x44,0x44));
+                m_lyrics->setLrcText(qFromUtf8("[00:00.000]上传失败"));
+                m_lyrics->setPosition(0);
+                m_hintActive = true;
+#ifdef QT3_BUILD
+                m_msgTimer->start(5000, true);
+#else
+                m_msgTimer->start(5000);
+#endif
+            }
+        } else {
+            qWarning("pastebin: 找不到 localId=%lld chatId=%d type=%s",
+                     (long long)evt->localId, evt->chatId, typeStr.c_str());
+        }
+        chatWidget->repaintMessages();
+        return;
+    }
+
+    // 翻译结果：就地内嵌进原消息元素（不追加译文消息）
+    if (event->type() == FanyibotDoneType) {
+        FanyibotDoneEvent* evt = static_cast<FanyibotDoneEvent*>(event);
+        chatWidget->loadingBar()->hideLoading(kLoadSendMsg);
+        const std::string typeStr = evt->chatType;
+        ChatHistory* h = m_chatbuf.ptr(evt->chatId, typeStr);
+        ChatElement* elp = nullptr;
+        if (h) {
+            for (size_t i = h->size(); i > 0; --i) {
+                if ((*h)[i - 1].localId == evt->localId) { elp = &(*h)[i - 1]; break; }
+            }
+        }
+        if (!elp) {
+            qWarning("fanyibot: 找不到 localId=%lld chatId=%d type=%s",
+                     (long long)evt->localId, evt->chatId, typeStr.c_str());
+            return;
+        }
+        if (evt->success) {
+            elp->sendState = ChatElement::SendSent;
+            elp->translatedText = qFromUtf8(evt->translatedText.data(), (int)evt->translatedText.size());
+            elp->showTranslation = true;
+            elp->translateError = QString();
+            const QString okText = qFromUtf8("翻译完成 · ") + qFromUtf8(evt->engineUsed.c_str());
+            ToastWidget::show(chatWidget, okText, 2500);
+            stbarShowStatusMessage(okText, SticonInfo, 2500);
+            sticonShowStatusMessage(okText, SticonInfo, 2500);
+            m_lyrics->setPlayedColor(QColor(0x00,0xB4,0xD8));
+            m_lyrics->setLrcText(qFromUtf8("[00:00.000]翻译完成"));
+            m_lyrics->setPosition(0);
+            m_hintActive = true;
+#ifdef QT3_BUILD
+            m_msgTimer->start(5000, true);
+#else
+            m_msgTimer->start(5000);
+#endif
+        } else {
+            elp->sendState = ChatElement::SendFailed;
+            elp->sendErrorMsg = qFromUtf8(evt->errorMsg.data(), (int)evt->errorMsg.size());
+            const QString failText = qFromUtf8("翻译失败：") + elp->sendErrorMsg;
+            ToastWidget::show(chatWidget, failText, 6000);
+            stbarShowStatusMessage(failText, SticonCritical, 5000);
+            sticonShowStatusMessage(failText, SticonCritical, 5000);
+            m_lyrics->setPlayedColor(QColor(0xFF,0x44,0x44));
+            m_lyrics->setLrcText(qFromUtf8("[00:00.000]翻译失败"));
+            m_lyrics->setPosition(0);
+            m_hintActive = true;
+#ifdef QT3_BUILD
+            m_msgTimer->start(5000, true);
+#else
+            m_msgTimer->start(5000);
+#endif
+        }
+        // updateElement 在 cachedWidth==contentWidth() 时会早退（chatview.cpp:2640），
+        // 必须先置 -1 强制重算高度，否则译文不展开
+        elp->cachedWidth = -1;
+        // 非当前会话时 messageArea 指向别的缓冲，indexOfLocalId 返回 -1（updateElement 内部已判越界）
+        chatWidget->updateElement(chatWidget->indexOfLocalId(evt->localId));
+        return;
+    }
+
     // 数据加载完成
     if (event->type() == ApiResultReadyType) {
         ApiResultEvent* e = static_cast<ApiResultEvent*>(event);
@@ -1491,73 +1623,6 @@ void MainWindow::customEvent(CustomEventBase* event) {
             } else {
                 ToastWidget::show(chatWidget, _("redact_failed").arg(qFromUtf8(evt->errorMessage)), 4000);
             }
-            return;
-        }
-
-        // 粘贴/临时文件上传结果：原消息置终态，并追加一条 URL 回执消息（走既有落库路径）
-        if (event->type() == PastebinResultType) {
-            PasteResultEvent* evt = static_cast<PasteResultEvent*>(event);
-            chatWidget->loadingBar()->hideLoading(kLoadSendMsg);
-            const std::string typeStr = evt->chatType;
-            const QString typeQ = qFromUtf8(typeStr.c_str());
-            ChatHistory* h = m_chatbuf.ptr(evt->chatId, typeStr);
-            int idx = -1;
-            if (h) {
-                for (size_t i = 0; i < h->size(); ++i) {
-                    if ((*h)[i].localId == evt->localId) { idx = (int)i; break; }
-                }
-            }
-            if (idx >= 0) {
-                ChatElement& el = (*h)[idx];
-                if (evt->success) {
-                    el.sendState = ChatElement::SendSent;
-                    const QString url = qFromUtf8(evt->url.c_str());
-                    ChatElement ack;
-                    ack.messageText = url;
-                    ack.category = "self";
-                    ack.senderName = "Me";
-                    ack.peerNumber = -1;
-                    ack.time = getCurrentTime();
-                    ack.sendState = ChatElement::SendSent;   // 必须显式置位，默认 SendSending 会一直转圈
-                    m_chatbuf.append(evt->chatId, typeStr, ack);
-                    db_writeMessage(evt->chatId, typeStr, ack);
-                    contactListWidget->updateContactLastMessage(evt->chatId, typeQ, url, timenowhm());
-                    db_writeLastMessage(evt->chatId, typeQ, url, timenowhm());
-                    const QString okText = qFromUtf8("已上传 · ") + qFromUtf8(evt->providerUsed.c_str());
-                    ToastWidget::show(chatWidget, okText, 2500);
-                    stbarShowStatusMessage(okText, SticonInfo, 2500);
-                    sticonShowStatusMessage(okText, SticonInfo, 2500);
-                    m_lyrics->setPlayedColor(QColor(0x00,0xB4,0xD8));
-                    m_lyrics->setLrcText(qFromUtf8("[00:00.000]已上传"));
-                    m_lyrics->setPosition(0);
-                    m_hintActive = true;
-#ifdef QT3_BUILD
-                    m_msgTimer->start(5000, true);
-#else
-                    m_msgTimer->start(5000);
-#endif
-                } else {
-                    el.sendState = ChatElement::SendFailed;
-                    el.sendErrorMsg = qFromUtf8(evt->errorMsg.c_str());
-                    const QString failText = qFromUtf8("上传失败：") + el.sendErrorMsg;
-                    ToastWidget::show(chatWidget, failText, 6000);
-                    stbarShowStatusMessage(failText, SticonCritical, 5000);
-                    sticonShowStatusMessage(failText, SticonCritical, 5000);
-                    m_lyrics->setPlayedColor(QColor(0xFF,0x44,0x44));
-                    m_lyrics->setLrcText(qFromUtf8("[00:00.000]上传失败"));
-                    m_lyrics->setPosition(0);
-                    m_hintActive = true;
-#ifdef QT3_BUILD
-                    m_msgTimer->start(5000, true);
-#else
-                    m_msgTimer->start(5000);
-#endif
-                }
-            } else {
-                qWarning("pastebin: 找不到 localId=%lld chatId=%d type=%s",
-                         (long long)evt->localId, evt->chatId, typeStr.c_str());
-            }
-            chatWidget->repaintMessages();
             return;
         }
 
@@ -1961,7 +2026,6 @@ void MainWindow::onContactSelected(int id, const QString& type, const QString& n
 // ── 虚拟联系人消息截留 stub ──
 static void handleBookmarkMessage(const QString&) {}
 static void handleAichatMessage(const QString&) {}
-static void handleTranslateMessage(const QString&) {}
 
 // Qt3 QMap 无 value()，统一按版本取键值（缺键返回空串）
 static QString mapValue(const QMap<QString,QString>& m, const QString& key) {
@@ -1997,6 +2061,30 @@ void MainWindow::handlePastebinMessage(int64_t localId, const QString& text) {
     req.provider = std::string(qToUtf8(mapValue(ctx, "provider")).data());
     req.expire   = std::string(qToUtf8(mapValue(ctx, "expire")).data());
     pasteUploadStart(req, this);
+}
+
+void MainWindow::handleTranslateMessage(int64_t localId, const QString& text) {
+    const std::string typeStr = std::string(qToUtf8(currentChatType).data());
+    ChatHistory& hist = m_chatbuf.getOrCreate(currentChatId, typeStr);
+    ChatElement* elp = nullptr;
+    for (size_t i = hist.size(); i > 0; --i) {
+        if (hist[i - 1].localId == localId) { elp = &hist[i - 1]; break; }
+    }
+    if (!elp) {
+        qWarning("fanyibot: localId=%lld 不在缓冲内", (long long)localId);
+        return;
+    }
+    // 与 handlePastebinMessage 同机制：首发内存态优先，缺失回落当前属性栏
+    const QMap<QString,QString> ctx = elp->sendCtx.isEmpty()
+            ? chatWidget->attribContext() : elp->sendCtx;
+    FanyibotRequest req;
+    req.text     = std::string(qToUtf8(text).data());
+    req.toLang   = std::string(qToUtf8(mapValue(ctx, "tolang")).data());
+    req.engine   = std::string(qToUtf8(mapValue(ctx, "engine")).data());
+    req.localId  = localId;
+    req.chatId   = currentChatId;
+    req.chatType = typeStr;
+    fanyibotTranslateStart(req, this);
 }
 
 void MainWindow::onMessageSending(const QString& message, const QMap<QString,QString>& context) {
@@ -2050,7 +2138,18 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
         m_msgTimer->start(5000);
 #endif
     } else if (type == kTranslateType) {
-        handleTranslateMessage(message);
+        // 客户端直译：不调 ToxAPI::sendMessage（sendmsgseq 保持 0），
+        // 真正启动在乐观插入拿到 localId 之后（见块外调用）。
+        chatWidget->loadingBar()->showLoading(kLoadSendMsg, qFromUtf8("翻译中..."));
+        m_lyrics->setPlayedColor(QColor(0xBB,0xBB,0xBB));
+        m_lyrics->setLrcText(qFromUtf8("[00:00.000]翻译中..."));
+        m_lyrics->setPosition(0);   // setLrcText 只装载不定位，需显式定位首行才渲染
+        m_hintActive = true;
+#ifdef QT3_BUILD
+        m_msgTimer->start(5000, true);
+#else
+        m_msgTimer->start(5000);
+#endif
     } else {
         chatWidget->loadingBar()->showLoading(kLoadSendMsg, _("sending_message"));
         m_lyrics->setPlayedColor(QColor(0xBB,0xBB,0xBB));
@@ -2090,6 +2189,7 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
 
     // 乐观更新：先写入 buffer，再显示在界面
     int64_t pasteLocalId = 0;       // 块外要用（append 时由 ChatHistory 分配）
+    int64_t translateLocalId = 0;   // 同上：翻译启动需要 localId 定位元素
     {
         std::string typeStr = std::string(qToUtf8(currentChatType).data());
         ChatElement el;
@@ -2106,16 +2206,21 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
         backEl.sendState = ChatElement::SendSending;
         backEl.sendmsgseq = sendmsgseq;
         if (type == kBookmarkType || type == kAichatType
-            || type == kTranslateType
             || type == kMobPushType || type == kSnapType) {
             backEl.sendState = ChatElement::SendSent;
         }
         if (type == kPastebinType) {
             pasteLocalId = backEl.localId;   // 保持 SendSending，等待上传结果事件
         }
+        if (type == kTranslateType) {
+            translateLocalId = backEl.localId;   // 保持 SendSending，等待翻译结果事件
+        }
     }
     if (type == kPastebinType) {
         handlePastebinMessage(pasteLocalId, message);
+    }
+    if (type == kTranslateType) {
+        handleTranslateMessage(translateLocalId, message);
     }
     contactListWidget->updateContactLastMessage(currentChatId, currentChatType, message, timenowhm());
     db_writeLastMessage(currentChatId, currentChatType, message, timenowhm());
@@ -3759,8 +3864,9 @@ void MainWindow::onResendMessage(int msgIndex) {
         const int64_t lid = el.localId;
         handlePastebinMessage(lid, msgText);
     } else if (type == kTranslateType) {
-        el.sendState = ChatElement::SendSent;
-        handleTranslateMessage(msgText);
+        // 保持 SendSending（chatview 入口已置）；先拷出 localId，避免扩容后 el 悬空
+        const int64_t lid = el.localId;
+        handleTranslateMessage(lid, msgText);
     } else {
         // 扩展上下文：首发内存态优先(可见性/CW/引用与原消息一致，沿用原引用目标)；
         // 缺失(重载/重启后从 DB 恢复)则退化为当前属性栏取值，且不带待发引用/提及

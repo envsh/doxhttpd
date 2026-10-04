@@ -179,6 +179,8 @@ public:
     void relayout();
     void repaintMessageElement(int msgIndex);
     void onGifFrameUpdated(int msgIndex);
+    /// 按 localId 反查下标（从尾反向）；找不到返回 -1。用于跨事件循环的稳定定位
+    int indexOfLocalId(int64_t localId) const;
 
     // ChatHistoryObserver
     void onInsertOne(size_t index) override;
@@ -244,8 +246,6 @@ private:
     /// 头像命中矩形（与 paint 绘制几何一致）；未绘制头像时返回空矩形
     QRect avatarRectFor(int msgIndex) const;
     int findByAbsY(int absY) const;
-    /// 按 localId 反查下标（从尾反向）；找不到返回 -1。用于跨事件循环的稳定定位
-    int indexOfLocalId(int64_t localId) const;
     /// 全量刷新：切换上下文、滚动、resetCanvas、relayout、全选等结构变化场景
     void updateFull();
     /// 增量刷新：appendMessage、pill 悬浮/计数、selection 拖拽等局部脏矩形场景

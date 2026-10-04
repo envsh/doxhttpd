@@ -344,6 +344,11 @@ static const QMap<QString, bool>& ctxAllowedKeys() {
         // 不影响 CS/Matrix 协议字段。
         m.insert("provider",   true);
         m.insert("expire",     true);
+        // 本地直译参数：translate 类型同样在 onMessageSending 被本地截留，
+        // 从不调用 ToxAPI::sendMessage，这两个 key 仅供客户端侧消费，
+        // 不影响 CS/Matrix 协议字段。
+        m.insert("engine",     true);
+        m.insert("tolang",     true);
         initialized = true;
     }
     return m;

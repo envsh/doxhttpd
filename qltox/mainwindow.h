@@ -112,6 +112,8 @@ protected slots:
 private:
     // 粘贴直传：localId 由调用方给出（首发=乐观插入尾元素，重试=目标元素）
     void handlePastebinMessage(int64_t localId, const QString& text);
+    // 翻译直译（客户端直连翻译服务，不经后端）：参数语义同 handlePastebinMessage
+    void handleTranslateMessage(int64_t localId, const QString& text);
     // 媒体本机播放：实体化缓存字节 → 探测/转码（worker） → 播放
     void scheduleMediaPlayback(int msgIndex, bool pendingPlay,
                                const std::vector<uint8_t>* preloaded = nullptr,

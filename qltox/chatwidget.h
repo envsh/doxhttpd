@@ -79,6 +79,7 @@ public:
     ChatElement messageAt(int index) const;
     ChatElement& mutableMessageAt(int index);
     void updateElement(int msgIndex) { messageArea->updateElement(msgIndex); }
+    int indexOfLocalId(int64_t localId) { return messageArea->indexOfLocalId(localId); }
     void repaintMessageElement(int msgIndex) { messageArea->repaintMessageElement(msgIndex); }
     void relayout() { messageArea->relayout(); }
     void repaintMessages() { messageArea->update(); }
