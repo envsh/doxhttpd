@@ -16,6 +16,12 @@
 #include "ThemeManager.h"
 #include "stickerpicker.h"
 #include "storage.h"
+#include <qpushbutton.h>
+#ifdef QT3_BUILD
+#include <qaction.h>
+#else
+#include <QAction>
+#endif
 #ifdef QT3_BUILD
 #include <qlayout.h>
 #include <qhbox.h>
@@ -26,6 +32,62 @@
 #endif
 
 static void clearChipRow(QWidget* row, ChipWidgetList& chips);
+
+// ═══════════════ 外观三件套按钮 + 弹出菜单 ════════════════
+// 移植 qlstik/src/mainwindow.cpp:40-59 + 294-312。三个 QPushButton 30×30，
+// 只显示字形，点击弹菜单；菜单文案由宿主在 retranslateUi() 里就地改写。
+
+QPushButton* makeAppearanceMenuButton(QWidget* parent, const QString& glyph)
+{
+    QPushButton* b = new QPushButton(glyph, parent);
+    b->setFixedSize(30, 30);
+    return b;
+}
+
+void attachAppearanceMenu(QPushButton* btn, MenuWidget34* menu)
+{
+#ifdef QT3_BUILD
+    // checkable 是菜单级开关；Qt3 的 setItemChecked() 文档明说会自动打开它，
+    // 这里显式设置只为表明「本菜单要显示勾选标记」的意图。
+    // 真正把对号画出来的是 LimeStyle 的 CE_PopupMenuItem：Qt3 的 QPopupMenu 把绘制
+    // 整个委托给这个 CE，不会去调 PE_MenuItemIndicatorCheck。
+    // Qt4/6 由 addAppearanceMenuItem() 里的 QAction::setCheckable(true) 负责。
+    menu->setCheckable(true);
+    btn->setPopup(menu);
+#else
+    btn->setMenu(menu);
+#endif
+}
+
+const char* const* appearanceLangLabelKeys()
+{
+    static const char* const kKeys[3] = {
+        "简体中文", "繁體中文", "English"
+    };
+    return kKeys;
+}
+
+// 菜单项不能带参数（Qt4 的 QAction 版把 int 当 checked 态），故用 LambdaSlot 把
+// 索引/开关值关进槽。
+void addAppearanceMenuItem(std::vector<AppearanceMenuItemRef>* out, MenuWidget34* menu,
+                           const QObject* receiver, const char* slot, const char* key,
+                           int group, int index)
+{
+    QString text = _(qFromUtf8(key));
+    AppearanceMenuItemRef ref;
+    ref.key = key;
+    ref.owner = menu;
+    ref.group = group;
+    ref.index = index;
+#ifdef QT3_BUILD
+    ref.id = menu->insertItem(text, receiver, slot);
+#else
+    QAction* a = menu->addAction(text, receiver, slot);
+    a->setCheckable(group >= 0);     // Qt4+ 要显式开可勾；Qt3 无此 API，checked 即带勾
+    ref.action = a;
+#endif
+    out->push_back(ref);
+}
 
 #ifdef QT3_BUILD
 #include <qfiledialog.h>
@@ -108,6 +170,7 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     connect(langSelector, SIGNAL(activated(int)), this, SLOT(onUilangChanged(int)));
     connect(langSelector, SIGNAL(activated(int)), this, SLOT(onTranslateTolangChanged(int)));
     headerLayout->addWidget(langSelector);
+    langSelector->hide();          // 已改用 m_langBtn + 弹出菜单
 
     // 风格选择器
     m_styleSelector = new QComboBox(this);
@@ -131,12 +194,82 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     }
     connect(m_styleSelector, SIGNAL(activated(int)), this, SLOT(onStyleChanged(int)));
     headerLayout->addWidget(m_styleSelector);
+    m_styleSelector->hide();        // 已改用 m_styleBtn + 弹出菜单
 
     // 主题切换复选框
     themeCheckBox = new QCheckBox(_("theme_dark"), this);
     qSetChecked(themeCheckBox, true);
     connect(themeCheckBox, SIGNAL(toggled(bool)), this, SLOT(onThemeToggled(bool)));
     headerLayout->addWidget(themeCheckBox);
+    themeCheckBox->hide();          // 已改用 m_darkBtn + 弹出菜单
+
+    // ── 外观三件套：按钮 + 弹出菜单（菜单宽度 150，同 qlstik）──
+    m_langBtn = makeAppearanceMenuButton(this, qFromUtf8("文"));
+    headerLayout->addWidget(m_langBtn, 0);
+    m_styleBtn = makeAppearanceMenuButton(this, qFromUtf8("饰"));
+    headerLayout->addWidget(m_styleBtn, 0);
+    m_darkBtn = makeAppearanceMenuButton(this, qFromUtf8("☾"));
+    headerLayout->addWidget(m_darkBtn, 0);
+
+    // 语言
+    m_langMenu = new MenuWidget34(this);
+    m_langMenu->setMinimumWidth(150);
+    {
+        const char* const* langKeys = appearanceLangLabelKeys();
+        for (int i = 0; i < 3; i++) {
+            LambdaSlot* slot = new LambdaSlot(m_langMenu, [this, i]() {
+                // 语言项同时驱动 UI 语言与翻译目标语言：translate_tolang 全局
+                // 仅此一个入口（config.cpp:62 只是默认值），漏掉就没有第二次机会改。
+                onUilangChanged(i);
+                onTranslateTolangChanged(i);
+                updateAppearanceTooltips();
+                updateAppearanceMenuChecks();
+            });
+            addAppearanceMenuItem(&m_appearanceItems, m_langMenu, slot, SLOT(call()),
+                                  langKeys[i], 0, i);
+        }
+    }
+    attachAppearanceMenu(m_langBtn, m_langMenu);
+
+    // 风格
+    m_styleMenu = new MenuWidget34(this);
+    m_styleMenu->setMinimumWidth(150);
+    {
+        const auto& styles = StyleParams::registeredStyles();
+        for (int i = 0; i < (int)styles.size(); i++) {
+            LambdaSlot* slot = new LambdaSlot(m_styleMenu, [this, i]() {
+                onStyleChanged(i);
+                updateAppearanceTooltips();   // ThemeManager 无信号，只能自己刷
+                updateAppearanceMenuChecks();
+            });
+            addAppearanceMenuItem(&m_appearanceItems, m_styleMenu, slot, SLOT(call()),
+                                  styles[i].displayKey, 1, i);
+        }
+    }
+    attachAppearanceMenu(m_styleBtn, m_styleMenu);
+
+    // 深色：开/关两项（文案固定，不随状态换词）
+    m_darkMenu = new MenuWidget34(this);
+    m_darkMenu->setMinimumWidth(150);
+    {
+        LambdaSlot* on = new LambdaSlot(m_darkMenu, [this]() {
+            onThemeToggled(true);
+            updateAppearanceTooltips();
+            updateAppearanceMenuChecks();
+        });
+        addAppearanceMenuItem(&m_appearanceItems, m_darkMenu, on, SLOT(call()),
+                              "theme_dark", 2, 0);
+        LambdaSlot* off = new LambdaSlot(m_darkMenu, [this]() {
+            onThemeToggled(false);
+            updateAppearanceTooltips();
+            updateAppearanceMenuChecks();
+        });
+        addAppearanceMenuItem(&m_appearanceItems, m_darkMenu, off, SLOT(call()),
+                              "theme_light", 2, 1);
+    }
+    attachAppearanceMenu(m_darkBtn, m_darkMenu);
+    updateAppearanceTooltips();
+    updateAppearanceMenuChecks();
     
     mainLayout->addLayout(headerLayout);
     
@@ -535,6 +668,11 @@ void ChatWidget::retranslateUi() {
     if (inputEdit) {
     inputEdit->setPlaceholderText(_("placeholders.type_message"));
     }
+
+    // 外观三件套：菜单项文案 + 按钮 tooltip 都跟随语言切换
+    refreshAppearanceMenuTexts();
+    updateAppearanceTooltips();
+    updateAppearanceMenuChecks();
 }
 
 static QString langCodeFromIndex(int index) {
@@ -542,6 +680,77 @@ static QString langCodeFromIndex(int index) {
     if (index == 1) return "zh-TW";
     if (index == 2) return "en-US";
     return "zh-CN";
+}
+
+int appearanceLangIndex(const QString& langCode) {
+    for (int i = 0; i < 3; i++) {
+        if (langCode == langCodeFromIndex(i)) { return i; }
+    }
+    return 0;
+}
+
+void ChatWidget::refreshAppearanceMenuTexts()
+{
+    for (size_t i = 0; i < m_appearanceItems.size(); i++) {
+        const AppearanceMenuItemRef& ref = m_appearanceItems[i];
+        if (!ref.key) { continue; }
+        QString text = _(qFromUtf8(ref.key));
+#ifdef QT3_BUILD
+        // Qt3 只能按 id 改文案（QMenuData::changeItem），id 由 insertItem 分配
+        static_cast<QPopupMenu*>(ref.owner)->changeItem(ref.id, text);
+#else
+        if (ref.action) { static_cast<QAction*>(ref.action)->setText(text); }
+#endif
+    }
+}
+
+void ChatWidget::updateAppearanceTooltips()
+{
+    if (m_langBtn) {
+        const char* const* langKeys = appearanceLangLabelKeys();
+        int li = appearanceLangIndex(Translator::instance().currentLang());
+        qSetToolTip(m_langBtn, _(qFromUtf8("tooltips.lang")) + ": "
+                    + qFromUtf8(langKeys[li]));
+    }
+    if (m_styleBtn) {
+        const auto& styles = StyleParams::registeredStyles();
+        int si = 0;
+        for (int i = 0; i < (int)styles.size(); i++) {
+            if (QString(styles[i].id) == QString(ThemeManager::styleId())) { si = i; break; }
+        }
+        QString label = (si >= 0 && si < (int)styles.size())
+                            ? _(qFromUtf8(styles[si].displayKey)) : QString();
+        qSetToolTip(m_styleBtn, _(qFromUtf8("tooltips.style")) + ": " + label);
+    }
+    if (m_darkBtn) {
+        qSetToolTip(m_darkBtn, _(qFromUtf8("tooltips.dark")) + ": "
+                    + (ThemeManager::isDarkMode() ? _("theme_dark") : _("theme_light")));
+    }
+}
+
+// 当前值打勾：三组各自单选。ThemeManager 无信号，所以每次改完外观都要显式调。
+void ChatWidget::updateAppearanceMenuChecks()
+{
+    int cur[3];
+    cur[0] = appearanceLangIndex(Translator::instance().currentLang());
+    cur[1] = 0;
+    {
+        const auto& styles = StyleParams::registeredStyles();
+        for (int i = 0; i < (int)styles.size(); i++) {
+            if (QString(styles[i].id) == QString(ThemeManager::styleId())) { cur[1] = i; break; }
+        }
+    }
+    cur[2] = ThemeManager::isDarkMode() ? 0 : 1;
+    for (size_t i = 0; i < m_appearanceItems.size(); i++) {
+        const AppearanceMenuItemRef& ref = m_appearanceItems[i];
+        if (ref.group < 0) { continue; }
+        bool on = (ref.index == cur[ref.group]);
+#ifdef QT3_BUILD
+        static_cast<QPopupMenu*>(ref.owner)->setItemChecked(ref.id, on);
+#else
+        if (ref.action) { static_cast<QAction*>(ref.action)->setChecked(on); }
+#endif
+    }
 }
 
 void ChatWidget::onUilangChanged(int index) {

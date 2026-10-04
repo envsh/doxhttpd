@@ -336,6 +336,21 @@ static int buttonRadiusFor(const StyleParams& params, const QRect& r) {
     return params.buttonRadius;
 }
 
+// Qt3/Qt4+ 通用勾选标记。Qt3 的 QPainter 没有 setRenderHint（Qt4+ 才有），
+// 故只画整数线段，观感与 CE_CheckBox 的 Style_On 分支一致。
+// 放在两个 QT3_BUILD 分支之外，Qt3 的 CE_PopupMenuItem 和 Qt4/6 的
+// CE_MenuItem 都要用（LimeStyle 自己手绘菜单项，不会走平台样式那套 PE）。
+static void drawMenuCheckMark(QPainter* p, const QRect& area, const QColor& fg) {
+    p->save();
+    p->setPen(QPen(fg, 2));
+    int cx = area.x() + area.width() / 2;
+    int cy = area.y() + area.height() / 2;
+    int s  = std::min(area.width(), area.height()) / 4;
+    p->drawLine(cx - s, cy, cx - s / 2, cy + s);
+    p->drawLine(cx - s / 2, cy + s, cx + s, cy - s);
+    p->restore();
+}
+
 // ========== Constructor ==========
 
 LimeStyle::LimeStyle() :
@@ -482,6 +497,7 @@ void LimeStyle::drawControl(ControlElement ce, const QStyleOption *opt,
         bool selected = opt->state & State_Selected;
         bool separator = false;
         bool enabled = opt->state & State_Enabled;
+        bool checked = false;
         QString text;
 
         if (const QStyleOptionMenuItem* mopt =
@@ -489,6 +505,15 @@ void LimeStyle::drawControl(ControlElement ce, const QStyleOption *opt,
             separator = mopt->menuItemType == QStyleOptionMenuItem::Separator;
             text = mopt->text;
             enabled = mopt->state & State_Enabled;
+            // 可勾选项的状态由 QAction::setCheckable(true) + setChecked() 驱动，
+            // 等价于 Qt3 的 QMenuItem::isChecked()。
+            // Qt4/Qt5/Qt6 的 QStyleOptionMenuItem 字段布局完全一致（已核对 qt4 4.8.7、
+            // qt 5.5、qt 5.15.19、qt6 6.0.4、6.8.7、6.9、6.11.2、6.12）：都是
+            // enum CheckType{NotCheckable,Exclusive,NonExclusive} + CheckType checkType
+            // + bool checked。该类从来没有 NoIndicator/CheckIndicatorType/checkState
+            // （checkState 属于 QStyleOptionViewItem），故无需按版本分支。
+            checked = mopt->checkType != QStyleOptionMenuItem::NotCheckable
+                   && mopt->checked;
         }
 
         if (separator) {
@@ -509,6 +534,11 @@ void LimeStyle::drawControl(ControlElement ce, const QStyleOption *opt,
         QColor fg = selected ? pal.accentText
                     : (enabled ? pal.textPrimary : pal.textDisabled);
         p->setPen(fg);
+        // 同 Qt3 的 CE_PopupMenuItem：菜单项是 LimeStyle 自己画的，
+        // 勾选标记必须在这里自绘，否则 checkable 项看起来完全一样。
+        if (checked)
+            drawMenuCheckMark(p, QRect(opt->rect.x() + 1, opt->rect.y(),
+                                       14, opt->rect.height()), fg);
         QRect textR = opt->rect.adjusted(16, 0, -16, 0);
         int ampPos = text.indexOf(QLatin1Char('&'));
         if (ampPos >= 0) text.remove(ampPos, 1);
@@ -941,6 +971,16 @@ void LimeStyle::drawPrimitive(PrimitiveElement pe, QPainter *p,
         p->restore();
         return;
     }
+    case PE_MenuItemIndicatorCheck: {
+        // Qt3 菜单勾选标记。QCommonStyle 不实现 PE_MenuItemIndicator*
+        // （qstyle.h:486-488，仅平台样式 QWindowsStyle/QMotifStyle 有）。
+        // 注意 Qt3 的 QPopupMenu::drawItem() 只把绘制委托给 CE_PopupMenuItem，
+        // 并不会来调这个 PE —— 对号实际是 CE_PopupMenuItem 里自绘的（见下）。
+        // 本 case 仅作兜底保留，画法与那处共用同一个函数。
+        drawMenuCheckMark(p, r, (flags & Style_Enabled) ? pal.textPrimary
+                                                        : pal.textDisabled);
+        return;
+    }
     default:
         break;
     }
@@ -1008,6 +1048,12 @@ void LimeStyle::drawControl(ControlElement ce, QPainter *p,
             QColor fg = selected ? pal.accentText
                         : (disabled ? pal.textDisabled : pal.textPrimary);
             p->setPen(fg);
+
+            // 对号只能在这里自绘：LimeStyle 接管了 Qt3 的 CE_PopupMenuItem，
+            // QPopupMenu 自己不会去调 PE_MenuItemIndicatorCheck。左边 20px
+            // 本来就是文字 inset（textR 从 r.x()+20 起），正好放标记。
+            if (mi->isChecked())
+                drawMenuCheckMark(p, QRect(r.x() + 2, r.y(), 16, r.height()), fg);
 
             int ampPos = text.find('&');
             if (ampPos >= 0)

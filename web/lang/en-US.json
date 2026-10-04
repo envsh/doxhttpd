@@ -60,7 +60,10 @@
         "file": "Send file",
         "sticker": "Stickers",
         "quickreply": "Quick reply",
-        "paste": "Paste"
+        "paste": "Paste",
+        "lang": "Language",
+        "style": "Style",
+        "dark": "Dark Mode"
     },
     "placeholders": {
         "add_friend": "Enter Tox ID to add friend",

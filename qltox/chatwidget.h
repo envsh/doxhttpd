@@ -28,9 +28,44 @@ typedef QList<QWidget*> ChipWidgetList;        // Qt4：存 QWidget*
 #include "emoji_picker.h"
 #include "StyleParams.h"
 #include "loadingbar.h"
+#include "EmbeddedMenuBar.h"
+#include <vector>
 #include <string>
 
 class StickerPicker;
+
+// 外观三件套（语言/风格/深色）弹出菜单的文案引用。
+// ⚠ 定义在类体之外：类体内 #ifdef 会让 Qt3 moc v26 同时处理两个分支而重复生成。
+// ⚠ 菜单文案不重建、只就地改写，原因（Qt3 实测约束，同 qlstik/mainwindow.h:15-21）：
+//   * QMenuData::clear()（Qt3）会保留旧分隔线 → 反复重建会堆积分隔线；
+//   * QPopupMenu::insertItem()（Qt3）返回的是**分配 id**（非位置），
+//     而 Qt4+ 的 QAction* 才是稳定句柄。
+// 故构建时记下每项的 id（Qt3）或 QAction*（Qt4+），retranslateUi() 据此改写。
+struct AppearanceMenuItemRef {
+    const char* key;      // 翻译键（UTF-8）
+    void* owner;          // 所属菜单（Qt3 changeItem 用；Qt4+ 仅留档）
+    int id;               // Qt3 insertItem 返回的分配 id
+    void* action;         // Qt4+ QAction*
+    int group;            // 0=语言 1=风格 2=深色；-1 = 不打勾
+    int index;            // 组内序号（语言/风格=索引，深色 0=开 1=关）
+    AppearanceMenuItemRef() : key(0), owner(0), id(-1), action(0), group(-1), index(-1) {}
+};
+
+// ── 外观三件套的共用构件 ──
+// ChatWidget 顶部与 MainWindow 标题栏各建一套（彼此独立维护文案与 tooltip），
+// 这几个构件跨两个 .cpp 共用，故不设为 static。
+// 用 QPushButton 而非 QToolButton：双端都能挂菜单（Qt3 setPopup / Qt4+ setMenu），
+// 且 Qt3 QToolButton 的 popup 不响应单击。
+QPushButton* makeAppearanceMenuButton(QWidget* parent, const QString& glyph);
+void attachAppearanceMenu(QPushButton* btn, MenuWidget34* menu);
+// 三个语言项固定用语言名自身（简体中文/繁體中文/English），不参与翻译
+const char* const* appearanceLangLabelKeys();
+// 当前语言代码 → 索引（0..2），认不出按 0
+int appearanceLangIndex(const QString& langCode);
+// 加一项并留档；out 为宿主容器的 m_appearanceItems
+void addAppearanceMenuItem(std::vector<AppearanceMenuItemRef>* out, MenuWidget34* menu,
+                           const QObject* receiver, const char* slot, const char* key,
+                           int group, int index);
 
 class ChatWidget : public QWidget {
     Q_OBJECT
@@ -135,6 +170,21 @@ private:
     EmojiPushButton* pasteBtn;      // 输入框左侧上：粘贴（与 Ctrl+V 同路径）
     EmojiPushButton* typeIconBtn;   // 输入框左侧下：当前联系人类型图标（纯指示器，不接 slot）
     void updateChatTypeIcon(const QString& type);
+
+    // ── 外观三件套（按钮 + 弹出菜单）──
+    // 旧的 langSelector / m_styleSelector / themeCheckBox 仍按原样构造并接线，
+    // 但已 hide()：它们的「当前值」全部走 ThemeManager / Config，无需读控件状态。
+    void updateAppearanceTooltips();      // 按钮 tooltip =「功能: 当前值」
+    void refreshAppearanceMenuTexts();    // 切换语言后就地改写菜单项文案
+    void updateAppearanceMenuChecks();    // 当前值打勾（三组各自单选）
+    QPushButton* m_langBtn;
+    QPushButton* m_styleBtn;
+    QPushButton* m_darkBtn;
+    MenuWidget34* m_langMenu;
+    MenuWidget34* m_styleMenu;
+    MenuWidget34* m_darkMenu;
+    std::vector<AppearanceMenuItemRef> m_appearanceItems;
+
     QString m_currentChatType;
     QPushButton* sendBtn;
     QPushButton* m_sendEnBtn;

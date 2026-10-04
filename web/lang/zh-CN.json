@@ -60,7 +60,10 @@
         "file": "发送文件",
         "sticker": "贴纸",
         "quickreply": "快速回复",
-        "paste": "粘贴"
+        "paste": "粘贴",
+        "lang": "语言",
+        "style": "风格",
+        "dark": "深色模式"
     },
     "placeholders": {
         "add_friend": "输入 Tox ID 添加好友",

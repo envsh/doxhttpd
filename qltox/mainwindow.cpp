@@ -74,6 +74,11 @@
 #include "ConfigDialog.h"
 #include <qpushbutton.h>
 #include <qlineedit.h>
+#ifdef QT3_BUILD
+#include <qaction.h>
+#else
+#include <QAction>
+#endif
 #include "plugin_manager_dialog.h"
 #include <qevent.h>
 #include "app_icon.xpm"
@@ -714,6 +719,7 @@ MainWindow::MainWindow(QWidget* parent)
     tLang->setCurrentIndex(0);
 #endif
     panelLay->addWidget(tLang, 0);
+    tLang->hide();        // 已改用 m_langBtn + 弹出菜单
 
     QComboBox* tStyle = new QComboBox(titlePanel);
     tStyle->setFixedHeight(30);  // 与 titlebar 内容高一致
@@ -740,15 +746,81 @@ MainWindow::MainWindow(QWidget* parent)
 #endif
     }
     panelLay->addWidget(tStyle, 0);
+    tStyle->hide();      // 已改用 m_styleBtn + 弹出菜单
 
     QCheckBox* tDark = new QCheckBox(_("theme_dark"), titlePanel);
     tDark->setFixedHeight(30);   // 与 titlebar 内容高一致
     qSetChecked(tDark, ThemeManager::isDarkMode());
     panelLay->addWidget(tDark, 0);
+    tDark->hide();       // 已改用 m_darkBtn + 弹出菜单
 
     QObject::connect(tLang, SIGNAL(activated(int)), this, SLOT(onTitleUilang(int)));
     QObject::connect(tStyle, SIGNAL(activated(int)), this, SLOT(onTitleStyle(int)));
     QObject::connect(tDark, SIGNAL(toggled(bool)), this, SLOT(onTitleDark(bool)));
+
+    // ── 外观三件套：按钮 + 弹出菜单（菜单宽度 150，同 qlstik）──
+    // 文案与 tooltip 由本窗口独立维护（与 ChatWidget 顶部那套互不干扰）
+    m_langBtn = makeAppearanceMenuButton(titlePanel, qFromUtf8("文"));
+    panelLay->addWidget(m_langBtn, 0);
+    m_styleBtn = makeAppearanceMenuButton(titlePanel, qFromUtf8("饰"));
+    panelLay->addWidget(m_styleBtn, 0);
+    m_darkBtn = makeAppearanceMenuButton(titlePanel, qFromUtf8("☾"));
+    panelLay->addWidget(m_darkBtn, 0);
+
+    m_langMenu = new MenuWidget34(this);
+    m_langMenu->setMinimumWidth(150);
+    {
+        const char* const* langKeys = appearanceLangLabelKeys();
+        for (int i = 0; i < 3; i++) {
+            LambdaSlot* slot = new LambdaSlot(m_langMenu, [this, i]() {
+                onTitleUilang(i);
+                updateAppearanceTooltips();
+                updateAppearanceMenuChecks();
+            });
+            addAppearanceMenuItem(&m_appearanceItems, m_langMenu, slot, SLOT(call()),
+                                  langKeys[i], 0, i);
+        }
+    }
+    attachAppearanceMenu(m_langBtn, m_langMenu);
+
+    m_styleMenu = new MenuWidget34(this);
+    m_styleMenu->setMinimumWidth(150);
+    {
+        const auto& panelStyles = StyleParams::registeredStyles();
+        for (int i = 0; i < (int)panelStyles.size(); i++) {
+            LambdaSlot* slot = new LambdaSlot(m_styleMenu, [this, i]() {
+                onTitleStyle(i);
+                updateAppearanceTooltips();     // ThemeManager 无信号，只能自己刷
+                updateAppearanceMenuChecks();
+            });
+            addAppearanceMenuItem(&m_appearanceItems, m_styleMenu, slot, SLOT(call()),
+                                  panelStyles[i].displayKey, 1, i);
+        }
+    }
+    attachAppearanceMenu(m_styleBtn, m_styleMenu);
+
+    m_darkMenu = new MenuWidget34(this);
+    m_darkMenu->setMinimumWidth(150);
+    {
+        LambdaSlot* on = new LambdaSlot(m_darkMenu, [this]() {
+            onTitleDark(true);
+            updateAppearanceTooltips();
+            updateAppearanceMenuChecks();
+        });
+        addAppearanceMenuItem(&m_appearanceItems, m_darkMenu, on, SLOT(call()),
+                              "theme_dark", 2, 0);
+        LambdaSlot* off = new LambdaSlot(m_darkMenu, [this]() {
+            onTitleDark(false);
+            updateAppearanceTooltips();
+            updateAppearanceMenuChecks();
+        });
+        addAppearanceMenuItem(&m_appearanceItems, m_darkMenu, off, SLOT(call()),
+                              "theme_light", 2, 1);
+    }
+    attachAppearanceMenu(m_darkBtn, m_darkMenu);
+    updateAppearanceTooltips();
+    updateAppearanceMenuChecks();
+
     titleBar->addTitleWidget(titlePanel, 0);
 
     EmbeddedMenuBar* mb = titleBar->menuBar();
@@ -2705,6 +2777,74 @@ void MainWindow::retranslateUi() {
             headerText = protoStreamEmoji(currentChatType) + " " + label;
         }
         chatWidget->setHeaderText(headerText);
+    }
+
+    // 外观三件套：菜单项文案 + 按钮 tooltip 都跟随语言切换
+    refreshAppearanceMenuTexts();
+    updateAppearanceTooltips();
+    updateAppearanceMenuChecks();
+}
+
+void MainWindow::refreshAppearanceMenuTexts()
+{
+    for (size_t i = 0; i < m_appearanceItems.size(); i++) {
+        const AppearanceMenuItemRef& ref = m_appearanceItems[i];
+        if (!ref.key) { continue; }
+        QString text = _(qFromUtf8(ref.key));
+#ifdef QT3_BUILD
+        // Qt3 只能按 id 改文案（QMenuData::changeItem），id 由 insertItem 分配
+        static_cast<QPopupMenu*>(ref.owner)->changeItem(ref.id, text);
+#else
+        if (ref.action) { static_cast<QAction*>(ref.action)->setText(text); }
+#endif
+    }
+}
+
+void MainWindow::updateAppearanceTooltips()
+{
+    if (m_langBtn) {
+        const char* const* langKeys = appearanceLangLabelKeys();
+        int li = appearanceLangIndex(Translator::instance().currentLang());
+        qSetToolTip(m_langBtn, _(qFromUtf8("tooltips.lang")) + ": "
+                    + qFromUtf8(langKeys[li]));
+    }
+    if (m_styleBtn) {
+        const auto& panelStyles = StyleParams::registeredStyles();
+        int si = 0;
+        for (int i = 0; i < (int)panelStyles.size(); i++) {
+            if (QString(panelStyles[i].id) == QString(ThemeManager::styleId())) { si = i; break; }
+        }
+        QString label = (si >= 0 && si < (int)panelStyles.size())
+                            ? _(qFromUtf8(panelStyles[si].displayKey)) : QString();
+        qSetToolTip(m_styleBtn, _(qFromUtf8("tooltips.style")) + ": " + label);
+    }
+    if (m_darkBtn) {
+        qSetToolTip(m_darkBtn, _(qFromUtf8("tooltips.dark")) + ": "
+                    + (ThemeManager::isDarkMode() ? _("theme_dark") : _("theme_light")));
+    }
+}
+
+void MainWindow::updateAppearanceMenuChecks()
+{
+    int cur[3];
+    cur[0] = appearanceLangIndex(Translator::instance().currentLang());
+    cur[1] = 0;
+    {
+        const auto& panelStyles = StyleParams::registeredStyles();
+        for (int i = 0; i < (int)panelStyles.size(); i++) {
+            if (QString(panelStyles[i].id) == QString(ThemeManager::styleId())) { cur[1] = i; break; }
+        }
+    }
+    cur[2] = ThemeManager::isDarkMode() ? 0 : 1;
+    for (size_t i = 0; i < m_appearanceItems.size(); i++) {
+        const AppearanceMenuItemRef& ref = m_appearanceItems[i];
+        if (ref.group < 0) { continue; }
+        bool on = (ref.index == cur[ref.group]);
+#ifdef QT3_BUILD
+        static_cast<QPopupMenu*>(ref.owner)->setItemChecked(ref.id, on);
+#else
+        if (ref.action) { static_cast<QAction*>(ref.action)->setChecked(on); }
+#endif
     }
 }
 

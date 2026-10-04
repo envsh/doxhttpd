@@ -164,6 +164,20 @@ private:
     QProcess* m_macShotProc;            // macOS 抓图进程（一次性，完成即销毁）
     QString m_macShotTmpPath;           // macOS 抓图临时文件路径
 
+    // ── titlebar 外观三件套（按钮 + 弹出菜单）──
+    // 旧的 tLang / tStyle / tDark 仍按原样构造并接线，但已 hide()。
+    // 复用 chatwidget.h 的 AppearanceMenuItemRef 与共用构件（本文件已 include 它）。
+    void updateAppearanceTooltips();
+    void refreshAppearanceMenuTexts();
+    void updateAppearanceMenuChecks();
+    QPushButton* m_langBtn;
+    QPushButton* m_styleBtn;
+    QPushButton* m_darkBtn;
+    MenuWidget34* m_langMenu;
+    MenuWidget34* m_styleMenu;
+    MenuWidget34* m_darkMenu;
+    std::vector<AppearanceMenuItemRef> m_appearanceItems;
+
 #ifdef QT3_BUILD
     QMap<int, int> m_etappItemToIndex;
 #endif
