@@ -873,16 +873,21 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
                         qFromUtf8("该会话的本地备注，仅用于查找与展示，不下发"));
         defs << tagsDef("tags", qFromUtf8("标签"));
     } else if (type == kTranslateType) {
-        QStringList eng;  eng << "all" << "msedge" << "youdao" << "deepl" << "google" << "yandex";
-        defs << comboDef("engine", qFromUtf8("翻译引擎"), eng, "all",
-                         qFromUtf8("翻译引擎：all=聚合自动选优 / msedge / youdao / deepl / google / yandex（占位属性，暂不生效）"));
+        QStringList eng;  eng << "any" << "all" << "msedge" << "google"
+                              << "youdao" << "yandex" << "deepl";
+        defs << comboDef("engine", qFromUtf8("翻译引擎"), eng, "any",
+                         qFromUtf8("翻译引擎：any=随机取序逐个尝试，首个成功即止（默认） / "
+                                   "all=按固定优先级依次尝试，成功即止 / 指定项=只用该引擎。"
+                                   "客户端直连翻译服务，不经后端。"
+                                   "deepl 需官方 auth key，暂不可用，选中即报错"));
         QStringList lang;
         lang << qFromUtf8("中文") << qFromUtf8("繁體中文") << qFromUtf8("日本語")
              << qFromUtf8("한국어") << qFromUtf8("English") << qFromUtf8("Français")
              << qFromUtf8("Deutsch") << qFromUtf8("Русский") << qFromUtf8("العربية")
              << qFromUtf8("地球语");
         defs << comboDef("tolang", qFromUtf8("目标语言"), lang, "中文",
-                         qFromUtf8("翻译目标语言（各语言原生名称）：中文=简体（默认）/ 繁體中文 / 日本語 / 한국어 / English / Français / Deutsch / Русский / العربية / 地球语=国际通用语（占位属性，暂不生效）"));
+                         qFromUtf8("翻译目标语言（各语言原生名称）：中文=简体（默认）/ 繁體中文 / 日本語 / 한국어 / "
+                                   "English / Français / Deutsch / Русский / العربية / 地球语=世界语"));
     } else if (type == kMobPushType) {
         QStringList pch;  pch << "all" << "ntfy" << "mozilla";
         defs << comboDef("ctype", qFromUtf8("类型"), pch, "all",

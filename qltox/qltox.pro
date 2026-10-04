@@ -27,8 +27,9 @@ SOURCES = main.cpp mainwindow.cpp storage.cpp restapi.cpp eventpoller.cpp pasteu
                 translate_util.cpp \
                  config.cpp \
                  msgdb_helper.cpp \
-                 translation_cache.cpp \
-                 statisticsdialog.cpp \
+translation_cache.cpp \
+                  fanyibot.cpp \
+                  statisticsdialog.cpp \
                  combinesearchwindow.cpp \
                  searchlistview.cpp \
                  sticker_db.cpp stickerpicker.cpp stickermanager.cpp \
@@ -49,6 +50,7 @@ HEADERS = mainwindow.h storage.h restapi.h eventpoller.h pasteuploader.h \
                  config.h version.h \
                  msgdb_helper.h \
                  translation_cache.h \
+                 fanyibot.h \
                  statisticsdialog.h \
                  combinesearchwindow.h \
                  searchlistview.h \

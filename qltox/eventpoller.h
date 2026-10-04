@@ -21,6 +21,7 @@ const EventType34 DiskLoadReadyType       = toEventType34(QEvent::User + 105);
 const EventType34 RowidBackfillReadyType  = toEventType34(QEvent::User + 106);
 const EventType34 MediaDownloadProgressType = toEventType34(QEvent::User + 107);
 const EventType34 PastebinResultType      = toEventType34(QEvent::User + 108);
+const EventType34 FanyibotDoneType        = toEventType34(QEvent::User + 109);
 
 // ── API 请求类型 ──
 enum ApiRequestType {
@@ -218,6 +219,19 @@ public:
     std::string url;            // 成功：可直接上屏的链接
     std::string providerUsed;   // 成功：实际命中的服务
     std::string errorMsg;       // 失败：含已试服务与最后错误
+};
+
+// 翻译虚拟联系人的翻译结果（客户端直连各翻译服务，不经后端）
+class FanyibotDoneEvent : public CustomEventBase {
+public:
+    FanyibotDoneEvent() : CustomEventBase(FanyibotDoneType) {}
+    int chatId = 0;
+    std::string chatType;
+    long long localId = 0;      // 宿主侧 ChatElement 定位（跨事件循环稳定）
+    bool success = false;
+    std::string translatedText; // 成功：译文
+    std::string engineUsed;     // 成功：实际命中的引擎
+    std::string errorMsg;       // 失败：含已试引擎与最后错误
 };
 
 class SelfInfoResultEvent : public ApiResultEvent {
