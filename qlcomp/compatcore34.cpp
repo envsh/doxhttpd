@@ -8,6 +8,11 @@
 // ========== 实现所需的 Qt 头文件 ==========
 #include <qdir.h>            // QDir (qGetHomePath, qAppDir, qCurrDir, qMkdir)
 #include <qdatetime.h>       // QDateTime (qFmtTime, getCurrentTime)
+#if QT_VERSION >= 0x050000
+#include <QTimer>             // QTimer (qTimerStart)
+#else
+#include <qtimer.h>           // QTimer
+#endif
 
 // ========== EventType34 ==========
 EventType34 toEventType34(int raw) {
@@ -425,4 +430,33 @@ bool qStartProcessDetached(const QString& program, const QStringList& args) {
 #else
     return QProcess::startDetached(program, args);
 #endif
+}
+
+// ========== QTimer / QMap 兼容 ==========
+void qTimerStart(QTimer* t, int msec, bool repeat) {
+    if (!t) { return; }
+#ifdef QT3_BUILD
+    t->start(msec, !repeat);
+#else
+    t->setSingleShot(!repeat);
+    t->start(msec);
+#endif
+}
+
+QString qMapValue(const QMap<QString,QString>& m, const QString& key, const QString& def) {
+    QMap<QString,QString>::const_iterator it = m.find(key);
+    if (it == m.end()) { return def; }
+    return *it;
+}
+
+QVariant qMapValue(const QMap<QString,QVariant>& m, const QString& key, const QVariant& def) {
+    QMap<QString,QVariant>::const_iterator it = m.find(key);
+    if (it == m.end()) { return def; }
+    return *it;
+}
+
+int qMapValue(const QMap<int,int>& m, int key, int def) {
+    QMap<int,int>::const_iterator it = m.find(key);
+    if (it == m.end()) { return def; }
+    return *it;
 }

@@ -18,6 +18,13 @@
 #endif
 #include <qlist.h>           // QList — for QPtrList
 #include <qfile.h>           // QFile
+#if QT_VERSION >= 0x050000
+#include <QMap>               // QMap — for qMapValue
+#include <QVariant>           // QVariant — for qMapValue(QMap<QString,QVariant>)
+#else
+#include <qmap.h>             // QMap
+#include <qvariant.h>         // QVariant
+#endif
 
 // ========== 事件类型兼容 ==========
 #ifdef QT3_BUILD
@@ -78,6 +85,17 @@ int qRuncmdCaptureOuterr(const QString& program, const QStringList& args, QStrin
 
 // 分离启动外部进程（播放器等）；返回是否成功启动
 bool qStartProcessDetached(const QString& program, const QStringList& args);
+
+// ========== QTimer / QMap 兼容 ==========
+class QTimer;   // 指针参数，前向声明即可（实现处 include QTimer 头）
+// 启动定时器。Qt3 start(msec, sshot) 第二参是「单次」，Qt4+ start(msec) 是重复触发
+//（单次须先 setSingleShot(true)）；这里统一成 repeat 语义，两端行为一致。
+void qTimerStart(QTimer* t, int msec, bool repeat = true);
+// QMap 取值：各代 const_iterator 都支持 operator*（Qt3 const T& / Qt4 const T / Qt6 const T&），
+// 实现无需 #ifdef。按实际用到的键值类型重载，缺键返回 def。
+QString qMapValue(const QMap<QString,QString>& m, const QString& key, const QString& def = QString());
+QVariant qMapValue(const QMap<QString,QVariant>& m, const QString& key, const QVariant& def = QVariant());
+int qMapValue(const QMap<int,int>& m, int key, int def = 0);
 
 // ========== QPtrList 兼容（Qt4 模拟） ==========
 #ifndef QT3_BUILD

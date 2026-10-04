@@ -339,6 +339,11 @@ static const QMap<QString, bool>& ctxAllowedKeys() {
         m.insert("localOnly",  true);
         m.insert("cw",         true);
         m.insert("tags",       true); // 属性栏标签，Misskey 侧解析为笔记哈希标签
+        // 本地直传参数：aichat/pastebin/bookmark 三类在 onMessageSending 被本地截留，
+        // 从不调用 ToxAPI::sendMessage，故这两个 key 不会上送、仅供客户端侧消费，
+        // 不影响 CS/Matrix 协议字段。
+        m.insert("provider",   true);
+        m.insert("expire",     true);
         initialized = true;
     }
     return m;

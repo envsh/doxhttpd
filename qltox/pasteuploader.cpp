@@ -393,7 +393,7 @@ void sendHost(Session* s, const PasteHost& h) {
     std::string fileName = isText ? std::string("paste.txt") : s->req.fileName;
     if (fileName.empty()) { fileName = "paste.bin"; }
     const std::string mime = isText ? std::string("text/plain; charset=utf-8")
-                                    : mimeOf(fileName);
+                                    : pasteMimeOf(fileName);
 
     // transfer.sh 只收 PUT 原始字节（目标 URL 携带文件名），保留期用 Max-Days 头
     if (h.id == kPasteHostTransferSh) {
@@ -520,6 +520,11 @@ void ensureSeed() {
 }
 
 } // namespace
+
+// 按文件名（含扩展名）判定 MIME；宿主据此选 image/video/file 上传类别。
+std::string pasteMimeOf(const std::string& fileName) {
+    return mimeOf(fileName);
+}
 
 const std::vector<PasteHost>& pasteHosts() {
     static std::vector<PasteHost> hosts(kHosts, kHosts + kHostCount);

@@ -55,6 +55,9 @@ bool pasteKindSupported(const PasteHost& host, PasteKind kind);
 unsigned int pasteExpireMask(const std::string& expire);
 bool pasteExpireSupported(const PasteHost& host, const std::string& expire);
 
+// 按文件名（含扩展名）判定 MIME；宿主据此选 image/video/file 上传类别。
+std::string pasteMimeOf(const std::string& fileName);
+
 struct PasteRequest {
     std::string text;        // kPasteKindText 用（UTF-8 原样上传）
     std::string fileData;    // 图片/视频/文件用（二进制）
