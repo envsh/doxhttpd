@@ -20,6 +20,7 @@ const EventType34 AvatarDownloadReadyType = toEventType34(QEvent::User + 104);
 const EventType34 DiskLoadReadyType       = toEventType34(QEvent::User + 105);
 const EventType34 RowidBackfillReadyType  = toEventType34(QEvent::User + 106);
 const EventType34 MediaDownloadProgressType = toEventType34(QEvent::User + 107);
+const EventType34 PastebinResultType      = toEventType34(QEvent::User + 108);
 
 // ── API 请求类型 ──
 enum ApiRequestType {
@@ -206,6 +207,19 @@ public:
     std::string eventId;
 };
 
+// Pastebin 虚拟联系人的上传结果（客户端直连各粘贴/临时文件服务，不经后端）
+class PasteResultEvent : public CustomEventBase {
+public:
+    PasteResultEvent() : CustomEventBase(PastebinResultType) {}
+    int chatId = 0;
+    std::string chatType;
+    long long localId = 0;      // 宿主侧 ChatElement 定位（跨事件循环稳定）
+    bool success = false;
+    std::string url;            // 成功：可直接上屏的链接
+    std::string providerUsed;   // 成功：实际命中的服务
+    std::string errorMsg;       // 失败：含已试服务与最后错误
+};
+
 class SelfInfoResultEvent : public ApiResultEvent {
 public:
     SelfInfoResultEvent() : ApiResultEvent(ApiGetSelf) {}
@@ -333,6 +347,7 @@ struct HttpRequest {
     long lowSpeedLimit = 0;   // curl 原生低速中止（B/s）；0=禁用
     long lowSpeedTime  = 0;   // 低于 lowSpeedLimit 持续 lowSpeedTime 秒 → CURLE_OPERATION_TIMEDOUT
     int delayMs = 0;          // 延迟调度毫秒；>0 时 delayMs 后才真正发出（非阻塞，pump 照常运转）
+    bool followRedirects = false;   // 是否跟随 3xx（默认关，保持既有请求行为不变）
     std::map<std::string, std::string> extraHeaders;
     // 下载进度回调（poller 线程触发；100ms 节流在 xferinfoCb 内处理）
     void (*progress)(long long received, long long total,

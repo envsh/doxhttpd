@@ -15,7 +15,7 @@ GIT_DIRTY = $$system(git -C $$PWD status --porcelain 2>/dev/null)
 
 QMAKE_MACOSX_DEPLOYMENT_TARGET = 11.7
 
-SOURCES = main.cpp mainwindow.cpp storage.cpp restapi.cpp eventpoller.cpp \
+SOURCES = main.cpp mainwindow.cpp storage.cpp restapi.cpp eventpoller.cpp pasteuploader.cpp \
              chatwidget.cpp chatview.cpp chatbuffer.cpp contactlist.cpp selfinfo.cpp \
              cJSON.c editinfodialog.cpp conferenceinvitedialog.cpp groupinvitedialog.cpp \
              friendinfodialog.cpp memberlistdialog.cpp logindialog.cpp \
@@ -36,7 +36,7 @@ SOURCES = main.cpp mainwindow.cpp storage.cpp restapi.cpp eventpoller.cpp \
                  ./vendor/barrust_bloom/bloom.c \
                  ../etapps/plugin_loader.cpp ../etapps/plugin_manager_dialog.cpp
 
-HEADERS = mainwindow.h storage.h restapi.h eventpoller.h \
+HEADERS = mainwindow.h storage.h restapi.h eventpoller.h pasteuploader.h \
              chatwidget.h chatview.h chatbuffer.h contactlist.h selfinfo.h \
              editinfodialog.h conferenceinvitedialog.h groupinvitedialog.h \
              friendinfodialog.h memberlistdialog.h logindialog.h \

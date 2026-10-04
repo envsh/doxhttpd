@@ -186,6 +186,19 @@ CURL* EventPoller::buildHandle(const HttpRequest& req,
         curl_easy_setopt(easy, CURLOPT_POSTFIELDSIZE, (long)ctx->postData.size());
     }
 
+    // PUT 走原始字节体（storage.to 三段流的中间上传）；其余方法保持 libcurl 默认
+    if (req.method == "PUT") {
+        curl_easy_setopt(easy, CURLOPT_CUSTOMREQUEST, "PUT");
+        curl_easy_setopt(easy, CURLOPT_POSTFIELDS, ctx->postData.c_str());
+        curl_easy_setopt(easy, CURLOPT_POSTFIELDSIZE, (long)ctx->postData.size());
+    }
+
+    // 默认不跟随重定向；仅显式请求的服务开启（既有调用方行为零变化）
+    if (req.followRedirects) {
+        curl_easy_setopt(easy, CURLOPT_FOLLOWLOCATION, 1L);
+        curl_easy_setopt(easy, CURLOPT_MAXREDIRS, 5L);
+    }
+
     if (!req.extraHeaders.empty()) {
         for (const auto& h : req.extraHeaders) {
             std::string hv = h.first + ": " + h.second;

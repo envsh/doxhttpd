@@ -903,13 +903,19 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
         defs << comboDef("model", qFromUtf8("模型"), mdl, "all",
                          qFromUtf8("AI 模型：all=跟随服务商默认 / gpt-4o / o3-mini / deepseek-chat / claude-sonnet-4 / llama-3.3-70b（占位属性，暂不生效）"));
     } else if (type == kPastebinType) {
-        QStringList psvc;  psvc << "all" << "pastebin.com" << "0x0.st"
-                                << "transfer.sh" << "dpaste.org";
-        defs << comboDef("provider", qFromUtf8("接入服务商"), psvc, "all",
-                         qFromUtf8("后台粘贴服务站点：all=聚合自动选优 / pastebin.com / 0x0.st / transfer.sh / dpaste.org（占位属性，暂不生效）"));
+        QStringList psvc;  psvc << "any" << "all"
+                                << "pastebin.com" << "dpaste.com" << "0x0.st"
+                                << "transfer.sh" << "catbox" << "litterbox"
+                                << "mhimg.cn" << "img.scdn.io"
+                                << "tmpfile.link" << "tempfile.org" << "storage.to";
+        defs << comboDef("provider", qFromUtf8("接入服务商"), psvc, "any",
+                         qFromUtf8("粘贴/临时文件服务：any=随机取序逐个尝试，首个成功即止（默认） / "
+                                   "all=按固定优先级依次尝试，成功即止 / 指定项=只用该服务。"
+                                   "pastebin.com 需官方 api_dev_key，暂不可用，选中即报错"));
         QStringList pexp;  pexp << "1h" << "1d" << "1w" << "1m" << "1y" << "never";
         defs << comboDef("expire", qFromUtf8("有效期"), pexp, "never",
-                         qFromUtf8("有效期预设：1h / 1d / 1w / 1m / 1y / never=永不过期（默认）（占位属性，暂不生效）"));
+                         qFromUtf8("有效期预设：1h / 1d / 1w / 1m / 1y / never=永不过期（默认）。"
+                                   "按服务能力过滤候选，无服务支持该有效期时报错"));
     } else if (type == kBookmarkType) {
         QStringList bsvc;  bsvc << "all" << "delicious.com" << "pinboard.in"
                                 << "raindrop.io" << "instapaper.com" << "floccus.org";
