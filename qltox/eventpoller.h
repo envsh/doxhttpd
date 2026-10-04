@@ -22,6 +22,7 @@ const EventType34 RowidBackfillReadyType  = toEventType34(QEvent::User + 106);
 const EventType34 MediaDownloadProgressType = toEventType34(QEvent::User + 107);
 const EventType34 PastebinResultType      = toEventType34(QEvent::User + 108);
 const EventType34 FanyibotDoneType        = toEventType34(QEvent::User + 109);
+const EventType34 AigptbotDoneType        = toEventType34(QEvent::User + 110);
 
 // ── API 请求类型 ──
 enum ApiRequestType {
@@ -232,6 +233,19 @@ public:
     std::string translatedText; // 成功：译文
     std::string engineUsed;     // 成功：实际命中的引擎
     std::string errorMsg;       // 失败：含已试引擎与最后错误
+};
+
+// AI GPT 虚拟联系人的对话结果（客户端直连各 AI 服务，不经后端）
+class AigptbotDoneEvent : public CustomEventBase {
+public:
+    AigptbotDoneEvent() : CustomEventBase(AigptbotDoneType) {}
+    int chatId = 0;
+    std::string chatType;
+    long long localId = 0;      // 宿主侧 ChatElement 定位（跨事件循环稳定）
+    bool success = false;
+    std::string reply;           // 成功：AI 回复文本
+    std::string providerUsed;    // 成功：实际命中的 provider 名称
+    std::string errorMsg;        // 失败：含已试 provider 与最后错误
 };
 
 class SelfInfoResultEvent : public ApiResultEvent {

@@ -1,5 +1,6 @@
 #include "messageattribbar.h"
 #include "pureconsts.hpp"   // 类型常量 kImapMailType / kGomuksRoomType / ...
+#include "aigptbot.h"
 #include "lambdaslot.h"
 #include <qframe.h>
 #include <qclipboard.h>
@@ -899,14 +900,18 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
         defs << comboDef("platform", qFromUtf8("平台"), pf, "all",
                          qFromUtf8("贴图/短视频平台：all=自动选优 / instagram / snapchat / giphy（占位属性，暂不生效）"));
     } else if (type == kAichatType) {
-        QStringList svc;  svc << "all" << "openai.com" << "deepseek.com"
-                              << "anthropic.com" << "groq.com";
-        defs << comboDef("provider", qFromUtf8("接入服务商"), svc, "all",
-                         qFromUtf8("后台服务商站点：all=聚合自动选优 / openai.com / deepseek.com / anthropic.com / groq.com（占位属性，暂不生效）"));
-        QStringList mdl;  mdl << "all" << "gpt-4o" << "o3-mini" << "deepseek-chat"
-                              << "claude-sonnet-4" << "llama-3.3-70b-versatile";
-        defs << comboDef("model", qFromUtf8("模型"), mdl, "all",
-                         qFromUtf8("AI 模型：all=跟随服务商默认 / gpt-4o / o3-mini / deepseek-chat / claude-sonnet-4 / llama-3.3-70b（占位属性，暂不生效）"));
+        QStringList svc;
+        svc << "any" << "all";
+        {
+            const auto& plist = aigptbotProviders();
+            for (size_t i = 0; i < plist.size(); ++i) {
+                svc << qFromUtf8(plist[i].name);
+            }
+        }
+        defs << comboDef("provider", qFromUtf8("接入服务商"), svc, "any",
+                         qFromUtf8("客户端直连：any=随机降级 / all=固定顺序降级 / 指定单一服务商"));
+        defs << lineDef("model", qFromUtf8("模型"), QString(),
+                        qFromUtf8("留空使用服务商默认模型"));
     } else if (type == kPastebinType) {
         QStringList psvc;  psvc << "any" << "all"
                                 << "pastebin.com" << "dpaste.com" << "0x0.st"

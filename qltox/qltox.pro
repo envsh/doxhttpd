@@ -29,6 +29,7 @@ SOURCES = main.cpp mainwindow.cpp storage.cpp restapi.cpp eventpoller.cpp pasteu
                  msgdb_helper.cpp \
 translation_cache.cpp \
                   fanyibot.cpp \
+                 aigptbot.cpp \
                   statisticsdialog.cpp \
                  combinesearchwindow.cpp \
                  searchlistview.cpp \
@@ -51,6 +52,7 @@ HEADERS = mainwindow.h storage.h restapi.h eventpoller.h pasteuploader.h \
                  msgdb_helper.h \
                  translation_cache.h \
                  fanyibot.h \
+                 aigptbot.h \
                  statisticsdialog.h \
                  combinesearchwindow.h \
                  searchlistview.h \

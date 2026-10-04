@@ -349,6 +349,7 @@ static const QMap<QString, bool>& ctxAllowedKeys() {
         // 不影响 CS/Matrix 协议字段。
         m.insert("engine",     true);
         m.insert("tolang",     true);
+        m.insert("model",      true);  // aichat
         initialized = true;
     }
     return m;
