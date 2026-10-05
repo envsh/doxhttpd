@@ -200,6 +200,11 @@ std::string parseOpenAiContent(const std::string& body, std::string& apiErr) {
                 if (c && cJSON_IsString(c) && c->valuestring) {
                     content = c->valuestring;
                 }
+            } else {
+                cJSON* c = cJSON_GetObjectItem(first, "text");
+                if (c && cJSON_IsString(c) && c->valuestring) {
+                    content = c->valuestring;
+                }
             }
         }
     }

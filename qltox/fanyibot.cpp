@@ -257,7 +257,9 @@ int msedgeErrorCode(const std::string& body) {
 std::string parseGoogle(const std::string& body) {
     const size_t head = body.find("[[\"");
     if (head == std::string::npos) { return std::string(); }
-    const size_t start = head + 4;          // head+3 是开引号本身
+    size_t start = head + 3;
+    if (start >= body.size()) { return std::string(); }
+    if (body[start] == '"') { start++; }
     const size_t b = body.find('"', start);
     if (b == std::string::npos) { return std::string(); }
     return body.substr(start, b - start);
