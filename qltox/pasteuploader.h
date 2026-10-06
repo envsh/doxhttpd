@@ -48,6 +48,7 @@ struct PasteHost {
     bool file;
     unsigned int expireMask;
     bool unsupported;   // true=保留属性选项但选中即报错（pastebin.com 需官方 api_dev_key）
+    bool disabled;      // true=保留表中但自动模式(all/any)跳过；显式选中即报错（当前暂不可用）
 };
 
 const std::vector<PasteHost>& pasteHosts();

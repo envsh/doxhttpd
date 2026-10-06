@@ -922,10 +922,11 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
                          qFromUtf8("粘贴/临时文件服务：any=随机取序逐个尝试，首个成功即止（默认） / "
                                    "all=按固定优先级依次尝试，成功即止 / 指定项=只用该服务。"
                                    "pastebin.com 需官方 api_dev_key，暂不可用，选中即报错"));
-        QStringList pexp;  pexp << "1h" << "1d" << "1w" << "1m" << "1y" << "never";
-        defs << comboDef("expire", qFromUtf8("有效期"), pexp, "never",
-                         qFromUtf8("有效期预设：1h / 1d / 1w / 1m / 1y / never=永不过期（默认）。"
-                                   "按服务能力过滤候选，无服务支持该有效期时报错"));
+        QStringList pexp;  pexp << "auto" << "1h" << "1d" << "1w" << "1m" << "1y" << "never";
+        defs << comboDef("expire", qFromUtf8("有效期"), pexp, "auto",
+                         qFromUtf8("有效期预设：auto=不按有效期过滤，由服务能力决定（默认）；"
+                                   "1h / 1d / 1w / 1m / 1y / never=按服务能力过滤候选，"
+                                   "无服务支持该有效期时报错"));
     } else if (type == kBookmarkType) {
         QStringList bsvc;  bsvc << "all" << "delicious.com" << "pinboard.in"
                                 << "raindrop.io" << "instapaper.com" << "floccus.org";

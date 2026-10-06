@@ -20,19 +20,19 @@ namespace {
 // ── 服务静态表（顺序 = provider="all" 的固定尝试序）──
 const PasteHost kHosts[] = {
     { kPasteHostDpaste,      "dpaste.com",   true,  false, false, false,
-      kPasteExp1d | kPasteExp1w | kPasteExp1m | kPasteExp1y, false },
-    { kPasteHostCatbox,      "catbox",       true,  true,  true,  true,  kPasteExpNever, false },
+      kPasteExp1d | kPasteExp1w | kPasteExp1m | kPasteExp1y, false, false },
+    { kPasteHostCatbox,      "catbox",       true,  true,  true,  true,  kPasteExpNever, false, true },
     { kPasteHost0x0,         "0x0.st",       true,  true,  true,  true,
-      kPasteExp1h | kPasteExp1d | kPasteExp1w | kPasteExp1m | kPasteExp1y, false },
+      kPasteExp1h | kPasteExp1d | kPasteExp1w | kPasteExp1m | kPasteExp1y, false, true },
     { kPasteHostTransferSh,  "transfer.sh",  true,  true,  true,  true,
-      kPasteExp1d | kPasteExp1w | kPasteExp1m | kPasteExp1y, false },
-    { kPasteHostMhimg,       "mhimg.cn",     false, true,  false, false, kPasteExp1h, false },
-    { kPasteHostScdnIo,      "img.scdn.io",  false, true,  true,  false, kPasteExpNever, false },
-    { kPasteHostTmpfileLink, "tmpfile.link", true,  true,  true,  true,  kPasteExpNever, false },
-    { kPasteHostTempfileOrg, "tempfile.org", true,  true,  true,  true,  kPasteExpNever, false },
-    { kPasteHostStorageTo,   "storage.to",   true,  true,  true,  true,  kPasteExpNever, false },
-    { kPasteHostLitterbox,   "litterbox",    true,  true,  true,  true,  kPasteExp1h, false },
-    { kPasteHostPastebinCom, "pastebin.com", false, false, false, false, 0, true },
+      kPasteExp1d | kPasteExp1w | kPasteExp1m | kPasteExp1y, false, true },
+    { kPasteHostMhimg,       "mhimg.cn",     false, true,  false, false, kPasteExp1h, false, false },
+    { kPasteHostScdnIo,      "img.scdn.io",  false, true,  true,  false, kPasteExpNever, false, true },
+    { kPasteHostTmpfileLink, "tmpfile.link", true,  true,  true,  true,  kPasteExpNever, false, false },
+    { kPasteHostTempfileOrg, "tempfile.org", true,  true,  true,  true,  kPasteExpNever, false, false },
+    { kPasteHostStorageTo,   "storage.to",   true,  true,  true,  true,  kPasteExpNever, false, false },
+    { kPasteHostLitterbox,   "litterbox",    true,  true,  true,  true,  kPasteExp1h, false, false },
+    { kPasteHostPastebinCom, "pastebin.com", false, false, false, false, 0, true, false },
 };
 const int kHostCount = int(sizeof(kHosts) / sizeof(kHosts[0]));
 
@@ -291,34 +291,24 @@ std::string parseUrl(PasteHostId id, const std::string& body, std::string& err) 
 std::vector<const PasteHost*> buildCandidates(const PasteRequest& req,
                                               std::string& reason) {
     std::vector<const PasteHost*> out;
-    const unsigned int mask = pasteExpireMask(req.expire);
-    if (req.provider == "all") {
+    // expire=auto/空串：不按有效期过滤（由服务能力决定），最大化候选
+    const bool expireAuto = (req.expire.empty() || req.expire == "auto");
+    const unsigned int mask = expireAuto ? ~0u : pasteExpireMask(req.expire);
+    if (req.provider == "all" || req.provider == "any" || req.provider.empty()) {
         for (int i = 0; i < kHostCount; i++) {
             const PasteHost& h = kHosts[i];
-            if (!h.unsupported && pasteKindSupported(h, req.kind)
+            if (!h.unsupported && !h.disabled && pasteKindSupported(h, req.kind)
                 && (h.expireMask & mask)) {
                 out.push_back(&h);
             }
         }
-        if (out.empty()) { reason = "没有可用服务：内容类型/有效期过滤后候选为空"; }
-        return out;
-    }
-    if (req.provider.empty() || req.provider == "any") {
-        for (int i = 0; i < kHostCount; i++) {
-            const PasteHost& h = kHosts[i];
-            if (!h.unsupported && pasteKindSupported(h, req.kind)
-                && (h.expireMask & mask)) {
-                out.push_back(&h);
-            }
-        }
-        if (!out.empty()) {
+        if (req.provider != "all" && !out.empty()) {   // any/空串：随机取序
             for (size_t i = out.size() - 1; i > 0; i--) {
                 const size_t j = (size_t)rand() % (i + 1);
                 std::swap(out[i], out[j]);
             }
-        } else {
-            reason = "没有可用服务：内容类型/有效期过滤后候选为空";
         }
+        if (out.empty()) { reason = "没有可用服务：内容类型/有效期/可用性过滤后候选为空"; }
         return out;
     }
     for (int i = 0; i < kHostCount; i++) {
@@ -326,6 +316,8 @@ std::vector<const PasteHost*> buildCandidates(const PasteRequest& req,
         if (req.provider != h.provider) { continue; }
         if (h.unsupported) {
             reason = std::string(h.provider) + " 需官方 api_dev_key，暂不可用";
+        } else if (h.disabled) {
+            reason = std::string(h.provider) + " 当前暂不可用";
         } else if (!pasteKindSupported(h, req.kind)) {
             reason = std::string(h.provider) + " 不支持该内容类型";
         } else if (!(h.expireMask & mask)) {
@@ -495,13 +487,14 @@ void onDone(const HttpResponse& resp, void* udata) {
         } else {
             cJSON* root = cJSON_Parse(resp.body.c_str());
             cJSON* fileItem = root ? cJSON_GetObjectItem(root, "file") : nullptr;
-            const std::string raw = fileItem ? jsonStr(fileItem, "raw_url") : std::string();
+            std::string raw = fileItem ? jsonStr(fileItem, "raw_url") : std::string();
+            if (raw.empty() && fileItem) { raw = jsonStr(fileItem, "url"); }   // 接口已不返回 raw_url，回退 url
             if (root) { cJSON_Delete(root); }
             if (!raw.empty()) {
                 postResult(s, true, raw, h->provider, std::string());
                 return;
             }
-            parseErr = "storage.to: confirm 未返回 raw_url";
+            parseErr = "storage.to: confirm 未返回 raw_url/url";
         }
     }
 
@@ -577,7 +570,7 @@ void pasteUploadStart(const PasteRequest& req, QObject* target) {
     }
     qWarning("paste: provider=%s expire=%s 候选 %d 个: %s",
              req.provider.empty() ? "any" : req.provider.c_str(),
-             req.expire.empty() ? "never" : req.expire.c_str(),
+             (req.expire.empty() || req.expire == "auto") ? "auto" : req.expire.c_str(),
              (int)s->cands.size(), order.c_str());
     startNext(s);
 }
