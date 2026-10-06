@@ -9,6 +9,8 @@
 #include <qglobal.h>
 
 #include <algorithm>
+#include <random>
+#include <utility>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -23,10 +25,10 @@ extern "C" {
 
 namespace {
 
-// ── 引擎静态表（顺序 = engine="all" 的固定尝试序）──
+// ── 引擎静态表（每次请求随机取序；google 暂禁，保留条目）──
 const FanyibotEngine kEngines[] = {
     { kFanyibotMsedge, "msedge", false },
-    { kFanyibotGoogle, "google", false },
+    { kFanyibotGoogle, "google", true  },
     { kFanyibotYoudao, "youdao", false },
     { kFanyibotYandex, "yandex", false },
     { kFanyibotDeepl,  "deepl",  true  },
@@ -42,17 +44,16 @@ const char* kBrowserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 // ── 有道：与 touse/oai 完全一致的 URL/头/参数 ──
 const char* kYoudaoUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                         "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
-const char* kYoudaoWarmURL = "https://fanyi.youdao.com/";
 const char* kYoudaoKeyURL  = "https://dict.youdao.com/webtranslate/key";
 const char* kYoudaoAPIURL  = "https://dict.youdao.com/webtranslate";
 const char* kYoudaoReferer = "https://fanyi.youdao.com/";
 const char* kYoudaoClient  = "fanyideskweb";
 const char* kYoudaoProduct = "webfanyi";
-const char* kYoudaoAppVer  = "12.0.0";
+const char* kYoudaoAppVer  = "1.0.0";   // 现接口带 12.0.0 会 500
 const char* kYoudaoUserID  = "abcdefg";
 const char* kYoudaoFakeCookie = "OUTFOX_SEARCH_USER_ID=0@127.0.0.1";
 
-const char* kYoudaoKeyParam = "keyid,client,mysticTime,product";
+const char* kYoudaoKeyParam = "client,mysticTime,product";   // 现接口带 keyid 会 500
 
 struct YoudaoKeyPair {
     const char* id;
@@ -93,9 +94,9 @@ struct Session {
     int index = 0;
     unsigned int seq = 0;
     std::string lastError;
-    std::vector<std::string> tried;
+    std::vector<std::pair<std::string, std::string> > tried;   // (engine, 失败原因)
     std::string cred;    // msedge JWT / yandex SID
-    int step = 0;        // msedge/yandex: 0=取凭据 1=发翻译请求; youdao: 0=预热/读缓存 2=取key 3=翻译
+    int step = 0;        // msedge: 恒 0(单步); yandex: 0=取 SID 1=发翻译; youdao: 0=取 key 1=发翻译
     int credRetry = 0;   // 凭据失效重取次数（上限 1，防死循环）
     std::string ydCookie;    // 有道 cookie（warm 取得）
     std::string ydSecret;    // 有道 data.secretKey
@@ -194,6 +195,25 @@ long long nowMs() {
     return (long long)tv.tv_sec * 1000LL + (long long)tv.tv_usec / 1000LL;
 }
 
+const char* engineHost(const FanyibotEngine& e, int step) {
+    switch (e.id) {
+    case kFanyibotMsedge: return "edge.microsoft.com";   // 免 token 新端点单步
+    case kFanyibotGoogle: return "translate.googleapis.com";
+    case kFanyibotYoudao: return step == 0 ? "fanyi.youdao.com" : "dict.youdao.com";
+    case kFanyibotYandex: return "translate.yandex.com";
+    case kFanyibotDeepl:  return "-";
+    }
+    return "-";
+}
+
+std::string briefOf(const std::string& body) {
+    std::string b = body;
+    const std::string::size_type nl = b.find('\n');
+    if (nl != std::string::npos) { b = b.substr(0, nl); }
+    if (b.size() > 64) { b = b.substr(0, 64); }
+    return b;
+}
+
 // ── 临时缓存：$TMPDIR/$TMP/<name>，与 touse/oai os.TempDir() 一致可互通 ──
 std::string tmpDir() {
     const char* d = std::getenv("TMPDIR");
@@ -258,6 +278,9 @@ bool isCurrentSeq(const Session* s) {
 
 void postResult(Session* s, bool ok, const std::string& text,
                 const std::string& engineUsed, const std::string& err) {
+    if (ok) {
+        qWarning("fanyibot: engine=%s 成功 textlen=%d B", engineUsed.c_str(), (int)text.size());
+    }
     FanyibotDoneEvent* ev = new FanyibotDoneEvent();
     ev->chatId         = s->req.chatId;
     ev->chatType       = s->req.chatType;
@@ -290,19 +313,6 @@ std::string parseMsedge(const std::string& body) {
         cJSON_Delete(root);
     }
     return out;
-}
-
-// msedge 错误码（401001 = token 失效）
-int msedgeErrorCode(const std::string& body) {
-    cJSON* root = cJSON_Parse(body.c_str());
-    int code = 0;
-    if (root) {
-        cJSON* err = cJSON_GetObjectItem(root, "error");
-        cJSON* c = err ? cJSON_GetObjectItem(err, "code") : nullptr;
-        if (c && cJSON_IsNumber(c)) { code = (int)c->valuedouble; }
-        cJSON_Delete(root);
-    }
-    return code;
 }
 
 // google: [[["译文","原文",…],…
@@ -393,10 +403,12 @@ bool youdaoKeyParse(const std::string& json, std::string& secretKey,
                     std::string& aesKey, std::string& aesIv, std::string& cookie) {
     cJSON* root = cJSON_Parse(json.c_str());
     if (!root) { return false; }
-    secretKey = jsonStr(root, "secretKey");
-    aesKey    = jsonStr(root, "aesKey");
-    aesIv     = jsonStr(root, "aesIv");
-    cookie    = jsonStr(root, "cookie");
+    cJSON* body = cJSON_GetObjectItem(root, "data");   // 现接口返回 data.{...}；旧缓存为顶层
+    if (!cJSON_IsObject(body)) { body = root; }
+    secretKey = jsonStr(body, "secretKey");
+    aesKey    = jsonStr(body, "aesKey");
+    aesIv     = jsonStr(body, "aesIv");
+    cookie    = jsonStr(body, "cookie");
     const bool ok = !secretKey.empty() && !aesKey.empty() && !aesIv.empty();
     cJSON_Delete(root);
     return ok;
@@ -423,27 +435,6 @@ void youdaoSaveKeyCache(Session* s) {
         + "\",\"aesIv\":\"" + jsonEscape(s->ydAesIv)
         + "\",\"cookie\":\"" + jsonEscape(cookie) + "\"}";
     saveTmp("youdao_web_key.txt", json);
-}
-
-// warm 响应里多个 Set-Cookie 累计（中间已用 \n 连接）里挑出这次的 cookie
-void youdaoExtractCookie(std::string& cookie, const std::string& setCookieBlock) {
-    if (setCookieBlock.empty()) { return; }
-    size_t pos = 0;
-    while (pos < setCookieBlock.size()) {
-        const size_t nl = setCookieBlock.find('\n', pos);
-        const std::string one = setCookieBlock.substr(
-            pos, nl == std::string::npos ? std::string::npos : nl - pos);
-        const size_t eq = one.find('=');
-        if (eq != std::string::npos) {
-            const std::string name = trimStr(one.substr(0, eq));
-            if (name == "OUTFOX_SEARCH_USER_ID" || name == "OUTFOX_SEARCH_USER_ID_NEW") {
-                cookie = one;
-                break;
-            }
-        }
-        if (nl == std::string::npos) { break; }
-        pos = nl + 1;
-    }
 }
 
 // ── base64url 解码（- _ 转 + /，容忍尾部 =）──
@@ -666,11 +657,9 @@ std::vector<const FanyibotEngine*> buildCandidates(const FanyibotRequest& req,
             reason = "没有可用引擎：候选表全为不可用";
             return out;
         }
-        if (req.engine != "all") {   // any：随机取序
-            for (size_t i = out.size() - 1; i > 0; i--) {
-                const size_t j = (size_t)rand() % (i + 1);
-                std::swap(out[i], out[j]);
-            }
+        {   // all/any/空：每次请求随机取序
+            std::mt19937 rng((unsigned int)nowMs() ^ (unsigned int)(uintptr_t)&out);
+            std::shuffle(out.begin(), out.end(), rng);
         }
         return out;
     }
@@ -692,6 +681,12 @@ void startNext(Session* s);
 
 void failEngine(Session* s, const FanyibotEngine& e, const std::string& why) {
     s->lastError = std::string(e.name) + ": " + why;
+    if (s->tried.empty() || s->tried.back().first != e.name) {
+        s->tried.push_back(std::make_pair(std::string(e.name), why));
+    } else {
+        s->tried.back().second = why;
+    }
+    qWarning("fanyibot: engine=%s 失败: %s → 切换候选", e.name, why.c_str());
     s->cred.clear();
     s->step = 0;
     s->credRetry = 0;
@@ -703,36 +698,32 @@ void failEngine(Session* s, const FanyibotEngine& e, const std::string& why) {
 
 void sendHttp(Session* s, const std::string& url, const std::string& method,
               const std::string& body,
-              const std::map<std::string, std::string>& headers) {
+              const std::map<std::string, std::string>& headers,
+              bool follow = true) {
     HttpRequest req(url, method, body, 20, headers);
-    req.followRedirects = true;
+    req.followRedirects = follow;
     EventPoller::addRequest(req, onDone, s);
 }
 
 void sendEngine(Session* s, const FanyibotEngine& e) {
-    if (s->tried.empty() || s->tried.back() != e.name) { s->tried.push_back(e.name); }
     const std::string code = fanyibotLangCode(e.id, s->req.toLang);
     if (code.empty()) {
         failEngine(s, e, "不支持目标语言 " + s->req.toLang);
         return;
     }
+    qWarning("fanyibot: 候选[%d/%d] engine=%s step=%d host=%s to=%s textlen=%d B",
+         s->index, (int)s->cands.size(), e.name, (int)s->step,
+         engineHost(e, s->step), code.c_str(), (int)s->req.text.size());
     const std::string& text = s->req.text;
     std::map<std::string, std::string> h;
 
     if (e.id == kFanyibotMsedge) {
-        if (s->step == 0) {   // 先取 token（$TMP/mset_apikey.txt 缓存）
-            if (s->cred.empty()) { s->cred = loadTmp("mset_apikey.txt"); }
-            if (!s->cred.empty()) { s->step = 1; sendEngine(s, e); return; }
-            h["User-Agent"] = kMsedgeUA;
-            sendHttp(s, "https://edge.microsoft.com/translate/auth", "GET", "", h);
-            return;
-        }
-        h["User-Agent"]    = kMsedgeUA;
-        h["Content-Type"]  = "application/json; charset=utf-8";
-        h["Authorization"] = "Bearer " + s->cred;
-        sendHttp(s, "https://api.cognitive.microsofttranslator.com/translate?from=&to=" + code
-                    + "&api-version=3.0&includeSentenceLength=true",
-                 "POST", "[{\"text\":\"" + jsonEscape(text) + "\"}]", h);
+        // 免鉴权新端点：POST /translate/translatetext，body 为字符串数组
+        h["User-Agent"]   = kMsedgeUA;
+        h["Content-Type"] = "application/json; charset=utf-8";
+        sendHttp(s, "https://edge.microsoft.com/translate/translatetext?from=&to=" + code
+                    + "&isEnterpriseClient=false",
+                 "POST", "[\"" + jsonEscape(text) + "\"]", h);
         return;
     }
 
@@ -745,26 +736,21 @@ void sendEngine(Session* s, const FanyibotEngine& e) {
     }
 
     if (e.id == kFanyibotYoudao) {
-        if (s->step == 0) {   // 预热取 cookie；已有 key 缓存直接翻译
+        if (s->step == 0) {   // 取 key：磁盘缓存/会话命中，否则 key 接口（无需 warm cookie）
+            if (s->ydAesKey.empty() || s->ydSecret.empty()) { youdaoLoadCache(s); }
             if (!s->ydAesKey.empty() && !s->ydSecret.empty()) {
-                s->step = 3;
+                qWarning("fanyibot: youdao key 命中(缓存/会话)");
+                s->step = 1;
                 sendEngine(s, e);
                 return;
             }
             if (s->ydCookie.empty()) { s->ydCookie = kYoudaoFakeCookie; }
-            h["User-Agent"] = kYoudaoUA;
-            h["Referer"]    = kYoudaoReferer;
-            h["Cookie"]     = s->ydCookie;
-            sendHttp(s, kYoudaoWarmURL, "GET", "", h);
-            return;
-        }
-        if (s->step == 2) {   // 取 keyid/mysticTime/sign
             const long long ms = nowMs();
             const std::string mysticTime = std::to_string(ms);
             const std::string sign = md5Hex(std::string(kYoudaoClient) + "&mysticTime="
                                             + mysticTime + "&product=" + kYoudaoProduct
                                             + "&key=" + kYoudaoKeyPairs[s->ydPair].secret);
-            std::string url = std::string(kYoudaoKeyURL)
+            const std::string url = std::string(kYoudaoKeyURL)
                 + "?keyid=" + kYoudaoKeyPairs[s->ydPair].id
                 + "&pointParam=" + kYoudaoKeyParam
                 + "&client=" + kYoudaoClient
@@ -773,11 +759,11 @@ void sendEngine(Session* s, const FanyibotEngine& e) {
                 + "&sign=" + sign;
             h["User-Agent"] = kYoudaoUA;
             h["Referer"]    = kYoudaoReferer;
-            if (!s->ydCookie.empty()) { h["Cookie"] = s->ydCookie; }
+            h["Cookie"]     = s->ydCookie;
             sendHttp(s, url, "GET", "", h);
             return;
         }
-        if (s->step == 3) {   // 正式翻译
+        if (s->step == 1) {   // 正式翻译
             const long long ms = nowMs();
             const std::string mysticTime = std::to_string(ms);
             const std::string sign = md5Hex(std::string(kYoudaoClient) + "&mysticTime="
@@ -786,6 +772,8 @@ void sendEngine(Session* s, const FanyibotEngine& e) {
             const std::string body =
                 "i=" + urlEncode(text)
                 + "&from=auto&to=" + code
+                + "&useTerm=false"
+                + "&dictResult=true"
                 + "&keyid=" + kYoudaoProduct
                 + "&appVersion=" + kYoudaoAppVer
                 + "&vendor=web"
@@ -795,8 +783,7 @@ void sendEngine(Session* s, const FanyibotEngine& e) {
                 + "&product=" + kYoudaoProduct
                 + "&mysticTime=" + mysticTime
                 + "&sign=" + sign
-                + "&mid=1&screen=1&model=1&network=wifi&abtest=0&yduuid=" + kYoudaoUserID
-                + "&dictResult=true";
+                + "&mid=1&screen=1&model=1&network=wifi&abtest=0&yduuid=" + kYoudaoUserID;
             h["User-Agent"]   = kYoudaoUA;
             h["Referer"]      = kYoudaoReferer;
             h["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8";
@@ -811,9 +798,15 @@ void sendEngine(Session* s, const FanyibotEngine& e) {
     if (e.id == kFanyibotYandex) {
         if (s->step == 0) {   // 取 SID（$TMP/yandex_sid.txt 缓存优先）
             if (s->cred.empty()) { s->cred = loadTmp("yandex_sid.txt"); }
-            if (!s->cred.empty()) { s->step = 1; sendEngine(s, e); return; }
+            if (!s->cred.empty()) {
+                qWarning("fanyibot: yandex SID 缓存命中 len=%d B", (int)s->cred.size());
+                s->step = 1;
+                sendEngine(s, e);
+                return;
+            }
+            qWarning("fanyibot: yandex SID 缓存未命中，重新抓取");
             h["User-Agent"] = kYandexUA;
-            sendHttp(s, "https://translate.yandex.com/", "GET", "", h);
+            sendHttp(s, "https://translate.yandex.com/", "GET", "", h, false);   // 反爬 302 秒判失败
             return;
         }
         h["User-Agent"] = kYandexUA;
@@ -833,49 +826,38 @@ void startNext(Session* s) {
         sendEngine(s, *s->cands[s->index]);
         return;
     }
-    std::string err = s->lastError.empty() ? std::string("所有候选引擎均失败") : s->lastError;
-    std::string tried;
+    std::string err;
     for (size_t i = 0; i < s->tried.size(); i++) {
-        if (i) { tried += ", "; }
-        tried += s->tried[i];
+        if (i) { err += "; "; }
+        err += s->tried[i].first + ": " + s->tried[i].second;
     }
-    if (!tried.empty()) { err += "（已尝试：" + tried + "）"; }
+    if (err.empty()) {
+        err = s->lastError.empty() ? std::string("所有候选引擎均失败") : s->lastError;
+    }
+    qWarning("fanyibot: 全部候选失败: %s", err.c_str());
     postResult(s, false, std::string(), std::string(), err);
 }
 
 void onDone(const HttpResponse& resp, void* udata) {
     Session* s = static_cast<Session*>(udata);
     if (!s) { return; }
-    if (!isCurrentSeq(s)) { removeSession(s); return; }   // 迟到回包：已被重试覆盖
+    if (!isCurrentSeq(s)) {
+        qWarning("fanyibot: 迟到回包丢弃 seq=%u", (unsigned int)s->seq);
+        removeSession(s);
+        return;
+    }
     const FanyibotEngine* e =
         (s->index < (int)s->cands.size()) ? s->cands[s->index] : nullptr;
     if (!e) { removeSession(s); return; }
 
     const bool httpOk = resp.httpCode >= 200 && resp.httpCode < 300
                         && resp.curlErrStr.empty();
+    qWarning("fanyibot: resp engine=%s step=%d http=%d curl=[%s] body=[%s]",
+         e->name, (int)s->step, resp.httpCode,
+         resp.curlErrStr.c_str(), briefOf(resp.body).c_str());
 
     if (e->id == kFanyibotMsedge) {
-        if (s->step == 0) {
-            const std::string token = trimStr(resp.body);
-            if (httpOk && !token.empty()) {
-                saveTmp("mset_apikey.txt", token);
-                s->cred = token;
-                s->step = 1;
-                sendEngine(s, *e);
-                return;
-            }
-            failEngine(s, *e, httpErr(resp));
-            return;
-        }
         if (httpOk) {
-            if (msedgeErrorCode(resp.body) == 401001 && s->credRetry < 1) {
-                ++s->credRetry;    // token 过期：丢弃缓存重取一次
-                removeTmp("mset_apikey.txt");
-                s->step = 0;
-                s->cred.clear();
-                sendEngine(s, *e);
-                return;
-            }
             const std::string out = parseMsedge(resp.body);
             if (!out.empty()) {
                 postResult(s, true, out, e->name, std::string());
@@ -900,42 +882,34 @@ void onDone(const HttpResponse& resp, void* udata) {
 
     if (e->id == kFanyibotYoudao) {
         if (httpOk && s->step == 0) {
-            std::map<std::string, std::string>::const_iterator cit =
-                resp.headers.find("set-cookie");
-            if (cit != resp.headers.end()) {
-                std::string cookie;
-                youdaoExtractCookie(cookie, cit->second);
-                if (!cookie.empty()) { s->ydCookie = cookie; }
-            }
-            s->step = 2;
-            sendEngine(s, *e);
-            return;
-        }
-        if (httpOk && s->step == 2) {
             std::string secretKey, aesKey, aesIv, cookie;
             if (youdaoKeyParse(resp.body, secretKey, aesKey, aesIv, cookie)) {
                 s->ydSecret = secretKey;
                 s->ydAesKey = aesKey;
                 s->ydAesIv  = aesIv;
+                if (!cookie.empty()) { s->ydCookie = cookie; }
                 youdaoSaveKeyCache(s);
-                s->step = 3;
+                qWarning("fanyibot: youdao key 新取成功，写入缓存 pair=%d", s->ydPair);
+                s->step = 1;
                 sendEngine(s, *e);
                 return;
             }
             if (s->ydPair < kYoudaoPairCount - 1) {   // 换 legacy keyid 再试
                 ++s->ydPair;
+                qWarning("fanyibot: youdao key 未解析成功，换 keyid[%d]", s->ydPair);
                 sendEngine(s, *e);
                 return;
             }
             failEngine(s, *e, "key 接口未解析到密钥");
             return;
         }
-        if (httpOk && s->step == 3) {
+        if (httpOk && s->step == 1) {
             const int code = youdaoResultCode(resp.body);
             if (code == 40 || code == 50) {
                 if (s->credRetry < 1) {
                     ++s->credRetry;
                     removeTmp("youdao_web_key.txt");
+                    qWarning("fanyibot: youdao 密钥失效(code %d)，删除缓存重取", code);
                     s->ydCookie.clear();
                     s->ydSecret = s->ydAesKey = s->ydAesIv = std::string();
                     s->step = 0;
@@ -963,6 +937,7 @@ void onDone(const HttpResponse& resp, void* udata) {
                 if (s->credRetry < 1) {   // 解密失败：key 不干净，重取一次
                     ++s->credRetry;
                     removeTmp("youdao_web_key.txt");
+                    qWarning("fanyibot: youdao 解密失败，key 不干净，删除缓存重取");
                     s->ydSecret = s->ydAesKey = s->ydAesIv = std::string();
                     s->step = 0;
                     sendEngine(s, *e);
@@ -979,6 +954,7 @@ void onDone(const HttpResponse& resp, void* udata) {
             const std::string sid = httpOk ? scrapeYandexSid(resp.body) : std::string();
             if (!sid.empty()) {
                 saveTmp("yandex_sid.txt", sid);
+                qWarning("fanyibot: yandex SID 新抓成功，写入缓存");
                 s->cred = sid;
                 s->step = 1;
                 sendEngine(s, *e);
@@ -996,6 +972,7 @@ void onDone(const HttpResponse& resp, void* udata) {
             if (s->credRetry < 1) {   // SID 失效：重抓一次
                 ++s->credRetry;
                 removeTmp("yandex_sid.txt");
+                qWarning("fanyibot: yandex SID 失效，删除缓存重抓");
                 s->step = 0;
                 s->cred.clear();
                 sendEngine(s, *e);

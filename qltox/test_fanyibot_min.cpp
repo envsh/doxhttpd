@@ -57,12 +57,15 @@ TEST_CASE("buildCandidates") {
     std::string reason;
     auto c = buildCandidates(r, reason);
     CHECK(reason.empty());
-    CHECK(c.size() == 4);
+    CHECK(c.size() == 3);
 }
 
 TEST_CASE("parseMsedge") {
     CHECK(parseMsedge("[{\"translations\":[{\"text\":\"你好\"}]}]") == "你好");
     CHECK(parseMsedge("{\"translations\":[{\"text\":\"hi\"}]}") == "hi");
+    CHECK(parseMsedge("[{\"detectedLanguage\":{\"language\":\"en\"},"
+                      "\"translations\":[{\"text\":\"你好，世界\",\"to\":\"zh-Hans\"}]}]")
+          == "你好，世界");
 }
 
 TEST_CASE("parseGoogle") {
@@ -79,13 +82,7 @@ TEST_CASE("parseYoudaoV2") {
 TEST_CASE("youdaoResultCode") {
     CHECK(youdaoResultCode("{\"code\":0}") == 0);
     CHECK(youdaoResultCode("{\"code\":50}") == 50);
-}
-
-TEST_CASE("youdaoExtractCookie") {
-    std::string c;
-    youdaoExtractCookie(c, "OUTFOX_SEARCH_USER_ID=100@127.0.0.1; Path=/"
-                            "\nOUTFOX_SEARCH_USER_ID_NEW=200@127.0.0.1");
-    CHECK(c == "OUTFOX_SEARCH_USER_ID=100@127.0.0.1; Path=/");
+    CHECK(youdaoResultCode("eh6zVNeFZ0TD1ei8mSABcQ==") == 0);
 }
 
 TEST_CASE("scrapeYandexSid") {
@@ -106,10 +103,6 @@ TEST_CASE("base64UrlDecode") {
 
 TEST_CASE("md5Raw") {
     CHECK(toHex(md5Raw("abc")) == "900150983cd24fb0d6963f7d28e17f72");
-}
-
-TEST_CASE("md5Raw") {
-    CHECK(md5Hex(md5Raw("abc")) == "900150983cd24fb0d6963f7d28e17f72");
 }
 
 TEST_CASE("AES-128-CBC FIPS-197 单块") {

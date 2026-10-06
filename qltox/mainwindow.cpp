@@ -1271,11 +1271,12 @@ void MainWindow::customEvent(CustomEventBase* event) {
         return;
     }
 
-    // 翻译结果：就地内嵌进原消息元素（不追加译文消息）
+    // 翻译结果：原消息收尾为发送完成态，另追加一条译文消息（同 pastebin 回执）
     if (event->type() == FanyibotDoneType) {
         FanyibotDoneEvent* evt = static_cast<FanyibotDoneEvent*>(event);
         chatWidget->loadingBar()->hideLoading(kLoadSendMsg);
         const std::string typeStr = evt->chatType;
+        const QString typeQ = qFromUtf8(typeStr.c_str());
         ChatHistory* h = m_chatbuf.ptr(evt->chatId, typeStr);
         ChatElement* elp = nullptr;
         if (h) {
@@ -1289,10 +1290,18 @@ void MainWindow::customEvent(CustomEventBase* event) {
             return;
         }
         if (evt->success) {
-            elp->sendState = ChatElement::SendSent;
-            elp->translatedText = qFromUtf8(evt->translatedText.data(), (int)evt->translatedText.size());
-            elp->showTranslation = true;
-            elp->translateError = QString();
+            elp->sendState = ChatElement::SendSent;   // 仅收尾成发送完成态，不加译文内容
+            ChatElement ack;
+            ack.messageText = qFromUtf8(evt->translatedText.data(), (int)evt->translatedText.size());
+            ack.category = "self";
+            ack.senderName = "Me";
+            ack.peerNumber = -1;
+            ack.time = getCurrentTime();
+            ack.sendState = ChatElement::SendSent;   // 必须显式置位，默认 SendSending 会一直转圈
+            m_chatbuf.append(evt->chatId, typeStr, ack);
+            db_writeMessage(evt->chatId, typeStr, ack);
+            contactListWidget->updateContactLastMessage(evt->chatId, typeQ, ack.messageText, timenowhm());
+            db_writeLastMessage(evt->chatId, typeQ, ack.messageText, timenowhm());
             const QString okText = qFromUtf8("翻译完成 · ") + qFromUtf8(evt->engineUsed.c_str());
             ToastWidget::show(chatWidget, okText, 2500);
             stbarShowStatusMessage(okText, SticonInfo, 2500);
@@ -1323,11 +1332,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
             m_msgTimer->start(5000);
 #endif
         }
-        // updateElement 在 cachedWidth==contentWidth() 时会早退（chatview.cpp:2640），
-        // 必须先置 -1 强制重算高度，否则译文不展开
-        elp->cachedWidth = -1;
-        // 非当前会话时 messageArea 指向别的缓冲，indexOfLocalId 返回 -1（updateElement 内部已判越界）
-        chatWidget->updateElement(chatWidget->indexOfLocalId(evt->localId));
+        chatWidget->repaintMessages();
         return;
     }
 

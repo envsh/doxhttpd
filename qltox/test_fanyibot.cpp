@@ -46,6 +46,7 @@ TEST_CASE("fanyibotEngines 基本结构") {
     CHECK(std::string(v[2].name) == "youdao");
     CHECK(std::string(v[3].name) == "yandex");
     CHECK(std::string(v[4].name) == "deepl");
+    CHECK(v[1].unsupported == true);   // google 已禁用
     CHECK(v[4].unsupported == true);
 }
 
@@ -57,14 +58,14 @@ TEST_CASE("fanyibotLangCode 映射") {
     CHECK(fanyibotLangCode(kFanyibotDeepl, "English").empty());
 }
 
-TEST_CASE("buildCandidates all 固定顺序") {
+TEST_CASE("buildCandidates all 随机取序") {
     FanyibotRequest r;
     r.engine = "all";
     r.toLang = "English";
     std::string reason;
     auto c = buildCandidates(r, reason);
     CHECK(reason.empty());
-    CHECK(c.size() == 4);
+    CHECK(c.size() == 3);
 }
 
 TEST_CASE("buildCandidates any 非空") {
@@ -74,12 +75,15 @@ TEST_CASE("buildCandidates any 非空") {
     std::string reason;
     auto c = buildCandidates(r, reason);
     CHECK(reason.empty());
-    CHECK(c.size() == 4);
+    CHECK(c.size() == 3);
 }
 
 TEST_CASE("parseMsedge 数组形/对象形") {
     CHECK(parseMsedge("[{\"translations\":[{\"text\":\"你好\"}]}]") == "你好");
     CHECK(parseMsedge("{\"translations\":[{\"text\":\"hi\"}]}") == "hi");
+    CHECK(parseMsedge("[{\"detectedLanguage\":{\"language\":\"en\",\"score\":0.9},"
+                      "\"translations\":[{\"text\":\"你好，世界\",\"to\":\"zh-Hans\"}]}]")
+          == "你好，世界");
 }
 
 TEST_CASE("parseGoogle 基本") {
@@ -100,6 +104,7 @@ TEST_CASE("youdaoResultCode") {
     CHECK(youdaoResultCode("{\"code\":0}") == 0);
     CHECK(youdaoResultCode("{\"code\":50}") == 50);
     CHECK(youdaoResultCode("not json") == 0);
+    CHECK(youdaoResultCode("eh6zVNeFZ0TD1ei8mSABcQ==") == 0);   // 裸 base64 响应
 }
 
 TEST_CASE("youdaoKeyParse") {
@@ -114,17 +119,15 @@ TEST_CASE("youdaoKeyParse") {
 
     sec = a = iv = ck = std::string();
     CHECK_FALSE(youdaoKeyParse("{\"secretKey\":\"s\",\"aesKey\":\"\"}", sec, a, iv, ck));
-}
 
-TEST_CASE("youdaoExtractCookie") {
-    std::string c;
-    youdaoExtractCookie(c, "OUTFOX_SEARCH_USER_ID=100@127.0.0.1; Path=/; HttpOnly"
-                            "\nOUTFOX_SEARCH_USER_ID_NEW=200@127.0.0.1; Path=/");
-    CHECK(c == "OUTFOX_SEARCH_USER_ID=100@127.0.0.1; Path=/; HttpOnly");
-
-    c = std::string();
-    youdaoExtractCookie(c, "");
-    CHECK(c.empty());
+    sec = a = iv = ck = std::string();
+    CHECK(youdaoKeyParse(
+        "{\"code\":0,\"data\":{\"secretKey\":\"s2\",\"aesKey\":\"ak2\",\"aesIv\":\"iv2\"}}",
+        sec, a, iv, ck));   // 现接口 data.{...} 嵌套
+    CHECK(sec == "s2");
+    CHECK(a == "ak2");
+    CHECK(iv == "iv2");
+    CHECK(ck.empty());
 }
 
 TEST_CASE("scrapeYandexSid") {
