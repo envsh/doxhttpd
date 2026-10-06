@@ -912,6 +912,12 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
                          qFromUtf8("客户端直连：any=随机降级 / all=固定顺序降级 / 指定单一服务商"));
         defs << lineDef("model", qFromUtf8("模型"), QString(),
                         qFromUtf8("留空使用服务商默认模型"));
+        {
+            MessageAttrDef briefDef = checkDef("brief", qFromUtf8("简洁回复"),
+                                               qFromUtf8("勾选后请求简短回复（前置简洁指令并限制 max_tokens=512），回复尾部标注 BY 实际服务"));
+            briefDef.defValue = QString::fromLatin1("1");
+            defs << briefDef;
+        }
     } else if (type == kPastebinType) {
         QStringList psvc;  psvc << "any" << "all"
                                 << "pastebin.com" << "dpaste.com" << "0x0.st"

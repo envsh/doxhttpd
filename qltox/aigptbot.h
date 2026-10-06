@@ -10,6 +10,7 @@ class QObject;
 // 端点参考 ../anystik/stikcommon/imageaiutil.cpp
 enum AigptbotProviderId {
     kAigptbotPollinations = 0,
+    kAigptbotPollinationsText,
     kAigptbotZhipu,
     kAigptbotSiliconFlow,
     kAigptbotNvidia,
@@ -48,6 +49,7 @@ struct AigptbotRequest {
     std::string text;      // 待发送文本（UTF-8 原样）
     std::string provider;  // "any" | "all" | <name>（空串视为 "any"）
     std::string model;     // UI 传入，空串表示“使用服务商默认模型”
+    bool brief = false;    // 简洁回复：附加简洁指令并限制 max_tokens
     long long localId = 0; // 回传定位：宿主侧 ChatElement
     int chatId = 0;
     std::string chatType;

@@ -350,6 +350,7 @@ static const QMap<QString, bool>& ctxAllowedKeys() {
         m.insert("engine",     true);
         m.insert("tolang",     true);
         m.insert("model",      true);  // aichat
+        m.insert("brief",      true);  // aichat 简洁回复（仅客户端侧消费，不上送）
         initialized = true;
     }
     return m;

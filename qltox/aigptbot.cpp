@@ -25,6 +25,8 @@ namespace {
 const AigptbotProvider kAigptProviders[] = {
     { kAigptbotPollinations,  "pollinations",    true,  false,   // 现已要求 key，any/all 跳过
       "https://gen.pollinations.ai/v1/chat/completions", "openai" },
+    { kAigptbotPollinationsText,"pollinations(匿名)", false, true,
+      "https://text.pollinations.ai/openai/chat/completions", "openai" },
     { kAigptbotZhipu,         "智谱",            true,  false,
       "https://open.bigmodel.cn/api/paas/v4/chat/completions", "" },
     { kAigptbotSiliconFlow,   "硅基流动",        true,  false,
@@ -226,7 +228,7 @@ void onDone(const HttpResponse& resp, void* udata);
 
 void sendHttp(Session* s, const std::string& url, const std::string& body,
               const std::map<std::string, std::string>& headers) {
-    HttpRequest req(url, "POST", body, 30, headers);
+    HttpRequest req(url, "POST", body, 51, headers);
     req.followRedirects = true;
     EventPoller::addRequest(req, onDone, s);
 }
@@ -242,17 +244,28 @@ void sendHost(Session* s, const AigptbotProvider& p) {
         return;
     }
     const std::string model = s->req.model.empty() ? p.modelDefault : s->req.model;
-    qWarning("aigptbot: 候选[%d/%d] provider=%s host=%s model=%s textlen=%d B",
+    qWarning("aigptbot: 候选[%d/%d] provider=%s host=%s model=%s brief=%d textlen=%d B",
              s->index, (int)s->cands.size(), p.name, p.baseUrl,
-             model.empty() ? "(未指定)" : model.c_str(), (int)s->req.text.size());
+             model.empty() ? "(未指定)" : model.c_str(), (int)s->req.brief, (int)s->req.text.size());
     // 构造 OpenAI 兼容请求体
     std::string body = "{";
     // model（UI 未指定时回落 provider 默认模型）
     if (!model.empty()) {
         body += "\"model\":\"" + jsonEscape(model) + "\",";
     }
+    // 显式关闭流式：避免服务端 SSE/keep-alive 不关连接导致 200+超时误判
+    body += "\"stream\":false,";
+    // 简洁回复：max_tokens 兜底 + system 简洁指令引导
+    if (s->req.brief) {
+        body += "\"max_tokens\":512,";
+    }
     // messages
-    body += "\"messages\":[{\"role\":\"user\",\"content\":\""
+    body += "\"messages\":[";
+    if (s->req.brief) {
+        body += "{\"role\":\"system\",\"content\":\""
+                + jsonEscape("请尽量用最简洁的方式回答，简短直接，避免冗长。") + "\"},";
+    }
+    body += "{\"role\":\"user\",\"content\":\""
             + jsonEscape(s->req.text) + "\"}]";
     body += "}";
     // headers
@@ -304,7 +317,7 @@ void onDone(const HttpResponse& resp, void* udata) {
     qWarning("aigptbot: resp provider=%s http=%d curl=[%s] body=[%s]",
              h ? h->name : "?", resp.httpCode,
              resp.curlErrStr.c_str(), briefBody(resp.body).c_str());
-    if (resp.httpCode >= 200 && resp.httpCode < 300 && resp.curlErrStr.empty()) {
+    if (resp.httpCode >= 200 && resp.httpCode < 300) {
         const std::string content = parseOpenAiContent(resp.body, apiErr);
         if (!content.empty()) {
             qWarning("aigptbot: provider=%s 成功 textlen=%d B",
@@ -318,6 +331,9 @@ void onDone(const HttpResponse& resp, void* udata) {
     if (h) { lastErr += h->name; } else { lastErr += "provider"; }
     lastErr += ": HTTP " + std::to_string(resp.httpCode);
     if (!resp.curlErrStr.empty()) { lastErr += " " + resp.curlErrStr; }
+    if (resp.httpCode >= 200 && resp.httpCode < 300 && !resp.curlErrStr.empty()) {
+        lastErr += "（收到 HTTP " + std::to_string(resp.httpCode) + " 但响应体不完整）";
+    }
     if (!apiErr.empty()) { lastErr += "（" + apiErr + "）"; }
     s->lastError = lastErr;
     qWarning("aigptbot: provider=%s 失败: %s → 切换候选", h ? h->name : "?", lastErr.c_str());

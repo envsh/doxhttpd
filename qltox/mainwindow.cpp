@@ -1232,9 +1232,13 @@ void MainWindow::customEvent(CustomEventBase* event) {
         if (evt->success) {
             // 原提问置为 SendSent
             elp->sendState = ChatElement::SendSent;
-            // 追加一条 AI 回复消息（self）
+            // 追加一条 AI 回复消息（self），尾部标注真实命中的服务（非 any）
             ChatElement ack;
-            ack.messageText = qFromUtf8(evt->reply.c_str());
+            QString ackText = qFromUtf8(evt->reply.c_str());
+            if (!evt->providerUsed.empty()) {
+                ackText += " -- " + qFromUtf8(evt->providerUsed.c_str());
+            }
+            ack.messageText = ackText;
             ack.category = "self";
             ack.senderName = "Me";
             ack.peerNumber = -1;
@@ -2128,6 +2132,7 @@ void MainWindow::handleAigptChatMessage(int64_t localId, const QString& text) {
     req.text     = std::string(qToUtf8(text).data());
     req.provider = std::string(qToUtf8(mapValue(ctx, "provider")).data());
     req.model    = std::string(qToUtf8(mapValue(ctx, "model")).data());
+    req.brief    = (mapValue(ctx, "brief") == "1");
     req.localId  = localId;
     req.chatId   = currentChatId;
     req.chatType = typeStr;
