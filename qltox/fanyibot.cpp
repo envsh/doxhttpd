@@ -11,8 +11,11 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <sys/stat.h>
+#include <sys/time.h>
 
 extern "C" {
 #include "md5.h"
@@ -32,9 +35,34 @@ const int kEngineCount = int(sizeof(kEngines) / sizeof(kEngines[0]));
 
 // msedge 取 token 必须带 msie UA（有道/雅翻走浏览器 UA）
 const char* kMsedgeUA = "msie 6";
+const char* kYandexUA = "msie 6";
 const char* kBrowserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
-const char* kYoudaoSignKey = "fanyideskweb";
+
+// ── 有道：与 touse/oai 完全一致的 URL/头/参数 ──
+const char* kYoudaoUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                        "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+const char* kYoudaoWarmURL = "https://fanyi.youdao.com/";
+const char* kYoudaoKeyURL  = "https://dict.youdao.com/webtranslate/key";
+const char* kYoudaoAPIURL  = "https://dict.youdao.com/webtranslate";
+const char* kYoudaoReferer = "https://fanyi.youdao.com/";
+const char* kYoudaoClient  = "fanyideskweb";
+const char* kYoudaoProduct = "webfanyi";
+const char* kYoudaoAppVer  = "12.0.0";
+const char* kYoudaoUserID  = "abcdefg";
+const char* kYoudaoFakeCookie = "OUTFOX_SEARCH_USER_ID=0@127.0.0.1";
+
+const char* kYoudaoKeyParam = "keyid,client,mysticTime,product";
+
+struct YoudaoKeyPair {
+    const char* id;
+    const char* secret;
+};
+const YoudaoKeyPair kYoudaoKeyPairs[] = {
+    { "webfanyi-key-getter-2025", "yU5nT5dK3eZ1pI4j" },
+    { "webfanyi-key-getter",       "asdjnjfenknafdfsdfsd" },
+};
+const int kYoudaoPairCount = int(sizeof(kYoudaoKeyPairs) / sizeof(kYoudaoKeyPairs[0]));
 
 // 目标语言显示名 → 各家语言码
 struct LangRow {
@@ -66,9 +94,14 @@ struct Session {
     unsigned int seq = 0;
     std::string lastError;
     std::vector<std::string> tried;
-    std::string cred;    // msedge JWT / yandex key
-    int step = 0;        // 0=取凭据 1=发翻译请求
+    std::string cred;    // msedge JWT / yandex SID
+    int step = 0;        // msedge/yandex: 0=取凭据 1=发翻译请求; youdao: 0=预热/读缓存 2=取key 3=翻译
     int credRetry = 0;   // 凭据失效重取次数（上限 1，防死循环）
+    std::string ydCookie;    // 有道 cookie（warm 取得）
+    std::string ydSecret;    // 有道 data.secretKey
+    std::string ydAesKey;    // 有道 data.aesKey
+    std::string ydAesIv;     // 有道 data.aesIv
+    int ydPair = 0;          // 有道 keyid 配对下标（0=2025 1=legacy）
 };
 
 QMutex g_mutex;
@@ -146,13 +179,34 @@ std::string md5Hex(const std::string& s) {
     return out;
 }
 
-// ── 凭据缓存：$HOME/.config/qltox/fanyibot_<name>（0600，存短期 token/key）──
-std::string credDir() {
-    return std::string(qToUtf8(qGetHomePath() + "/.config/qltox").data());
+std::string md5Raw(const std::string& s) {
+    MD5_CTX ctx;
+    uint8_t digest[16];
+    MD5_Init(&ctx);
+    MD5_Update(&ctx, (const uint8_t*)s.data(), s.size());
+    MD5_Final(digest, &ctx);
+    return std::string((const char*)digest, 16);
 }
 
-std::string loadCred(const char* name) {
-    const std::string path = credDir() + "/fanyibot_" + name;
+long long nowMs() {
+    struct timeval tv;
+    gettimeofday(&tv, nullptr);
+    return (long long)tv.tv_sec * 1000LL + (long long)tv.tv_usec / 1000LL;
+}
+
+// ── 临时缓存：$TMPDIR/$TMP/<name>，与 touse/oai os.TempDir() 一致可互通 ──
+std::string tmpDir() {
+    const char* d = std::getenv("TMPDIR");
+    if (d && *d) { return std::string(d); }
+    return "/tmp";
+}
+
+std::string tmpPath(const char* name) {
+    return tmpDir() + "/" + name;
+}
+
+std::string loadTmp(const char* name) {
+    const std::string path = tmpPath(name);
     FILE* f = std::fopen(path.c_str(), "rb");
     if (!f) { return std::string(); }
     std::string out;
@@ -163,20 +217,17 @@ std::string loadCred(const char* name) {
     return trimStr(out);
 }
 
-void saveCred(const char* name, const std::string& val) {
+void saveTmp(const char* name, const std::string& val) {
     if (val.empty()) { return; }
-    const std::string dir = credDir();
-    qMkdir(qFromUtf8(dir.c_str()));
-    const std::string path = dir + "/fanyibot_" + name;
+    const std::string path = tmpPath(name);
     FILE* f = std::fopen(path.c_str(), "wb");
     if (!f) { return; }
     std::fwrite(val.data(), 1, val.size(), f);
     std::fclose(f);
-    ::chmod(path.c_str(), 0600);
 }
 
-void removeCred(const char* name) {
-    std::remove((credDir() + "/fanyibot_" + name).c_str());
+void removeTmp(const char* name) {
+    std::remove(tmpPath(name).c_str());
 }
 
 void removeSession(Session* s) {
@@ -227,14 +278,15 @@ std::string httpErr(const HttpResponse& resp) {
     return err;
 }
 
-// msedge: [{"translations":[{"text":"…"}]}]
+// msedge: [{"translations":[{"text":"…"}]}]（touse/oai 的真实返回为最外层数组）
 std::string parseMsedge(const std::string& body) {
     cJSON* root = cJSON_Parse(body.c_str());
     std::string out;
     if (root) {
-        cJSON* arr = cJSON_GetObjectItem(root, "translations");
-        cJSON* first = arr ? cJSON_GetArrayItem(arr, 0) : nullptr;
-        out = first ? jsonStr(first, "text") : std::string();
+        cJSON* first = cJSON_IsArray(root) ? cJSON_GetArrayItem(root, 0) : root;
+        cJSON* arr = first ? cJSON_GetObjectItem(first, "translations") : nullptr;
+        cJSON* tr0 = arr ? cJSON_GetArrayItem(arr, 0) : nullptr;
+        out = tr0 ? jsonStr(tr0, "text") : std::string();
         cJSON_Delete(root);
     }
     return out;
@@ -265,14 +317,24 @@ std::string parseGoogle(const std::string& body) {
     return body.substr(start, b - start);
 }
 
-// 有道：translateResult[0].t，退回 translation[0].t
-std::string parseYoudao(const std::string& body) {
+// 有道（v2 接口）：translateResult[][].tgt，回退 v1 .t；多段 / 多行以 "" 拼接
+std::string parseYoudaoV2(const std::string& body) {
     cJSON* root = cJSON_Parse(body.c_str());
     std::string out;
     if (root) {
         cJSON* tr = cJSON_GetObjectItem(root, "translateResult");
-        cJSON* first = tr ? cJSON_GetArrayItem(tr, 0) : nullptr;
-        if (first) { out = jsonStr(first, "t"); }
+        if (cJSON_IsArray(tr)) {
+            const int rows = cJSON_GetArraySize(tr);
+            for (int i = 0; i < rows; i++) {
+                cJSON* segArr = cJSON_GetArrayItem(tr, i);
+                const int segs = cJSON_IsArray(segArr) ? cJSON_GetArraySize(segArr) : 0;
+                for (int j = 0; j < segs; j++) {
+                    std::string t = jsonStr(cJSON_GetArrayItem(segArr, j), "tgt");
+                    if (t.empty()) { t = jsonStr(cJSON_GetArrayItem(segArr, j), "t"); }
+                    out += t;
+                }
+            }
+        }
         if (out.empty()) {
             cJSON* tl = cJSON_GetObjectItem(root, "translation");
             cJSON* t0 = tl ? cJSON_GetArrayItem(tl, 0) : nullptr;
@@ -281,6 +343,17 @@ std::string parseYoudao(const std::string& body) {
         cJSON_Delete(root);
     }
     return out;
+}
+
+int youdaoResultCode(const std::string& body) {
+    cJSON* root = cJSON_Parse(body.c_str());
+    int code = 0;
+    if (root) {
+        cJSON* c = cJSON_GetObjectItem(root, "code");
+        if (c && cJSON_IsNumber(c)) { code = (int)c->valuedouble; }
+        cJSON_Delete(root);
+    }
+    return code;
 }
 
 // 雅翻：{"code":200,"text":["译文",…]}
@@ -299,22 +372,287 @@ std::string parseYandex(const std::string& body) {
     return out;
 }
 
-// 雅翻 key 藏在首页 JS 配置里：…"key":"XXXX"…
-std::string scrapeYandexKey(const std::string& html) {
-    const std::string tag = "\"key\":\"";
-    size_t pos = 0;
-    while (true) {
-        const size_t at = html.find(tag, pos);
-        if (at == std::string::npos) { return std::string(); }
-        const size_t b = at + tag.size();
-        const size_t e = html.find('"', b);
-        if (e == std::string::npos) { return std::string(); }
-        const std::string key = html.substr(b, e - b);
-        if (!key.empty() && key.size() >= 8 && key.find(' ') == std::string::npos) {
-            return key;
-        }
-        pos = e + 1;
+// 雅翻 SID 抓取（touse/oai 同款 esc-js 正则）：sid\:\s'([0-9a-f.]+)'
+std::string scrapeYandexSid(const std::string& html) {
+    const std::string tag = "sid: '";
+    const size_t at = html.find(tag);
+    if (at == std::string::npos) { return std::string(); }
+    const size_t b = at + tag.size();
+    size_t e = b;
+    while (e < html.size()) {
+        const char c = html[e];
+        const bool ok = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || c == '.';
+        if (!ok) { break; }
+        e++;
     }
+    return html.substr(b, e - b);
+}
+
+// ── 有道 key 缓存（$TMP/youdao_web_key.txt，JSON 与 touse/oai 互通）──
+bool youdaoKeyParse(const std::string& json, std::string& secretKey,
+                    std::string& aesKey, std::string& aesIv, std::string& cookie) {
+    cJSON* root = cJSON_Parse(json.c_str());
+    if (!root) { return false; }
+    secretKey = jsonStr(root, "secretKey");
+    aesKey    = jsonStr(root, "aesKey");
+    aesIv     = jsonStr(root, "aesIv");
+    cookie    = jsonStr(root, "cookie");
+    const bool ok = !secretKey.empty() && !aesKey.empty() && !aesIv.empty();
+    cJSON_Delete(root);
+    return ok;
+}
+
+bool youdaoLoadCache(Session* s) {
+    std::string secretKey, aesKey, aesIv, cookie;
+    if (!youdaoKeyParse(loadTmp("youdao_web_key.txt"), secretKey, aesKey, aesIv, cookie)) {
+        return false;
+    }
+    s->ydSecret = secretKey;
+    s->ydAesKey = aesKey;
+    s->ydAesIv  = aesIv;
+    s->ydCookie = cookie;
+    return true;
+}
+
+void youdaoSaveKeyCache(Session* s) {
+    std::string cookie = s->ydCookie;
+    if (cookie.empty()) { cookie = kYoudaoFakeCookie; }
+    const std::string json =
+        "{\"secretKey\":\"" + jsonEscape(s->ydSecret)
+        + "\",\"aesKey\":\"" + jsonEscape(s->ydAesKey)
+        + "\",\"aesIv\":\"" + jsonEscape(s->ydAesIv)
+        + "\",\"cookie\":\"" + jsonEscape(cookie) + "\"}";
+    saveTmp("youdao_web_key.txt", json);
+}
+
+// warm 响应里多个 Set-Cookie 累计（中间已用 \n 连接）里挑出这次的 cookie
+void youdaoExtractCookie(std::string& cookie, const std::string& setCookieBlock) {
+    if (setCookieBlock.empty()) { return; }
+    size_t pos = 0;
+    while (pos < setCookieBlock.size()) {
+        const size_t nl = setCookieBlock.find('\n', pos);
+        const std::string one = setCookieBlock.substr(
+            pos, nl == std::string::npos ? std::string::npos : nl - pos);
+        const size_t eq = one.find('=');
+        if (eq != std::string::npos) {
+            const std::string name = trimStr(one.substr(0, eq));
+            if (name == "OUTFOX_SEARCH_USER_ID" || name == "OUTFOX_SEARCH_USER_ID_NEW") {
+                cookie = one;
+                break;
+            }
+        }
+        if (nl == std::string::npos) { break; }
+        pos = nl + 1;
+    }
+}
+
+// ── base64url 解码（- _ 转 + /，容忍尾部 =）──
+static const char* kBase64Chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+std::string base64UrlDecode(const std::string& s) {
+    static int8_t rev[256];
+    static bool init = false;
+    if (!init) {
+        std::memset(rev, -1, sizeof(rev));
+        for (int i = 0; kBase64Chars[i]; i++) { rev[(uint8_t)kBase64Chars[i]] = (int8_t)i; }
+        init = true;
+    }
+    std::string out;
+    uint32_t bits = 0;
+    int nbits = 0;
+    for (size_t i = 0; i < s.size(); i++) {
+        const unsigned char c = (unsigned char)s[i];
+        if (c == '=') { break; }
+        int v = -1;
+        if (c == '-') { v = 62; }
+        else if (c == '_') { v = 63; }
+        else if (c < 128) { v = rev[c]; }
+        if (v < 0) { continue; }
+        bits = (bits << 6) | (uint32_t)v;
+        nbits += 6;
+        if (nbits >= 8) {
+            nbits -= 8;
+            out += (char)((bits >> nbits) & 0xFF);
+        }
+    }
+    return out;
+}
+
+// ── AES-128（Sbox/InvSbox/密钥扩展/解密），仅 CBC 解密用到 ──
+static const uint8_t kAesSbox[256] = {
+    0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5,
+    0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
+    0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0,
+    0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
+    0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc,
+    0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
+    0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a,
+    0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
+    0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0,
+    0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
+    0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b,
+    0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
+    0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85,
+    0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
+    0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5,
+    0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
+    0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17,
+    0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
+    0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88,
+    0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
+    0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c,
+    0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
+    0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9,
+    0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
+    0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6,
+    0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+    0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e,
+    0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
+    0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94,
+    0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
+    0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68,
+    0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16,
+};
+
+static const uint8_t kAesInvSbox[256] = {
+    0x52, 0x09, 0x6a, 0xd5, 0x30, 0x36, 0xa5, 0x38,
+    0xbf, 0x40, 0xa3, 0x9e, 0x81, 0xf3, 0xd7, 0xfb,
+    0x7c, 0xe3, 0x39, 0x82, 0x9b, 0x2f, 0xff, 0x87,
+    0x34, 0x8e, 0x43, 0x44, 0xc4, 0xde, 0xe9, 0xcb,
+    0x54, 0x7b, 0x94, 0x32, 0xa6, 0xc2, 0x23, 0x3d,
+    0xee, 0x4c, 0x95, 0x0b, 0x42, 0xfa, 0xc3, 0x4e,
+    0x08, 0x2e, 0xa1, 0x66, 0x28, 0xd9, 0x24, 0xb2,
+    0x76, 0x5b, 0xa2, 0x49, 0x6d, 0x8b, 0xd1, 0x25,
+    0x72, 0xf8, 0xf6, 0x64, 0x86, 0x68, 0x98, 0x16,
+    0xd4, 0xa4, 0x5c, 0xcc, 0x5d, 0x65, 0xb6, 0x92,
+    0x6c, 0x70, 0x48, 0x50, 0xfd, 0xed, 0xb9, 0xda,
+    0x5e, 0x15, 0x46, 0x57, 0xa7, 0x8d, 0x9d, 0x84,
+    0x90, 0xd8, 0xab, 0x00, 0x8c, 0xbc, 0xd3, 0x0a,
+    0xf7, 0xe4, 0x58, 0x05, 0xb8, 0xb3, 0x45, 0x06,
+    0xd0, 0x2c, 0x1e, 0x8f, 0xca, 0x3f, 0x0f, 0x02,
+    0xc1, 0xaf, 0xbd, 0x03, 0x01, 0x13, 0x8a, 0x6b,
+    0x3a, 0x91, 0x11, 0x41, 0x4f, 0x67, 0xdc, 0xea,
+    0x97, 0xf2, 0xcf, 0xce, 0xf0, 0xb4, 0xe6, 0x73,
+    0x96, 0xac, 0x74, 0x22, 0xe7, 0xad, 0x35, 0x85,
+    0xe2, 0xf9, 0x37, 0xe8, 0x1c, 0x75, 0xdf, 0x6e,
+    0x47, 0xf1, 0x1a, 0x71, 0x1d, 0x29, 0xc5, 0x89,
+    0x6f, 0xb7, 0x62, 0x0e, 0xaa, 0x18, 0xbe, 0x1b,
+    0xfc, 0x56, 0x3e, 0x4b, 0xc6, 0xd2, 0x79, 0x20,
+    0x9a, 0xdb, 0xc0, 0xfe, 0x78, 0xcd, 0x5a, 0xf4,
+    0x1f, 0xdd, 0xa8, 0x33, 0x88, 0x07, 0xc7, 0x31,
+    0xb1, 0x12, 0x10, 0x59, 0x27, 0x80, 0xec, 0x5f,
+    0x60, 0x51, 0x7f, 0xa9, 0x19, 0xb5, 0x4a, 0x0d,
+    0x2d, 0xe5, 0x7a, 0x9f, 0x93, 0xc9, 0x9c, 0xef,
+    0xa0, 0xe0, 0x3b, 0x4d, 0xae, 0x2a, 0xf5, 0xb0,
+    0xc8, 0xeb, 0xbb, 0x3c, 0x83, 0x53, 0x99, 0x61,
+    0x17, 0x2b, 0x04, 0x7e, 0xba, 0x77, 0xd6, 0x26,
+    0xe1, 0x69, 0x14, 0x63, 0x55, 0x21, 0x0c, 0x7d,
+};
+
+static uint8_t aesMul(uint8_t a, uint8_t b) {
+    uint8_t p = 0;
+    for (int i = 0; i < 8; i++) {
+        if (b & 1) { p ^= a; }
+        const bool hi = (a & 0x80) != 0;
+        a <<= 1;
+        if (hi) { a ^= 0x1b; }
+        b >>= 1;
+    }
+    return p;
+}
+
+static void aesExpandKey(const uint8_t* key, uint8_t* rk) {
+    static const uint8_t rcon[11] = {
+        0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36,
+    };
+    for (int i = 0; i < 16; i++) { rk[i] = key[i]; }
+    for (int i = 4; i < 44; i++) {
+        uint8_t t[4];
+        for (int j = 0; j < 4; j++) { t[j] = rk[(i - 1) * 4 + j]; }
+        if (i % 4 == 0) {
+            const uint8_t first = t[0];
+            for (int j = 0; j < 3; j++) { t[j] = t[j + 1]; }
+            t[3] = first;
+            for (int j = 0; j < 4; j++) { t[j] = kAesSbox[t[j]]; }
+            t[0] ^= rcon[i / 4];
+        }
+        for (int j = 0; j < 4; j++) { rk[i * 4 + j] = rk[(i - 4) * 4 + j] ^ t[j]; }
+    }
+}
+
+static void aesAddRoundKey(uint8_t* s, const uint8_t* rk, int round) {
+    for (int i = 0; i < 16; i++) { s[i] ^= rk[round * 16 + i]; }
+}
+
+static void aesInvShiftRows(uint8_t* s) {
+    uint8_t tmp[16];
+    for (int r = 0; r < 4; r++) {
+        for (int c = 0; c < 4; c++) { tmp[c * 4 + r] = s[((c + 4 - r) % 4) * 4 + r]; }
+    }
+    std::memcpy(s, tmp, 16);
+}
+
+static void aesInvSubBytes(uint8_t* s) {
+    for (int i = 0; i < 16; i++) { s[i] = kAesInvSbox[s[i]]; }
+}
+
+static void aesInvMixColumns(uint8_t* s) {
+    for (int c = 0; c < 4; c++) {
+        const int o = c * 4;
+        const uint8_t a = s[o], b = s[o + 1], e = s[o + 2], d = s[o + 3];
+        s[o]     = aesMul(a, 14) ^ aesMul(b, 11) ^ aesMul(e, 13) ^ aesMul(d, 9);
+        s[o + 1] = aesMul(a, 9)  ^ aesMul(b, 14) ^ aesMul(e, 11) ^ aesMul(d, 13);
+        s[o + 2] = aesMul(a, 13) ^ aesMul(b, 9)  ^ aesMul(e, 14) ^ aesMul(d, 11);
+        s[o + 3] = aesMul(a, 11) ^ aesMul(b, 13) ^ aesMul(e, 9)  ^ aesMul(d, 14);
+    }
+}
+
+static void aesDecryptBlock(const uint8_t* key, const uint8_t* in, uint8_t* out) {
+    uint8_t rk[176];
+    aesExpandKey(key, rk);
+    uint8_t s[16];
+    std::memcpy(s, in, 16);
+    aesAddRoundKey(s, rk, 10);
+    for (int round = 9; round >= 1; round--) {
+        aesInvShiftRows(s);
+        aesInvSubBytes(s);
+        aesAddRoundKey(s, rk, round);
+        aesInvMixColumns(s);
+    }
+    aesInvShiftRows(s);
+    aesInvSubBytes(s);
+    aesAddRoundKey(s, rk, 0);
+    std::memcpy(out, s, 16);
+}
+
+// key/iv 各 16 字节（调用方传 md5 原字节），PKCS7 去填充
+std::string aes128CbcDecrypt(const std::string& key, const std::string& iv,
+                             const std::string& data) {
+    std::string out;
+    if (key.size() != 16 || iv.size() != 16 || data.empty() || data.size() % 16 != 0) {
+        return out;
+    }
+    const uint8_t* k = (const uint8_t*)key.data();
+    uint8_t prev[16];
+    std::memcpy(prev, iv.data(), 16);
+    for (size_t off = 0; off < data.size(); off += 16) {
+        uint8_t blk[16];
+        aesDecryptBlock(k, (const uint8_t*)data.data() + off, blk);
+        for (int i = 0; i < 16; i++) {
+            blk[i] ^= prev[i];
+            prev[i] = (uint8_t)data[off + i];
+        }
+        out.append((const char*)blk, 16);
+    }
+    if (out.empty()) { return out; }
+    const uint8_t pad = (uint8_t)out[out.size() - 1];
+    if (pad < 1 || pad > 16) { return std::string(); }
+    for (int i = 0; i < pad; i++) {
+        if ((uint8_t)out[out.size() - 1 - i] != pad) { return std::string(); }
+    }
+    out.erase(out.size() - pad);
+    return out;
 }
 
 std::vector<const FanyibotEngine*> buildCandidates(const FanyibotRequest& req,
@@ -354,6 +692,11 @@ void startNext(Session* s);
 
 void failEngine(Session* s, const FanyibotEngine& e, const std::string& why) {
     s->lastError = std::string(e.name) + ": " + why;
+    s->cred.clear();
+    s->step = 0;
+    s->credRetry = 0;
+    s->ydCookie = s->ydSecret = s->ydAesKey = s->ydAesIv = std::string();
+    s->ydPair = 0;
     ++s->index;
     startNext(s);
 }
@@ -377,8 +720,8 @@ void sendEngine(Session* s, const FanyibotEngine& e) {
     std::map<std::string, std::string> h;
 
     if (e.id == kFanyibotMsedge) {
-        if (s->step == 0) {   // 先取 token（缓存优先）
-            if (s->cred.empty()) { s->cred = loadCred("msedge_token"); }
+        if (s->step == 0) {   // 先取 token（$TMP/mset_apikey.txt 缓存）
+            if (s->cred.empty()) { s->cred = loadTmp("mset_apikey.txt"); }
             if (!s->cred.empty()) { s->step = 1; sendEngine(s, e); return; }
             h["User-Agent"] = kMsedgeUA;
             sendHttp(s, "https://edge.microsoft.com/translate/auth", "GET", "", h);
@@ -387,7 +730,7 @@ void sendEngine(Session* s, const FanyibotEngine& e) {
         h["User-Agent"]    = kMsedgeUA;
         h["Content-Type"]  = "application/json; charset=utf-8";
         h["Authorization"] = "Bearer " + s->cred;
-        sendHttp(s, "https://api.cognitive.microsofttranslator.com/translate?to=" + code
+        sendHttp(s, "https://api.cognitive.microsofttranslator.com/translate?from=&to=" + code
                     + "&api-version=3.0&includeSentenceLength=true",
                  "POST", "[{\"text\":\"" + jsonEscape(text) + "\"}]", h);
         return;
@@ -402,30 +745,82 @@ void sendEngine(Session* s, const FanyibotEngine& e) {
     }
 
     if (e.id == kFanyibotYoudao) {
-        const std::string salt = std::to_string((long long)time(nullptr));
-        const std::string body = "i=" + urlEncode(text) + "&from=auto&to=" + code
-            + "&smartresult=dict&client=pc&salt=" + urlEncode(salt)
-            + "&sign=" + md5Hex(std::string(kYoudaoSignKey) + text + salt);
-        h["User-Agent"]   = kBrowserUA;
-        h["Referer"]      = "https://fanyi.youdao.com/";
-        h["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8";
-        sendHttp(s, "https://fanyi.youdao.com/translate", "POST", body, h);
+        if (s->step == 0) {   // 预热取 cookie；已有 key 缓存直接翻译
+            if (!s->ydAesKey.empty() && !s->ydSecret.empty()) {
+                s->step = 3;
+                sendEngine(s, e);
+                return;
+            }
+            if (s->ydCookie.empty()) { s->ydCookie = kYoudaoFakeCookie; }
+            h["User-Agent"] = kYoudaoUA;
+            h["Referer"]    = kYoudaoReferer;
+            h["Cookie"]     = s->ydCookie;
+            sendHttp(s, kYoudaoWarmURL, "GET", "", h);
+            return;
+        }
+        if (s->step == 2) {   // 取 keyid/mysticTime/sign
+            const long long ms = nowMs();
+            const std::string mysticTime = std::to_string(ms);
+            const std::string sign = md5Hex(std::string(kYoudaoClient) + "&mysticTime="
+                                            + mysticTime + "&product=" + kYoudaoProduct
+                                            + "&key=" + kYoudaoKeyPairs[s->ydPair].secret);
+            std::string url = std::string(kYoudaoKeyURL)
+                + "?keyid=" + kYoudaoKeyPairs[s->ydPair].id
+                + "&pointParam=" + kYoudaoKeyParam
+                + "&client=" + kYoudaoClient
+                + "&product=" + kYoudaoProduct
+                + "&mysticTime=" + mysticTime
+                + "&sign=" + sign;
+            h["User-Agent"] = kYoudaoUA;
+            h["Referer"]    = kYoudaoReferer;
+            if (!s->ydCookie.empty()) { h["Cookie"] = s->ydCookie; }
+            sendHttp(s, url, "GET", "", h);
+            return;
+        }
+        if (s->step == 3) {   // 正式翻译
+            const long long ms = nowMs();
+            const std::string mysticTime = std::to_string(ms);
+            const std::string sign = md5Hex(std::string(kYoudaoClient) + "&mysticTime="
+                                            + mysticTime + "&product=" + kYoudaoProduct
+                                            + "&key=" + s->ydSecret);
+            const std::string body =
+                "i=" + urlEncode(text)
+                + "&from=auto&to=" + code
+                + "&keyid=" + kYoudaoProduct
+                + "&appVersion=" + kYoudaoAppVer
+                + "&vendor=web"
+                + "&pointParam=" + urlEncode(kYoudaoKeyParam)
+                + "&keyfrom=fanyi.web"
+                + "&client=" + kYoudaoClient
+                + "&product=" + kYoudaoProduct
+                + "&mysticTime=" + mysticTime
+                + "&sign=" + sign
+                + "&mid=1&screen=1&model=1&network=wifi&abtest=0&yduuid=" + kYoudaoUserID
+                + "&dictResult=true";
+            h["User-Agent"]   = kYoudaoUA;
+            h["Referer"]      = kYoudaoReferer;
+            h["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8";
+            h["Cookie"]       = s->ydCookie.empty() ? kYoudaoFakeCookie : s->ydCookie;
+            sendHttp(s, kYoudaoAPIURL, "POST", body, h);
+            return;
+        }
+        failEngine(s, e, "状态机异常: step=" + std::to_string(s->step));
         return;
     }
 
     if (e.id == kFanyibotYandex) {
-        if (s->step == 0) {   // key 藏在首页 JS 里，抓一次缓存
-            if (s->cred.empty()) { s->cred = loadCred("yandex_key"); }
+        if (s->step == 0) {   // 取 SID（$TMP/yandex_sid.txt 缓存优先）
+            if (s->cred.empty()) { s->cred = loadTmp("yandex_sid.txt"); }
             if (!s->cred.empty()) { s->step = 1; sendEngine(s, e); return; }
-            h["User-Agent"] = kBrowserUA;
+            h["User-Agent"] = kYandexUA;
             sendHttp(s, "https://translate.yandex.com/", "GET", "", h);
             return;
         }
-        h["User-Agent"] = kBrowserUA;
-        sendHttp(s, "https://translate.yandex.com/api/v1/tr.json/translate?id="
-                    + std::to_string((long long)time(nullptr))
-                    + "&srv=trg&lang=auto-" + code + "&reason=auto&format=text"
-                    + "&key=" + urlEncode(s->cred) + "&text=" + urlEncode(text),
+        h["User-Agent"] = kYandexUA;
+        sendHttp(s, "https://translate.yandex.com/api/v1/tr.json/translate?srv=tr-url-widget"
+                    + std::string("&id=") + s->cred + "-0-0"
+                    + "&format=text&lang=-" + code
+                    + "&text=" + urlEncode(text),
                  "GET", "", h);
         return;
     }
@@ -463,7 +858,7 @@ void onDone(const HttpResponse& resp, void* udata) {
         if (s->step == 0) {
             const std::string token = trimStr(resp.body);
             if (httpOk && !token.empty()) {
-                saveCred("msedge_token", token);
+                saveTmp("mset_apikey.txt", token);
                 s->cred = token;
                 s->step = 1;
                 sendEngine(s, *e);
@@ -475,7 +870,7 @@ void onDone(const HttpResponse& resp, void* udata) {
         if (httpOk) {
             if (msedgeErrorCode(resp.body) == 401001 && s->credRetry < 1) {
                 ++s->credRetry;    // token 过期：丢弃缓存重取一次
-                removeCred("msedge_token");
+                removeTmp("mset_apikey.txt");
                 s->step = 0;
                 s->cred.clear();
                 sendEngine(s, *e);
@@ -504,11 +899,75 @@ void onDone(const HttpResponse& resp, void* udata) {
     }
 
     if (e->id == kFanyibotYoudao) {
-        if (httpOk) {
-            const std::string out = parseYoudao(resp.body);
-            if (!out.empty()) {
-                postResult(s, true, out, e->name, std::string());
+        if (httpOk && s->step == 0) {
+            std::map<std::string, std::string>::const_iterator cit =
+                resp.headers.find("set-cookie");
+            if (cit != resp.headers.end()) {
+                std::string cookie;
+                youdaoExtractCookie(cookie, cit->second);
+                if (!cookie.empty()) { s->ydCookie = cookie; }
+            }
+            s->step = 2;
+            sendEngine(s, *e);
+            return;
+        }
+        if (httpOk && s->step == 2) {
+            std::string secretKey, aesKey, aesIv, cookie;
+            if (youdaoKeyParse(resp.body, secretKey, aesKey, aesIv, cookie)) {
+                s->ydSecret = secretKey;
+                s->ydAesKey = aesKey;
+                s->ydAesIv  = aesIv;
+                youdaoSaveKeyCache(s);
+                s->step = 3;
+                sendEngine(s, *e);
                 return;
+            }
+            if (s->ydPair < kYoudaoPairCount - 1) {   // 换 legacy keyid 再试
+                ++s->ydPair;
+                sendEngine(s, *e);
+                return;
+            }
+            failEngine(s, *e, "key 接口未解析到密钥");
+            return;
+        }
+        if (httpOk && s->step == 3) {
+            const int code = youdaoResultCode(resp.body);
+            if (code == 40 || code == 50) {
+                if (s->credRetry < 1) {
+                    ++s->credRetry;
+                    removeTmp("youdao_web_key.txt");
+                    s->ydCookie.clear();
+                    s->ydSecret = s->ydAesKey = s->ydAesIv = std::string();
+                    s->step = 0;
+                    sendEngine(s, *e);
+                    return;
+                }
+                failEngine(s, *e, "密钥失效(code " + std::to_string(code) + ")");
+                return;
+            }
+            if (code != 0) {
+                failEngine(s, *e, code == 20 ? "文本超长" : "有道返回码 " + std::to_string(code));
+                return;
+            }
+            if (!resp.body.empty()) {
+                const std::string plain =
+                    aes128CbcDecrypt(md5Raw(s->ydAesKey), md5Raw(s->ydAesIv),
+                                     base64UrlDecode(resp.body));
+                if (!plain.empty()) {
+                    const std::string out = parseYoudaoV2(plain);
+                    if (!out.empty()) {
+                        postResult(s, true, out, e->name, std::string());
+                        return;
+                    }
+                }
+                if (s->credRetry < 1) {   // 解密失败：key 不干净，重取一次
+                    ++s->credRetry;
+                    removeTmp("youdao_web_key.txt");
+                    s->ydSecret = s->ydAesKey = s->ydAesIv = std::string();
+                    s->step = 0;
+                    sendEngine(s, *e);
+                    return;
+                }
             }
         }
         failEngine(s, *e, httpErr(resp));
@@ -517,21 +976,29 @@ void onDone(const HttpResponse& resp, void* udata) {
 
     if (e->id == kFanyibotYandex) {
         if (s->step == 0) {
-            const std::string key = httpOk ? scrapeYandexKey(resp.body) : std::string();
-            if (!key.empty()) {
-                saveCred("yandex_key", key);
-                s->cred = key;
+            const std::string sid = httpOk ? scrapeYandexSid(resp.body) : std::string();
+            if (!sid.empty()) {
+                saveTmp("yandex_sid.txt", sid);
+                s->cred = sid;
                 s->step = 1;
                 sendEngine(s, *e);
                 return;
             }
-            failEngine(s, *e, httpOk ? "首页未解析到 key" : httpErr(resp));
+            failEngine(s, *e, httpOk ? "首页未解析到 SID" : httpErr(resp));
             return;
         }
         if (httpOk) {
             const std::string out = parseYandex(resp.body);
             if (!out.empty()) {
                 postResult(s, true, out, e->name, std::string());
+                return;
+            }
+            if (s->credRetry < 1) {   // SID 失效：重抓一次
+                ++s->credRetry;
+                removeTmp("yandex_sid.txt");
+                s->step = 0;
+                s->cred.clear();
+                sendEngine(s, *e);
                 return;
             }
         }

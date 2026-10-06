@@ -23,7 +23,13 @@ static size_t headerCb(void* contents, size_t size, size_t nmemb, void* userp) {
     while (vEnd > vStart && (line[vEnd - 1] == '\r' || line[vEnd - 1] == '\n')) vEnd--;
     if (vEnd <= vStart) { return total; }
     for (char& c : name) { c = static_cast<char>(tolower(static_cast<unsigned char>(c))); }
-    (*headers)[name] = line.substr(vStart, vEnd - vStart);
+    std::string& dst = (*headers)[name];
+    if (name == "set-cookie" && !dst.empty()) {
+        dst += "\n";
+        dst += line.substr(vStart, vEnd - vStart);
+    } else {
+        dst = line.substr(vStart, vEnd - vStart);
+    }
     return total;
 }
 
