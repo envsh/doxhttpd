@@ -2221,12 +2221,8 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
     if (type == kBookmarkType) {
         handleBookmarkMessage(message);
     } else if (type == kAichatType) {
-        int64_t lidA = 0;
-        ChatHistory* h = m_chatbuf.ptr(currentChatId, type);
-        if (h && !h->empty()) {
-            lidA = h->back().localId;
-        }
-        handleAigptChatMessage(lidA, message);
+        // 与 pastebin/translate 同机制：真正启动在乐观插入拿到 localId 之后（见块外 :2333），
+        // 这里仅分流免走 ToxAPI 真实发送
     } else if (type == kPastebinType) {
         // 客户端直传：不调 ToxAPI::sendMessage（sendmsgseq 保持 0），
         // 真正启动在乐观插入拿到 localId 之后（见块外调用）。

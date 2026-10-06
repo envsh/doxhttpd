@@ -23,8 +23,8 @@ namespace {
 // ── provider 静态表（顺序 = provider="all" 的固定尝试序）──
 // 名称字段 name 原样拷贝自 imageaiutil.cpp（startOpenAiVision 第一个参数）
 const AigptbotProvider kAigptProviders[] = {
-    { kAigptbotPollinations,  "pollinations",    false, false,
-      "https://gen.pollinations.ai/v1/chat/completions", "" },
+    { kAigptbotPollinations,  "pollinations",    true,  false,   // 现已要求 key，any/all 跳过
+      "https://gen.pollinations.ai/v1/chat/completions", "openai" },
     { kAigptbotZhipu,         "智谱",            true,  false,
       "https://open.bigmodel.cn/api/paas/v4/chat/completions", "" },
     { kAigptbotSiliconFlow,   "硅基流动",        true,  false,
@@ -34,15 +34,15 @@ const AigptbotProvider kAigptProviders[] = {
     { kAigptbotOpenRouter,    "OpenRouter",      true,  false,
       "https://openrouter.ai/api/v1/chat/completions", "" },
     { kAigptbotBlockRun,      "BlockRun",        false, true,
-      "https://blockrun.ai/api/v1/chat/completions", "" },
+      "https://blockrun.ai/api/v1/chat/completions", "nvidia/mistral-nemotron" },
     { kAigptbotLlm7,          "LLM7",            true,  false,
       "https://api.llm7.io/v1/chat/completions", "" },
     { kAigptbotCloudflare,    "Cloudflare",      true,  false,
       "https://api.cloudflare.com/client/v4/accounts/%1/ai/v1/chat/completions", "" },
     { kAigptbotDashScope,     "百炼",            true,  false,
       "https://dashscope.aliyun.com/compatible-mode/v1/chat/completions", "" },
-    { kAigptbotOvh,           "OVH",             false, true,
-      "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions", "" },
+    { kAigptbotOvh,           "OVH",             true, true,
+      "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions", "Qwen3.6-27B" },
     { kAigptbotVolcengine,    "豆包",            true,  false,
       "https://ark.cn-beijing.volces.com/api/v3/chat/completions", "" },
     { kAigptbotModelScope,    "ModelScope(国内)", true, false,
@@ -56,7 +56,7 @@ const AigptbotProvider kAigptProviders[] = {
     { kAigptbotGemini,        "Gemini",          true,  false,
       "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "" },
     { kAigptbotOllama,        "Ollama 本地",     false, true,
-      "http://localhost:11434/v1/chat/completions", "" },
+      "http://localhost:11434/v1/chat/completions", "qwen2.5" },
     { kAigptbotZai,           "Z.ai(国际)",      true,  false,
       "https://api.z.ai/api/paas/v4/chat/completions", "" },
     { kAigptbotGroqViaCf,     "groq-viacf",      true,  false,
@@ -92,6 +92,15 @@ std::string trimStr(const std::string& s) {
 
 bool strEqual(const std::string& a, const std::string& b) {
     return a == b;
+}
+
+// 日志截断：取首行、上限 64 字符（同 fanyibot::briefOf）
+std::string briefBody(const std::string& body) {
+    std::string b = body;
+    const std::string::size_type nl = b.find('\n');
+    if (nl != std::string::npos) { b = b.substr(0, nl); }
+    if (b.size() > 64) { b = b.substr(0, 64); }
+    return b;
 }
 
 void ensureSeed() {
@@ -232,11 +241,15 @@ void sendHost(Session* s, const AigptbotProvider& p) {
                    std::string("AI Horde 暂不支持文本对话"));
         return;
     }
+    const std::string model = s->req.model.empty() ? p.modelDefault : s->req.model;
+    qWarning("aigptbot: 候选[%d/%d] provider=%s host=%s model=%s textlen=%d B",
+             s->index, (int)s->cands.size(), p.name, p.baseUrl,
+             model.empty() ? "(未指定)" : model.c_str(), (int)s->req.text.size());
     // 构造 OpenAI 兼容请求体
     std::string body = "{";
-    // model（仅非空）
-    if (!s->req.model.empty()) {
-        body += "\"model\":\"" + jsonEscape(s->req.model) + "\",";
+    // model（UI 未指定时回落 provider 默认模型）
+    if (!model.empty()) {
+        body += "\"model\":\"" + jsonEscape(model) + "\",";
     }
     // messages
     body += "\"messages\":[{\"role\":\"user\",\"content\":\""
@@ -270,22 +283,32 @@ void startNext(Session* s) {
         tried += s->tried[i];
     }
     if (!tried.empty()) { err += "（已尝试：" + tried + "）"; }
+    qWarning("aigptbot: 全部候选失败: %s", err.c_str());
     postResult(s, false, std::string(), std::string(), err);
 }
 
 void onDone(const HttpResponse& resp, void* udata) {
     Session* s = static_cast<Session*>(udata);
     if (!s) { return; }
-    if (!isCurrentSeq(s)) { removeSession(s); return; }
+    if (!isCurrentSeq(s)) {
+        qWarning("aigptbot: 迟到回包丢弃 seq=%u", (unsigned int)s->seq);
+        removeSession(s);
+        return;
+    }
     if (s->index < 0 || s->index >= (int)s->cands.size()) {
         removeSession(s);
         return;
     }
     const AigptbotProvider* h = s->cands[s->index];
     std::string apiErr;
+    qWarning("aigptbot: resp provider=%s http=%d curl=[%s] body=[%s]",
+             h ? h->name : "?", resp.httpCode,
+             resp.curlErrStr.c_str(), briefBody(resp.body).c_str());
     if (resp.httpCode >= 200 && resp.httpCode < 300 && resp.curlErrStr.empty()) {
         const std::string content = parseOpenAiContent(resp.body, apiErr);
         if (!content.empty()) {
+            qWarning("aigptbot: provider=%s 成功 textlen=%d B",
+                     h ? h->name : "?", (int)content.size());
             postResult(s, true, content, h ? h->name : std::string(), std::string());
             return;
         }
@@ -297,7 +320,7 @@ void onDone(const HttpResponse& resp, void* udata) {
     if (!resp.curlErrStr.empty()) { lastErr += " " + resp.curlErrStr; }
     if (!apiErr.empty()) { lastErr += "（" + apiErr + "）"; }
     s->lastError = lastErr;
-    if (h) { s->tried.push_back(h->name); }
+    qWarning("aigptbot: provider=%s 失败: %s → 切换候选", h ? h->name : "?", lastErr.c_str());
     ++s->index;
     startNext(s);
 }
@@ -373,5 +396,14 @@ void aigptbotChatStart(const AigptbotRequest& req, QObject* target) {
     std::string reason;
     s->cands = buildCandidates(req, reason);
     if (!reason.empty()) { s->lastError = reason; }
+    std::string order;
+    for (size_t i = 0; i < s->cands.size(); ++i) {
+        if (i) { order += " → "; }
+        order += s->cands[i]->name;
+    }
+    qWarning("aigptbot: provider=%s model=%s 候选 %d 个: %s",
+             req.provider.empty() ? "any" : req.provider.c_str(),
+             req.model.empty() ? "(默认)" : req.model.c_str(),
+             (int)s->cands.size(), order.c_str());
     startNext(s);
 }
