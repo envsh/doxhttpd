@@ -56,9 +56,14 @@
         "sticker": "貼圖",
         "quickreply": "快速回覆",
         "paste": "貼上",
+        "record_audio": "錄音發送",
+        "record_screen": "錄影發送",
         "lang": "語言",
         "style": "風格",
         "dark": "深色模式"
+    },
+    "record": {
+        "empty_hint": "錄製內容為空或失敗，未發送"
     },
     "placeholders": {
         "add_friend": "輸入 Tox ID 添加好友",

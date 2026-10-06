@@ -61,9 +61,14 @@
         "sticker": "贴纸",
         "quickreply": "快速回复",
         "paste": "粘贴",
+        "record_audio": "录音发送",
+        "record_screen": "录屏发送",
         "lang": "语言",
         "style": "风格",
         "dark": "深色模式"
+    },
+    "record": {
+        "empty_hint": "录制内容为空或失败，未发送"
     },
     "placeholders": {
         "add_friend": "输入 Tox ID 添加好友",

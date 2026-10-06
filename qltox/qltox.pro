@@ -17,6 +17,7 @@ QMAKE_MACOSX_DEPLOYMENT_TARGET = 11.7
 
 SOURCES = main.cpp mainwindow.cpp storage.cpp restapi.cpp eventpoller.cpp pasteuploader.cpp \
              chatwidget.cpp chatview.cpp chatbuffer.cpp contactlist.cpp selfinfo.cpp \
+             recorder.cpp \
              cJSON.c editinfodialog.cpp conferenceinvitedialog.cpp groupinvitedialog.cpp \
              friendinfodialog.cpp memberlistdialog.cpp logindialog.cpp \
              imageinputconfirm.cpp messageinput.cpp messageattribbar.cpp sound.c loadingbar.cpp \
@@ -40,6 +41,7 @@ translation_cache.cpp \
 
 HEADERS = mainwindow.h storage.h restapi.h eventpoller.h pasteuploader.h \
              chatwidget.h chatview.h chatbuffer.h contactlist.h selfinfo.h \
+             recorder.h \
              editinfodialog.h conferenceinvitedialog.h groupinvitedialog.h \
              friendinfodialog.h memberlistdialog.h logindialog.h \
               imageinputconfirm.h messageinput.h messageattribbar.h sound.h loadingbar.h \

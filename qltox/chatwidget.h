@@ -24,6 +24,7 @@ typedef QList<QWidget*> ChipWidgetList;        // Qt4：存 QWidget*
 #include "chatview.h"
 #include "messageinput.h"
 #include "messageattribbar.h"
+#include "recorder.h"
 #include "emojiwidgets.h"
 #include "emoji_picker.h"
 #include "StyleParams.h"
@@ -71,6 +72,7 @@ class ChatWidget : public QWidget {
     Q_OBJECT
 public:
     ChatWidget(QWidget* parent = 0);
+    ~ChatWidget();
     static bool s_autoTranslateArg;
     
     void setHeaderText(const QString& text);
@@ -138,6 +140,9 @@ private slots:
     void onForwardRequested(int msgIndex);
     void onScreenshotClicked();
     void onPasteClicked();
+    void onRecordAudioClicked();
+    void onRecordScreenClicked();
+    void onRecordFinished(const QString& file, int exitCode);
     void onReplyStripClose();
     void hideUnreadBanner();
 
@@ -169,8 +174,13 @@ private:
     EmojiPushButton* quickReplyBtn;
     EmojiPushButton* historyBtn;
     EmojiPushButton* screenshotBtn;
-    EmojiPushButton* pasteBtn;      // 输入框左侧上：粘贴（与 Ctrl+V 同路径）
-    EmojiPushButton* typeIconBtn;   // 输入框左侧下：当前联系人类型图标（纯指示器，不接 slot）
+    EmojiPushButton* pasteBtn;      // 输入框左侧第一列上：粘贴（与 Ctrl+V 同路径）
+    EmojiPushButton* typeIconBtn;   // 输入框左侧第一列下：当前联系人类型图标（纯指示器，不接 slot）
+    EmojiPushButton* recordAudioBtn;   // 输入框左侧第二列上：录音发送
+    EmojiPushButton* recordScreenBtn;  // 输入框左侧第二列下：录屏发送
+    MediaRecorder* m_recorder;         // 归属本窗口，析构回收
+    int m_recKind;                     // MediaRecorder::kNone/kAudio/kScreen
+    void onRecordToggle(int kind, EmojiPushButton* me, EmojiPushButton* other);
     void updateChatTypeIcon(const QString& type);
 
     // ── 外观三件套（按钮 + 弹出菜单）──

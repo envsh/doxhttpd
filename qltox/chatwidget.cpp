@@ -17,6 +17,8 @@
 #include "stickerpicker.h"
 #include "storage.h"
 #include <qpushbutton.h>
+#include <qmessagebox.h>
+#include <qfileinfo.h>        // QFileInfo（录音/录屏成品大小校验）
 #ifdef QT3_BUILD
 #include <qaction.h>
 #else
@@ -359,8 +361,8 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     
     // 输入区域 (2行 x 3列)
 #ifdef QT3_BUILD
-    QGridLayout* inputGrid = new QGridLayout(2, 7, 2);
-    // 输入框左侧竖排两键：上=粘贴，下=当前联系人类型图标（指示器）
+    QGridLayout* inputGrid = new QGridLayout(2, 8, 2);
+    // 输入框左侧第一列：上=粘贴，下=当前联系人类型图标（指示器）
     pasteBtn = new EmojiPushButton(qFromUtf8("📋"), this);
     pasteBtn->setFixedSize(24, 24);
     pasteBtn->setEmojiInset(3);
@@ -371,57 +373,68 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     typeIconBtn->setEmojiInset(3);
     inputGrid->addWidget(typeIconBtn, 1, 0);
     typeIconBtn->hide();
+    // 输入框左侧第二列：上=录音发送，下=录屏发送（两段式：再点停止并发送）
+    recordAudioBtn = new EmojiPushButton(qFromUtf8("🎙"), this);
+    recordAudioBtn->setFixedSize(24, 24);
+    recordAudioBtn->setEmojiInset(3);
+    qSetToolTip(recordAudioBtn, _("tooltips.record_audio"));
+    inputGrid->addWidget(recordAudioBtn, 0, 1);
+    recordScreenBtn = new EmojiPushButton(qFromUtf8("🎥"), this);
+    recordScreenBtn->setFixedSize(24, 24);
+    recordScreenBtn->setEmojiInset(3);
+    qSetToolTip(recordScreenBtn, _("tooltips.record_screen"));
+    inputGrid->addWidget(recordScreenBtn, 1, 1);
     inputEdit = new MessageInput(this);
     // Qt3 的 addMultiCellWidget 形参是 (fromRow, toRow, fromCol, toCol) —— 起止坐标，
-    // 不是 Qt4 addWidget 的 rowSpan/colSpan。这里必须填列 1..1，若写 0..1 会横跨
-    // 列 0，把上面新加的粘贴/类型图标两个按钮整列盖住。
-    inputGrid->addMultiCellWidget(inputEdit, 0, 1, 1, 1);
+    // 不是 Qt4 addWidget 的 rowSpan/colSpan。这里必须填列 2..2，若写 1..2 会横跨
+    // 列 1，把上面新加的录音/录屏两个按钮整列盖住。
+    inputGrid->addMultiCellWidget(inputEdit, 0, 1, 2, 2);
     emojiBtn = new EmojiPushButton(qFromUtf8("😊"), this);
     emojiBtn->setFixedSize(24, 24);
     emojiBtn->setEmojiInset(3);
     qSetToolTip(emojiBtn, _("tooltips.emoji"));
-    inputGrid->addWidget(emojiBtn, 0, 2);
+    inputGrid->addWidget(emojiBtn, 0, 3);
     fileBtn = new EmojiPushButton(qFromUtf8("📎"), this);
     fileBtn->setFixedSize(24, 24);
     fileBtn->setEmojiInset(3);
     qSetToolTip(fileBtn, _("tooltips.file"));
-    inputGrid->addWidget(fileBtn, 1, 2);
+    inputGrid->addWidget(fileBtn, 1, 3);
     stickerBtn = new EmojiPushButton(qFromUtf8("🧸"), this);
     stickerBtn->setFixedSize(24, 24);
     stickerBtn->setEmojiInset(3);
     qSetToolTip(stickerBtn, _("tooltips.sticker"));
-    inputGrid->addWidget(stickerBtn, 0, 3);
+    inputGrid->addWidget(stickerBtn, 0, 4);
     quickReplyBtn = new EmojiPushButton(qFromUtf8("⚡"), this);
     quickReplyBtn->setFixedSize(24, 24);
     quickReplyBtn->setEmojiInset(3);
     qSetToolTip(quickReplyBtn, _("tooltips.quickreply"));
-    inputGrid->addWidget(quickReplyBtn, 1, 3);
+    inputGrid->addWidget(quickReplyBtn, 1, 4);
     historyBtn = new EmojiPushButton(qFromUtf8("🕘"), this);
     historyBtn->setFixedSize(24, 24);
     historyBtn->setEmojiInset(3);
     qSetToolTip(historyBtn, qFromUtf8("显示历史消息"));
-    inputGrid->addWidget(historyBtn, 0, 4);
+    inputGrid->addWidget(historyBtn, 0, 5);
     screenshotBtn = new EmojiPushButton(qFromUtf8("📷"), this);
     screenshotBtn->setFixedSize(24, 24);
     screenshotBtn->setEmojiInset(3);
     qSetToolTip(screenshotBtn, screenshotShortcutHint());
-    inputGrid->addWidget(screenshotBtn, 1, 4);
+    inputGrid->addWidget(screenshotBtn, 1, 5);
     sendBtn = new QPushButton(_("buttons.send"), this);
     QFontMetrics fm = inputEdit->fontMetrics();
     int twoLineH = fm.lineSpacing() * 2 + fm.lineSpacing() / 2 + 6;
     inputEdit->setMaximumHeight(twoLineH);
     sendBtn->setFixedSize(twoLineH, twoLineH);
-    inputGrid->addMultiCellWidget(sendBtn, 0, 1, 5, 5);
-    inputGrid->setColStretch(1, 1);
+    inputGrid->addMultiCellWidget(sendBtn, 0, 1, 6, 6);
+    inputGrid->setColStretch(2, 1);
 
     m_sendEnBtn = new QPushButton("Send EN", this);
     m_sendEnBtn->setFixedWidth(60);
     m_sendEnBtn->setFixedHeight(twoLineH);
-    inputGrid->addMultiCellWidget(m_sendEnBtn, 0, 1, 6, 6);
+    inputGrid->addMultiCellWidget(m_sendEnBtn, 0, 1, 7, 7);
 #else
     QGridLayout* inputGrid = new QGridLayout();
     inputGrid->setSpacing(2);
-    // 输入框左侧竖排两键：上=粘贴，下=当前联系人类型图标（指示器）
+    // 输入框左侧第一列：上=粘贴，下=当前联系人类型图标（指示器）
     pasteBtn = new EmojiPushButton(qFromUtf8("📋"), this);
     pasteBtn->setFixedSize(24, 24);
     pasteBtn->setEmojiInset(3);
@@ -432,51 +445,63 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     typeIconBtn->setEmojiInset(3);
     inputGrid->addWidget(typeIconBtn, 1, 0, 1, 1);
     typeIconBtn->hide();
+    // 输入框左侧第二列：上=录音发送，下=录屏发送（两段式：再点停止并发送）
+    recordAudioBtn = new EmojiPushButton(qFromUtf8("🎙"), this);
+    recordAudioBtn->setFixedSize(24, 24);
+    recordAudioBtn->setEmojiInset(3);
+    qSetToolTip(recordAudioBtn, _("tooltips.record_audio"));
+    inputGrid->addWidget(recordAudioBtn, 0, 1, 1, 1);
+    recordScreenBtn = new EmojiPushButton(qFromUtf8("🎥"), this);
+    recordScreenBtn->setFixedSize(24, 24);
+    recordScreenBtn->setEmojiInset(3);
+    qSetToolTip(recordScreenBtn, _("tooltips.record_screen"));
+    inputGrid->addWidget(recordScreenBtn, 1, 1, 1, 1);
     inputEdit = new MessageInput(this);
-    inputGrid->addWidget(inputEdit, 0, 1, 2, 1);
+    inputGrid->addWidget(inputEdit, 0, 2, 2, 1);
     emojiBtn = new EmojiPushButton(qFromUtf8("😊"), this);
     emojiBtn->setFixedSize(24, 24);
     emojiBtn->setEmojiInset(3);
     qSetToolTip(emojiBtn, _("tooltips.emoji"));
-    inputGrid->addWidget(emojiBtn, 0, 2);
+    inputGrid->addWidget(emojiBtn, 0, 3);
     fileBtn = new EmojiPushButton(qFromUtf8("📎"), this);
     fileBtn->setFixedSize(24, 24);
     fileBtn->setEmojiInset(3);
     qSetToolTip(fileBtn, _("tooltips.file"));
-    inputGrid->addWidget(fileBtn, 1, 2);
+    inputGrid->addWidget(fileBtn, 1, 3);
     stickerBtn = new EmojiPushButton(qFromUtf8("🧸"), this);
     stickerBtn->setFixedSize(24, 24);
     stickerBtn->setEmojiInset(3);
     qSetToolTip(stickerBtn, _("tooltips.sticker"));
-    inputGrid->addWidget(stickerBtn, 0, 3);
+    inputGrid->addWidget(stickerBtn, 0, 4);
     quickReplyBtn = new EmojiPushButton(qFromUtf8("⚡"), this);
     quickReplyBtn->setFixedSize(24, 24);
     quickReplyBtn->setEmojiInset(3);
     qSetToolTip(quickReplyBtn, _("tooltips.quickreply"));
-    inputGrid->addWidget(quickReplyBtn, 1, 3);
+    inputGrid->addWidget(quickReplyBtn, 1, 4);
     historyBtn = new EmojiPushButton(qFromUtf8("🕘"), this);
     historyBtn->setFixedSize(24, 24);
     historyBtn->setEmojiInset(3);
     qSetToolTip(historyBtn, qFromUtf8("显示历史消息"));
-    inputGrid->addWidget(historyBtn, 0, 4);
+    inputGrid->addWidget(historyBtn, 0, 5);
     screenshotBtn = new EmojiPushButton(qFromUtf8("📷"), this);
     screenshotBtn->setFixedSize(24, 24);
     screenshotBtn->setEmojiInset(3);
     qSetToolTip(screenshotBtn, screenshotShortcutHint());
-    inputGrid->addWidget(screenshotBtn, 1, 4);
+    inputGrid->addWidget(screenshotBtn, 1, 5);
     sendBtn = new QPushButton(_("buttons.send"), this);
     QFontMetrics fm = inputEdit->fontMetrics();
     int twoLineH = fm.lineSpacing() * 2 + fm.lineSpacing() / 2 + 6;
     inputEdit->setMaximumHeight(twoLineH);
     sendBtn->setFixedSize(twoLineH, twoLineH);
     sendBtn->setAttribute(Qt::WA_LayoutUsesWidgetRect, true);
-    inputGrid->addWidget(sendBtn, 0, 5, 2, 1);
-    inputGrid->setColumnStretch(1, 1);
+    inputGrid->addWidget(sendBtn, 0, 6, 2, 1);
+    inputGrid->setColumnStretch(2, 1);
 
     inputGrid->setColumnMinimumWidth(1, 24);
     inputGrid->setColumnMinimumWidth(2, 24);
     inputGrid->setColumnMinimumWidth(3, 24);
     inputGrid->setColumnMinimumWidth(4, 24);
+    inputGrid->setColumnMinimumWidth(5, 24);
     inputGrid->setRowMinimumHeight(0, 24);
     inputGrid->setRowMinimumHeight(1, 24);
     inputGrid->setRowMinimumHeight(0, 24);
@@ -486,7 +511,7 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     m_sendEnBtn->setFixedWidth(60);
     m_sendEnBtn->setFixedHeight(twoLineH);
     m_sendEnBtn->setAttribute(Qt::WA_LayoutUsesWidgetRect, true);
-    inputGrid->addWidget(m_sendEnBtn, 0, 6, 2, 1);
+    inputGrid->addWidget(m_sendEnBtn, 0, 7, 2, 1);
 #endif
 
         inputEdit->setPlaceholderText(_("placeholders.type_message"));
@@ -505,6 +530,11 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     connect(screenshotBtn, SIGNAL(clicked()), this, SLOT(onScreenshotClicked()));
     connect(pasteBtn, SIGNAL(clicked()), this, SLOT(onPasteClicked()));
     connect(inputEdit, SIGNAL(filePasteRequested(const QString&, const QString&)), this, SLOT(onFilePaste(const QString&, const QString&)));
+    connect(recordAudioBtn, SIGNAL(clicked()), this, SLOT(onRecordAudioClicked()));
+    connect(recordScreenBtn, SIGNAL(clicked()), this, SLOT(onRecordScreenClicked()));
+    m_recorder = new MediaRecorder(0);
+    connect(m_recorder, SIGNAL(finished(const QString&, int)), this, SLOT(onRecordFinished(const QString&, int)));
+    m_recKind = MediaRecorder::kNone;
     
     mainLayout->addLayout(inputGrid);
 
@@ -899,6 +929,52 @@ void ChatWidget::onFileClicked() {
 void ChatWidget::onFilePaste(const QString& filePath, const QString& caption) {
     if (filePath.isEmpty()) { return; }
     emit fileSendRequested(filePath, caption);
+}
+
+ChatWidget::~ChatWidget() {
+    if (m_recorder) {
+        delete m_recorder;
+        m_recorder = 0;
+    }
+}
+
+void ChatWidget::onRecordAudioClicked() {
+    onRecordToggle(MediaRecorder::kAudio, recordAudioBtn, recordScreenBtn);
+}
+
+void ChatWidget::onRecordScreenClicked() {
+    onRecordToggle(MediaRecorder::kScreen, recordScreenBtn, recordAudioBtn);
+}
+
+void ChatWidget::onRecordToggle(int kind, EmojiPushButton* me, EmojiPushButton* other) {
+    if (m_recKind == kind) {
+        m_recorder->stop();
+        return;
+    }
+    if (m_recKind != MediaRecorder::kNone) { return; }
+    QString file;
+    if (!m_recorder->start(kind, &file)) {
+        QMessageBox::information(this, qFromUtf8("录制发送"), qFromUtf8("无法开始录制：缺少 ffmpeg 或无输入设备/DISPLAY"));
+        return;
+    }
+    m_recKind = kind;
+    me->setText(qFromUtf8("🔴"));
+    other->setEnabled(false);
+}
+
+void ChatWidget::onRecordFinished(const QString& file, int exitCode) {
+    EmojiPushButton* me = (m_recKind == MediaRecorder::kAudio) ? recordAudioBtn : recordScreenBtn;
+    EmojiPushButton* other = (m_recKind == MediaRecorder::kAudio) ? recordScreenBtn : recordAudioBtn;
+    int kind = m_recKind;
+    m_recKind = MediaRecorder::kNone;
+    me->setText(kind == MediaRecorder::kAudio ? qFromUtf8("🎙") : qFromUtf8("🎥"));
+    other->setEnabled(true);
+    QFileInfo fi(file);
+    if (exitCode != 0 || !fi.exists() || fi.size() <= 0) {
+        QMessageBox::information(this, qFromUtf8("录制发送"), _("record.empty_hint"));
+        return;
+    }
+    onFilePaste(file, QString());
 }
 
 void ChatWidget::onStickerClicked() {

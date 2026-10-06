@@ -61,9 +61,14 @@
         "sticker": "Stickers",
         "quickreply": "Quick reply",
         "paste": "Paste",
+        "record_audio": "Record audio",
+        "record_screen": "Record screen",
         "lang": "Language",
         "style": "Style",
         "dark": "Dark Mode"
+    },
+    "record": {
+        "empty_hint": "Recording is empty or failed, not sent"
     },
     "placeholders": {
         "add_friend": "Enter Tox ID to add friend",
