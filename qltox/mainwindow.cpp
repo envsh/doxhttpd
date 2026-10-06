@@ -605,6 +605,7 @@ MainWindow::MainWindow(QWidget* parent)
             this, SLOT(onTranslateForSendRequested(const QString&, const QString&)));
     connect(chatWidget, SIGNAL(sourceClicked(int)), this, SLOT(onSourceClicked(int)));
     connect(chatWidget, SIGNAL(retryClicked(int, const QString&, const QString&)), this, SLOT(onRetryClicked(int, const QString&, const QString&)));
+    connect(chatWidget, SIGNAL(downloadNeeded(int, const QString&)), this, SLOT(onDownloadNeeded(int, const QString&)));
     connect(chatWidget, SIGNAL(resendMessage(int)), this, SLOT(onResendMessage(int)));
     connect(chatWidget, SIGNAL(requestRedactMessage(int)), this, SLOT(onRequestRedactMessage(int)));
     connect(chatWidget, SIGNAL(openFullSizeImage(int, const QString&)),
@@ -3880,15 +3881,11 @@ void MainWindow::onTranslateForSendRequested(const QString& text, const QString&
     ToxAPI::translateForSend(std::string(qToUtf8(text)), std::string(qToUtf8(targetLang)));
 }
 
-void MainWindow::onRetryClicked(int msgIndex, const QString& mediaUrl, const QString& /*source*/) {
+void MainWindow::startMediaDownload(int msgIndex, const QString& mediaUrl) {
     if (msgIndex < 0 || msgIndex >= chatWidget->messageCount()) { return; }
     if (currentChatId == 0 || currentChatId < -10000) { return; }
-    // 远端直链（粘贴上传成功的 URL）不经本地缓存下载，直接交给系统浏览器
-    if (!mediaUrl.startsWith("mxc://")) {
-        qOpenUrl(mediaUrl);
-        return;
-    }
-
+    // 任何链接（mxc:// 媒体或 http(s) 直链）统一走 /api/media_download（服务器代理抓取），
+    // 本函数只负责取数、落缓存、绘缩略图，永不打开浏览器。
     std::string mxc = std::string(qToUtf8(mediaUrl).data());
     std::string typeStr = std::string(qToUtf8(currentChatType).data());
     int realIdx = -1;
@@ -3929,6 +3926,16 @@ void MainWindow::onRetryClicked(int msgIndex, const QString& mediaUrl, const QSt
     el.downloadSpeedBps = 0;
     ToxAPI::downloadMedia(currentChatId, std::string(qToUtf8(currentChatType).data()),
                           msgIndex, std::string(qToUtf8(mediaUrl).data()), el.fileSize);
+}
+
+void MainWindow::onRetryClicked(int msgIndex, const QString& mediaUrl, const QString& /*source*/) {
+    // 手动点击下载/重试按钮：与自动绘制同走统一下载入口（不在此打开浏览器）
+    startMediaDownload(msgIndex, mediaUrl);
+}
+
+void MainWindow::onDownloadNeeded(int msgIndex, const QString& mediaUrl) {
+    // 自动绘制入口：滚动可见即预取缩略图，统一走 download media api，永不弹浏览器
+    startMediaDownload(msgIndex, mediaUrl);
 }
 
 void MainWindow::onResendMessage(int msgIndex) {

@@ -3954,7 +3954,7 @@ void ChatView::paintEvent(QPaintEvent* event) {
                     || el.etype == ChatElement::Video)
                 && el.fileSize >= UnkSize && el.fileSize < 1048576)
             {
-                emit retryClicked((int)i, el.mediaUrl, qFromUtf8("autopaint"));
+                emit downloadNeeded((int)i, el.mediaUrl);
             }
 
             if (el.etype == ChatElement::Text

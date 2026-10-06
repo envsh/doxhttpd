@@ -76,6 +76,7 @@ protected slots:
     void onTranslateRequested(int msgIndex, const QString& text, const QString& targetLang);
     void onTranslateForSendRequested(const QString& text, const QString& targetLang);
     void onSourceClicked(int msgIndex);
+    void onDownloadNeeded(int msgIndex, const QString& mediaUrl);
     void onRetryClicked(int msgIndex, const QString& mediaUrl, const QString& source);
     void onResendMessage(int msgIndex);
     void onRequestRedactMessage(int msgIndex);
@@ -110,6 +111,8 @@ protected slots:
     void updateTrayBadge(int total);
     
 private:
+    // 统一媒体下载：mxc / http(s) 直链均走 /api/media_download（服务器代理抓取），不在此打开浏览器
+    void startMediaDownload(int msgIndex, const QString& mediaUrl);
     // 粘贴直传：localId 由调用方给出（首发=乐观插入尾元素，重试=目标元素）
     void handlePastebinMessage(int64_t localId, const QString& text);
     // 翻译直译（客户端直连翻译服务，不经后端）：参数语义同 handlePastebinMessage
