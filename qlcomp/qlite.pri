@@ -17,7 +17,7 @@ QTCOMP_CPP = $$PWD/limelog.cpp $$PWD/appsetup.cpp $$PWD/compat34.cpp $$PWD/trans
 			$$PWD/floatingpill.cpp \
 			$$PWD/generic_slot.cpp \
 			$$PWD/md5.c $$PWD/identicon.cpp \
-			$$PWD/qcrc64.cpp \
+			$$PWD/aes.c $$PWD/qcrc64.cpp \
 			$$PWD/hjson_wrap.cpp \
 			$$PWD/desktoplyrics.cpp \
 			$$PWD/assertf.cpp \
@@ -38,7 +38,7 @@ QTCOMP_HDR = $$PWD/limelog.h $$PWD/appsetup.h $$PWD/appsetup_c.h $$PWD/translato
 			$$PWD/jsonview.h \
 			$$PWD/floatingpill.h \
 			$$PWD/md5.h $$PWD/identicon.h \
-			$$PWD/qcrc64.h \
+			$$PWD/aes.h $$PWD/qcrc64.h \
 			$$PWD/hjson_wrap.h \
 			$$PWD/desktoplyrics.h \
 			$$PWD/assertf.h \
