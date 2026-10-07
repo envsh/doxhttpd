@@ -700,7 +700,7 @@ bool init_channel_db(SqliteDb& db) {
         bool hasRemark = false;
         auto stmt = db.prepare("PRAGMA table_info(peers)");
         while (stmt.isPrepared() && stmt.stepRow()) {
-            if (stmt.columnText(1) == "remark_name") { hasRemark = true; }
+            if (QString(stmt.columnText(1)) == "remark_name") { hasRemark = true; }
         }
         if (!hasRemark) {
             ok = ok && db.exec("ALTER TABLE peers ADD COLUMN remark_name TEXT DEFAULT ''");
