@@ -681,6 +681,7 @@ bool init_channel_db(SqliteDb& db) {
         "  public_key    TEXT DEFAULT '',"
         "  name          TEXT DEFAULT '',"
         "  nickname      TEXT DEFAULT '',"
+        "  remark_name   TEXT DEFAULT '',"
         "  avatar_url    TEXT DEFAULT '',"
         "  status_text   TEXT DEFAULT '',"
         "  status_str    TEXT DEFAULT '',"
@@ -694,6 +695,17 @@ bool init_channel_db(SqliteDb& db) {
         "  updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
         "  PRIMARY KEY (chanid, peer_number)"
         ")");
+    // peers 旧库升级：无 remark_name 列时补加
+    {
+        bool hasRemark = false;
+        auto stmt = db.prepare("PRAGMA table_info(peers)");
+        while (stmt.isPrepared() && stmt.stepRow()) {
+            if (stmt.columnText(1) == "remark_name") { hasRemark = true; }
+        }
+        if (!hasRemark) {
+            ok = ok && db.exec("ALTER TABLE peers ADD COLUMN remark_name TEXT DEFAULT ''");
+        }
+    }
     // 联系人 tags 规范化子表（镜像 message_tags，独立于 channels 原表）
     ok = ok && db.exec(
         "CREATE TABLE IF NOT EXISTS channel_tags ("
