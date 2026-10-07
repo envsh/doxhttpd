@@ -398,6 +398,12 @@ static QString timenowhm() {
 #endif
 }
 
+// 完整 "yyyy-MM-dd hh:mm:ss" → 联系人行最后消息时间 "hh:mm"；异常回退当前时刻
+static QString contactListTimeStr(const QString& fullTime) {
+    if (fullTime.length() >= 16) { return fullTime.mid(11, 5); }
+    return timenowhm();
+}
+
 // 读取保存的语言设置
 static QString loadSavedLanguage() {
     QString home = qGetHomePath();
@@ -1168,8 +1174,9 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 ack.sendState = ChatElement::SendSent;   // 必须显式置位，默认 SendSending 会一直转圈
                 m_chatbuf.append(evt->chatId, typeStr, ack);
                 db_writeMessage(evt->chatId, typeStr, ack);
-                contactListWidget->updateContactLastMessage(evt->chatId, typeQ, url, timenowhm());
-                db_writeLastMessage(evt->chatId, typeQ, url, timenowhm());
+                QString ackTimeStr = contactListTimeStr(ack.time);
+                contactListWidget->updateContactLastMessage(evt->chatId, typeQ, url, ackTimeStr);
+                db_writeLastMessage(evt->chatId, typeQ, url, ackTimeStr);
                 const QString okText = qFromUtf8("已上传 · ") + qFromUtf8(evt->providerUsed.c_str());
                 ToastWidget::show(chatWidget, okText, 2500);
                 stbarShowStatusMessage(okText, SticonInfo, 2500);
@@ -1246,8 +1253,9 @@ void MainWindow::customEvent(CustomEventBase* event) {
             ack.sendState = ChatElement::SendSent;  // 显式置位
             m_chatbuf.append(evt->chatId, typeStr, ack);
             db_writeMessage(evt->chatId, typeStr, ack);
-            contactListWidget->updateContactLastMessage(evt->chatId, typeQ, ack.messageText, timenowhm());
-            db_writeLastMessage(evt->chatId, typeQ, ack.messageText, timenowhm());
+            QString ackTimeStr = contactListTimeStr(ack.time);
+            contactListWidget->updateContactLastMessage(evt->chatId, typeQ, ack.messageText, ackTimeStr);
+            db_writeLastMessage(evt->chatId, typeQ, ack.messageText, ackTimeStr);
             ToastWidget::show(chatWidget, qFromUtf8("AI 回复已送达"), 2000);
             stbarShowStatusMessage(qFromUtf8("AI 回复已送达"), SticonInfo, 2000);
             sticonShowStatusMessage(qFromUtf8("AI 回复已送达"), SticonInfo, 2000);
@@ -1304,8 +1312,9 @@ void MainWindow::customEvent(CustomEventBase* event) {
             ack.sendState = ChatElement::SendSent;   // 必须显式置位，默认 SendSending 会一直转圈
             m_chatbuf.append(evt->chatId, typeStr, ack);
             db_writeMessage(evt->chatId, typeStr, ack);
-            contactListWidget->updateContactLastMessage(evt->chatId, typeQ, ack.messageText, timenowhm());
-            db_writeLastMessage(evt->chatId, typeQ, ack.messageText, timenowhm());
+            QString ackTimeStr = contactListTimeStr(ack.time);
+            contactListWidget->updateContactLastMessage(evt->chatId, typeQ, ack.messageText, ackTimeStr);
+            db_writeLastMessage(evt->chatId, typeQ, ack.messageText, ackTimeStr);
             const QString okText = qFromUtf8("翻译完成 · ") + qFromUtf8(evt->engineUsed.c_str());
             ToastWidget::show(chatWidget, okText, 2500);
             stbarShowStatusMessage(okText, SticonInfo, 2500);
@@ -2295,6 +2304,7 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
     int64_t pasteLocalId = 0;       // 块外要用（append 时由 ChatHistory 分配）
     int64_t translateLocalId = 0;   // 同上：翻译启动需要 localId 定位元素
     int64_t aigptLocalId = 0;       // 同上：AI GPT Chat 启动需要 localId 定位元素
+    QString selfTimeStr = timenowhm();
     {
         std::string typeStr = std::string(qToUtf8(currentChatType).data());
         ChatElement el;
@@ -2303,6 +2313,7 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
         el.senderName = "Me";
         el.peerNumber = -1;
         el.time = getCurrentTime();
+        selfTimeStr = contactListTimeStr(el.time);
         el.sendCtx = context;   // 失败重试据此还原可见性/CW/引用（仅内存态）
         m_chatbuf.append(currentChatId, typeStr, el);
         db_writeMessage(currentChatId, typeStr, el);
@@ -2333,8 +2344,8 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
     if (type == kAichatType) {
         handleAigptChatMessage(aigptLocalId, message);
     }
-    contactListWidget->updateContactLastMessage(currentChatId, currentChatType, message, timenowhm());
-    db_writeLastMessage(currentChatId, currentChatType, message, timenowhm());
+    contactListWidget->updateContactLastMessage(currentChatId, currentChatType, message, selfTimeStr);
+    db_writeLastMessage(currentChatId, currentChatType, message, selfTimeStr);
 }
 
 void MainWindow::handleEvents(const EventList& events) {
@@ -2361,7 +2372,7 @@ void MainWindow::handleEvents(const EventList& events) {
                         auto fit = peerInfoMap.find("friend_" + std::to_string(friendId));
                     }
                     m_chatbuf.append(friendId, "friend", el);
-                    QString friendTimeStr = timenowhm();
+                    QString friendTimeStr = contactListTimeStr(el.time);
                     bool friendNotCurrent = !(friendId == currentChatId && currentChatType == "friend");
                     db_writeMessage(friendId, "friend", el,
                         [friendId, message, friendTimeStr, friendNotCurrent](int64_t rowid) {
@@ -2373,7 +2384,7 @@ void MainWindow::handleEvents(const EventList& events) {
                     if (friendNotCurrent) {
                         contactListWidget->incrementUnread(friendId, "friend");
                     }
-                    contactListWidget->updateContactLastMessage(friendId, "friend", message, timenowhm());
+                    contactListWidget->updateContactLastMessage(friendId, "friend", message, friendTimeStr);
                     if (!qIsAppActive())
                         playNotificationSound();
                 }
@@ -2464,6 +2475,7 @@ void MainWindow::handleEvents(const EventList& events) {
                     }
 
                     bool confNotCurrent = !(confNumber == currentChatId && currentChatType == "conference");
+                    QString confTimeStr = timenowhm();
 
                     {
                         ChatElement el;
@@ -2479,7 +2491,7 @@ void MainWindow::handleEvents(const EventList& events) {
                             el.senderName = qFromUtf8(cJSON_GetStringValue(peerNameItem));
                         }
                         m_chatbuf.append(confNumber, "conference", el);
-                        QString confTimeStr = timenowhm();
+                        confTimeStr = contactListTimeStr(el.time);
                         db_writeMessage(confNumber, "conference", el,
                             [confNumber, message, confTimeStr, confNotCurrent](int64_t rowid) {
                                 db_writeLastMessage(confNumber, "conference", message, confTimeStr, rowid);
@@ -2491,7 +2503,7 @@ void MainWindow::handleEvents(const EventList& events) {
                     if (confNotCurrent) {
                         contactListWidget->incrementUnread(confNumber, "conference");
                     }
-                    contactListWidget->updateContactLastMessage(confNumber, "conference", message, timenowhm());
+                    contactListWidget->updateContactLastMessage(confNumber, "conference", message, confTimeStr);
                     if (!qIsAppActive())
                         playNotificationSound();
                 } else {
@@ -2578,6 +2590,7 @@ void MainWindow::handleEvents(const EventList& events) {
                     }
 
                     bool groupNotCurrent = !(groupNumber == currentChatId && currentChatType == "group");
+                    QString groupTimeStr = timenowhm();
 
                     {
                         ChatElement el;
@@ -2594,7 +2607,7 @@ void MainWindow::handleEvents(const EventList& events) {
                             el.senderName = qFromUtf8(cJSON_GetStringValue(peerNameItem));
                         }
                         m_chatbuf.append(groupNumber, "group", el);
-                        QString groupTimeStr = timenowhm();
+                        groupTimeStr = contactListTimeStr(el.time);
                         db_writeMessage(groupNumber, "group", el,
                             [groupNumber, message, groupTimeStr, groupNotCurrent](int64_t rowid) {
                                 db_writeLastMessage(groupNumber, "group", message, groupTimeStr, rowid);
@@ -2606,7 +2619,7 @@ void MainWindow::handleEvents(const EventList& events) {
                     if (groupNotCurrent) {
                         contactListWidget->incrementUnread(groupNumber, "group");
                     }
-                    contactListWidget->updateContactLastMessage(groupNumber, "group", message, timenowhm());
+                    contactListWidget->updateContactLastMessage(groupNumber, "group", message, groupTimeStr);
                     if (!qIsAppActive())
                         playNotificationSound();
                 }
@@ -2928,9 +2941,10 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
                 
                     qWarning("Cache PUSH to %s %d: sender=%s",
                              chatType.c_str(), chatId, qToUtf8(msg.senderName).data());
+                    QString lastTimeStr = contactListTimeStr(msg.time);
                     contactListWidget->updateContactLastMessage(
-                        chatId, qFromUtf8(chatType), msg.messageText, timenowhm());
-                    db_writeLastMessage(chatId, qFromUtf8(chatType), msg.messageText, timenowhm());
+                        chatId, qFromUtf8(chatType), msg.messageText, lastTimeStr);
+                    db_writeLastMessage(chatId, qFromUtf8(chatType), msg.messageText, lastTimeStr);
                     m_chatbuf.append(chatId, chatType, msg);
                     db_writeMessage(chatId, chatType, msg);
                     if (currentChatId == chatId && currentChatType == qFromUtf8(chatType)) {
@@ -2995,7 +3009,7 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
                 qWarning("Cache PUSH to reddit %d: sender=%s",
                          VIRTUAL_REDDIT_ID, qToUtf8(msg.senderName).data());
                 m_chatbuf.append(VIRTUAL_REDDIT_ID, kTopicType, msg);
-                QString redditTimeStr = timenowhm();
+                QString redditTimeStr = contactListTimeStr(msg.time);
                 QString redditMsgText = msg.messageText;
                 bool redditNotCurrent = !(currentChatId == VIRTUAL_REDDIT_ID && currentChatType == kTopicType);
                 db_writeMessage(VIRTUAL_REDDIT_ID, kTopicType, msg,
@@ -3006,7 +3020,7 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
                         }
                     });
                 contactListWidget->updateContactLastMessage(
-                    VIRTUAL_REDDIT_ID, kTopicType, msg.messageText, timenowhm());
+                    VIRTUAL_REDDIT_ID, kTopicType, msg.messageText, contactListTimeStr(msg.time));
                 if (redditNotCurrent) {
                     contactListWidget->incrementUnread(VIRTUAL_REDDIT_ID, kTopicType);
                 }
@@ -3025,7 +3039,7 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
                 qWarning("Cache PUSH to unknown %d: type=%s, handled=%d, sender=%s",
                          VIRTUAL_UNKNOWN_ID, e.type.c_str(), pr.handled, qToUtf8(msg.senderName).data());
                 m_chatbuf.append(VIRTUAL_UNKNOWN_ID, kUnknownType, msg);
-                QString unkTimeStr = timenowhm();
+                QString unkTimeStr = contactListTimeStr(msg.time);
                 QString unkMsgText = msg.messageText;
                 bool unkNotCurrent = !(currentChatId == VIRTUAL_UNKNOWN_ID && currentChatType == kUnknownType);
                 db_writeMessage(VIRTUAL_UNKNOWN_ID, kUnknownType, msg,
@@ -3036,7 +3050,7 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
                         }
                     });
                 contactListWidget->updateContactLastMessage(
-                    VIRTUAL_UNKNOWN_ID, kUnknownType, msg.messageText, timenowhm());
+                    VIRTUAL_UNKNOWN_ID, kUnknownType, msg.messageText, contactListTimeStr(msg.time));
                 if (unkNotCurrent) {
                     contactListWidget->incrementUnread(VIRTUAL_UNKNOWN_ID, kUnknownType);
                 }

@@ -1046,6 +1046,74 @@ static bool tryParseToutiaoHotlist(const std::string& rawStr, ParseResult& ret) 
     return true;
 }
 
+// ── 知乎 API URL → 浏览器 URL ──
+// api.zhihu.com 的 REST 接口 URL → 浏览器可访问 URL。
+// 规则表覆盖：问题/回答/用户(members|people)/话题/收藏夹/想法(pin)/
+// 专栏文章(articles|p)/视频(zvideos|videos)/live/专栏(columns|zhuanlan)，
+// 兼容 www.zhihu.com/api/v4/... 形式与 "//zhihu" 协议相对地址。
+// 非 zhihu 或无法识别：原样返回；query/fragment 一律丢弃。
+
+struct ZhUrlRule { const char* apiPrefix; const char* webBase; };
+static const ZhUrlRule kZhRules[] = {
+    { "/questions/",  "https://www.zhihu.com/question/"  },
+    { "/question/",   "https://www.zhihu.com/question/"  },
+    { "/answers/",    "https://www.zhihu.com/answer/"    },
+    { "/members/",    "https://www.zhihu.com/people/"    },
+    { "/people/",     "https://www.zhihu.com/people/"    },
+    { "/topics/",     "https://www.zhihu.com/topic/"     },
+    { "/collections/","https://www.zhihu.com/collection/"},
+    { "/pins/",       "https://www.zhihu.com/pin/"       },
+    { "/articles/",   "https://zhuanlan.zhihu.com/p/"    },
+    { "/p/",          "https://zhuanlan.zhihu.com/p/"    },
+    { "/zvideos/",    "https://www.zhihu.com/zvideo/"    },
+    { "/videos/",     "https://www.zhihu.com/zvideo/"    },
+    { "/lives/",      "https://www.zhihu.com/lives/"     },
+    { "/columns/",    "https://zhuanlan.zhihu.com/"      },
+    { "/zhuanlan/",   "https://zhuanlan.zhihu.com/"      },
+};
+
+// 取路径首段 id/slug（截断其余子路径，避免把 /answers 之类的子资源凑进来）
+static std::string zhUrlFirstSegment(const std::string& rest) {
+    std::size_t e = rest.find('/');
+    std::string seg = (e == std::string::npos) ? rest : rest.substr(0, e);
+    return seg;
+}
+
+// 规则表转换：apiPath 已剥掉 query，命中返回浏览器 URL，未命中返回空串
+static std::string zhUrlApplyRules(const std::string& path) {
+    for (size_t i = 0; i < sizeof(kZhRules) / sizeof(kZhRules[0]); ++i) {
+        std::string prefix = kZhRules[i].apiPrefix;
+        if (path.rfind(prefix, 0) != 0) { continue; }
+        std::string seg = zhUrlFirstSegment(path.substr(prefix.size()));
+        if (seg.empty()) { continue; }
+        return std::string(kZhRules[i].webBase) + seg;
+    }
+    return std::string();
+}
+
+static std::string zhihuBrowserUrl(const std::string& url) {
+    std::string s = url;
+    if (s.rfind("//", 0) == 0) { s = "https:" + s; }
+    std::size_t sp = s.find("://");
+    std::string rest = (sp == std::string::npos) ? s : s.substr(sp + 3);
+    std::size_t slash = rest.find('/');
+    if (slash == std::string::npos) { return s; }
+    std::string host = rest.substr(0, slash);
+    std::string path = rest.substr(slash);
+    std::size_t q = path.find_first_of("?#");
+    if (q != std::string::npos) { path = path.substr(0, q); }
+
+    if (host != "api.zhihu.com" && host != "www.zhihu.com") { return s; }
+    if (host == "www.zhihu.com") {
+        const std::string kApiV4 = "/api/v4";
+        if (path.rfind(kApiV4, 0) != 0) { return s; }
+        path = path.substr(kApiV4.size());
+    }
+    std::string hit = zhUrlApplyRules(path);
+    if (!hit.empty()) { return hit; }
+    return "https://www.zhihu.com" + path;   // 兜底：换到浏览器宿主，至少不再返回 API JSON
+}
+
 // ── 知乎通知订阅流解析 ──
 // 识别: Value.data 为 zhihu_collection 收藏动态 JSON（kind==zhihu_collection + title/url 非空）
 //   纯文本类型（无 image），消息 = 标题 + 链接 + 全文摘录 + 元信息
@@ -1076,7 +1144,7 @@ static bool tryParseZhihuNotify(const std::string& rawStr, ParseResult& ret) {
     cd.isConnected = true;
     ret.contacts.push_back(cd);
 
-    std::string message = title + "\n" + url;
+    std::string message = title + "\n" + zhihuBrowserUrl(url);
     if (!excerpt.empty()) {
         message += "\n" + excerpt;
     }
@@ -1205,7 +1273,7 @@ static bool tryParseZhihuHotnews(const std::string& rawStr, ParseResult& ret) {
 
     HistoryMessage hm;
     hm.created_at    = feedTime;
-    hm.message       = title + "\n" + url + (meta.empty() ? "" : "\n" + meta);
+    hm.message       = title + "\n" + zhihuBrowserUrl(url) + (meta.empty() ? "" : "\n" + meta);
     hm.sender_pubkey = "fedone";
     hm.sender_number = 0;
     hm.direction     = "received";
