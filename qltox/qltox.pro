@@ -18,7 +18,7 @@ QMAKE_MACOSX_DEPLOYMENT_TARGET = 11.7
 SOURCES = main.cpp mainwindow.cpp storage.cpp restapi.cpp eventpoller.cpp pasteuploader.cpp \
              chatwidget.cpp chatview.cpp chatbuffer.cpp contactlist.cpp selfinfo.cpp \
              recorder.cpp \
-             cJSON.c editinfodialog.cpp conferenceinvitedialog.cpp groupinvitedialog.cpp \
+             ../qlcomp/cJSON.c editinfodialog.cpp conferenceinvitedialog.cpp groupinvitedialog.cpp \
              friendinfodialog.cpp memberlistdialog.cpp logindialog.cpp \
              imageinputconfirm.cpp messageinput.cpp messageattribbar.cpp sound.c loadingbar.cpp \
               unknownparser.cpp photoviewer.cpp avatar_manager.cpp \
@@ -36,7 +36,7 @@ translation_cache.cpp \
                  searchlistview.cpp \
                  sticker_db.cpp stickerpicker.cpp stickermanager.cpp \
                  seen_unknown.cpp \
-                 ./vendor/barrust_bloom/bloom.c \
+                 ../3rdparty/barrust_bloom/bloom.c \
                  ../etapps/plugin_loader.cpp ../etapps/plugin_manager_dialog.cpp
 
 HEADERS = mainwindow.h storage.h restapi.h eventpoller.h pasteuploader.h \
@@ -60,8 +60,8 @@ HEADERS = mainwindow.h storage.h restapi.h eventpoller.h pasteuploader.h \
                  searchlistview.h \
                  sticker_db.h stickerpicker.h stickermanager.h \
                  seen_unknown.h \
-                 ./vendor/bloom/bloom_filter.hpp \
-                 ./vendor/barrust_bloom/bloom.h \
+                 ../3rdparty/bloom/bloom_filter.hpp \
+                 ../3rdparty/barrust_bloom/bloom.h \
                  ../etapps/plugin_loader.h ../etapps/plugin_manager_dialog.h
 
 # FORMS += MediumMsgEditor.ui — 已弃用。Qt3/Qt4 uic XML schema 不兼容，
@@ -72,7 +72,7 @@ include(../mdeditor/mdeditor.pri)
 # 使 qltox/ 中的 #include "compat34.h" 能找到 qlcomp/
 INCLUDEPATH += ../qlcomp
 INCLUDEPATH += ../etapps
-INCLUDEPATH += ./vendor/bloom ./vendor/barrust_bloom
+INCLUDEPATH += ../3rdparty/bloom ../3rdparty/barrust_bloom
 macx {
     INCLUDEPATH += /opt/vcpkg/installed/x64-osx-dynamic/include
     LIBS += -L/opt/vcpkg/installed/x64-osx-dynamic/lib -Wl,-rpath,/opt/vcpkg/installed/x64-osx-dynamic/lib -lhjson
