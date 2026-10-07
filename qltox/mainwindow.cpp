@@ -697,6 +697,29 @@ MainWindow::MainWindow(QWidget* parent)
         addSeed(VIRTUAL_MOBPUSH_ID, kMobPushName, kMobPushType);
         addSeed(VIRTUAL_SNAP_ID, kSnapName, kSnapType);
         contactListWidget->setContacts(list);
+
+    // 虚拟联系人（pastebin/aigptbot/fanyibot）落库：
+    // messages.chanid 外键引用 channels，先有行消息插入才不会失败
+    {
+        struct VirtualChanSeed { int id; const char* name; const char* type; };
+        static const VirtualChanSeed kVirtualChannels[] = {
+            { VIRTUAL_AICHAT_ID,    kAichatName,    kAichatType    },
+            { VIRTUAL_PASTEBIN_ID,  kPastebinName,  kPastebinType  },
+            { VIRTUAL_TRANSLATE_ID, kTranslateName, kTranslateType },
+        };
+        auto* cdb = Storage::instance().channelDb();
+        if (cdb) {
+            for (size_t i = 0; i < sizeof(kVirtualChannels)/sizeof(kVirtualChannels[0]); ++i) {
+                ChannelRow row;
+                row.chanid = std::string(kVirtualChannels[i].type) + "_" + std::to_string(kVirtualChannels[i].id);
+                row.proto_type = kVirtualChannels[i].type;
+                row.name = kVirtualChannels[i].name;
+                row.status = "online";
+                row.is_connected = 0;
+                cdb->update_contact_channel(row);
+            }
+        }
+    }
     }
     
     // 异步加载初始数据
