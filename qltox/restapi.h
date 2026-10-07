@@ -146,6 +146,9 @@ private:
         std::string str2;
         int n1 = 0;
         int step = 0;
+        // events 轮询链世代：startPollEvent/stopPollEvent 自增；
+        // 每条轮询记录发起时的世代，过期世代的完成回调不再派发/重挂
+        uint64_t generation = 0;
         ApiCtx() {}
         ApiCtx(int t) : type(t) {}
         ApiCtx(int t, int i) : type(t), id(i) {}
@@ -177,13 +180,14 @@ private:
 
     static QObject* s_target;
     static std::string s_baseUrl;
-    static uint64_t s_lastEventId;
+    static std::atomic<uint64_t> s_lastEventId;
     static std::atomic<uint64_t> s_pollTotal;
     static std::atomic<uint64_t> s_pollTotalElapsedMs;
     static std::atomic<uint64_t> s_pollOk;
     static std::atomic<uint64_t> s_pollFail;
     static int s_sendMsgSeq;
-    static bool s_pollRunning;
+    static std::atomic<bool> s_pollRunning;
+    static std::atomic<uint64_t> s_pollGeneration;   // events 轮询链世代
     static bool s_loadingAllData;
     static bool s_reloadPending;
 };

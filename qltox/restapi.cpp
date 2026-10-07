@@ -13,13 +13,14 @@
 // ── Static members ──
 QObject* ToxAPI::s_target = nullptr;
 std::string ToxAPI::s_baseUrl = "http://localhost:8181";
-uint64_t ToxAPI::s_lastEventId = 0;
+std::atomic<uint64_t> ToxAPI::s_lastEventId{0};
 std::atomic<uint64_t> ToxAPI::s_pollTotal{0};
 std::atomic<uint64_t> ToxAPI::s_pollTotalElapsedMs{0};
 std::atomic<uint64_t> ToxAPI::s_pollOk{0};
 std::atomic<uint64_t> ToxAPI::s_pollFail{0};
 int ToxAPI::s_sendMsgSeq = 100;
-bool ToxAPI::s_pollRunning = false;
+std::atomic<bool> ToxAPI::s_pollRunning{false};
+std::atomic<uint64_t> ToxAPI::s_pollGeneration{0};
 bool ToxAPI::s_loadingAllData = false;
 bool ToxAPI::s_reloadPending = false;
 static bool s_useNdjson = true; // true=auto s/ Content-Type 分派; false=强制旧 JSON 数组
@@ -228,7 +229,7 @@ void ToxAPI::setEventTarget(QObject* target) { s_target = target; }
 void ToxAPI::setBaseUrl(const std::string& url) { s_baseUrl = url; }
 std::string ToxAPI::baseUrl() { return s_baseUrl; }
 
-void ToxAPI::resetLastEventId() { s_lastEventId = 0; }
+void ToxAPI::resetLastEventId() { s_lastEventId.store(0); }
 
 ToxAPI::PollStats ToxAPI::pollStats() {
     PollStats s;
@@ -240,13 +241,17 @@ ToxAPI::PollStats ToxAPI::pollStats() {
 }
 
 void ToxAPI::startPollEvent() {
-    s_pollRunning = true;
-    s_lastEventId = 0;
+    // 先换代再开跑：上一代在途轮询的完成回调会被 generation 守卫丢弃，
+    // 不会与新链并存（杜绝账号切换竞态产生的并发轮询链）
+    s_pollGeneration.fetch_add(1);
+    s_lastEventId.store(0);
+    s_pollRunning.store(true);
     pollEvents();
 }
 
 void ToxAPI::stopPollEvent() {
-    s_pollRunning = false;
+    s_pollRunning.store(false);
+    s_pollGeneration.fetch_add(1);
 }
 
 void ToxAPI::pollEvents() {
@@ -254,14 +259,19 @@ void ToxAPI::pollEvents() {
 }
 
 // events 长轮询调度：delayMs>0 走 EventPoller 非阻塞延迟队列（不阻塞 pump 线程，
-// 无 qSleepMs）；retry 时用当前 s_lastEventId 重新构造 URL
+// 无 qSleepMs）；retry 时用当前 s_lastEventId 重新构造 URL。
+// 这是 events 请求参数的唯一出处（timeout/stall/低速/建连超时），成功续拉也必须走这里，
+// 避免重复构造丢参数；同时记录当前 generation，便于守卫丢弃陈旧链。
 void ToxAPI::schedulePoll(int delayMs) {
-    HttpRequest req(buildUrl("/api/events?after=" + std::to_string(s_lastEventId) + "&" + kEventTopic),
+    HttpRequest req(buildUrl("/api/events?after=" + std::to_string(s_lastEventId.load()) + "&" + kEventTopic),
                     "GET", "", 35, {{"Accept", "application/x-ndjson"}}, kPollStallSec);
     req.lowSpeedLimit = 999;   // <999B/s 持续 45s → curl 原生中止
     req.lowSpeedTime  = 45;
+    req.connectTimeoutSec = 10;   // 切网/坏 IP 后 10s 内建连失败，快速进入下一轮
     req.delayMs = delayMs;
-    EventPoller::addRequest(req, onHttpDone, new ApiCtx(ApiPollEvents));
+    auto* ctx = new ApiCtx(ApiPollEvents);
+    ctx->generation = s_pollGeneration.load();
+    EventPoller::addRequest(req, onHttpDone, ctx);
 }
 
 void ToxAPI::loadAllData() {
@@ -929,23 +939,33 @@ void ToxAPI::dispatchResult(ApiCtx* ctx, const HttpResponse& resp) {
     switch (type) {
 
     case ApiPollEvents: {
+        // generation 守卫：stopPollEvent 换代后，上一代在途轮询的完成回调
+        // 不派发、不重挂、不计统计（避免账号切换竞态产生并发轮询链）
+        if (ctx->generation != s_pollGeneration.load()) {
+            ALOG_WARN("Event poll: drop stale generation",
+                      "ctx=" + std::to_string(ctx->generation),
+                      "cur=" + std::to_string(s_pollGeneration.load()));
+            break;
+        }
+
         s_pollTotal++;
         s_pollTotalElapsedMs += resp.elapsedMs;
+        uint64_t lastId = s_lastEventId.load();
         bool restartDetected = false;
         auto it = resp.headers.find("x-server-next-id");
         if (it != resp.headers.end()) {
             char* endptr = nullptr;
             uint64_t serverNextId = std::strtoull(it->second.c_str(), &endptr, 10);
-            if (endptr != it->second.c_str() && serverNextId <= s_lastEventId) {
+            if (endptr != it->second.c_str() && serverNextId <= lastId) {
                 restartDetected = true;
-                s_lastEventId = 0;
+                lastId = 0;
             }
         }
 
         if (resp.httpCode == 0 && !resp.curlErrStr.empty()) {
             s_pollFail++;
             ALOG_WARN("Event poll error:", resp.curlErrStr);
-            if (s_pollRunning) {
+            if (s_pollRunning.load()) {
                 schedulePoll(2000);
             }
             break;
@@ -954,7 +974,7 @@ void ToxAPI::dispatchResult(ApiCtx* ctx, const HttpResponse& resp) {
         if (resp.httpCode != 200) {
             s_pollFail++;
             ALOG_WARN("!! event poll non-200:", resp.httpCode);
-            if (s_pollRunning) {
+            if (s_pollRunning.load()) {
                 schedulePoll(2000);
             }
             break;
@@ -972,22 +992,22 @@ void ToxAPI::dispatchResult(ApiCtx* ctx, const HttpResponse& resp) {
         }
 
         if (useNdjson) {
-            int parseErrors = parseEventsNdjson(resp.body, s_lastEventId, events);
+            int parseErrors = parseEventsNdjson(resp.body, lastId, events);
             if (parseErrors > 0) {
                 ALOG_WARN("parseEventsNdjson:", parseErrors, "/", events.size() + parseErrors, "lines failed");
             }
         } else {
-            if (!parseEventsJson(resp.body, s_lastEventId, events))
+            if (!parseEventsJson(resp.body, lastId, events))
                 ALOG_WARN("parseEventsJson: parse failed");
         }
+        s_lastEventId.store(lastId);
 
         QApplication::postEvent(s_target, new EventListEvent(events));
 
-        if (s_pollRunning) {
-            EventPoller::addRequest(
-                {buildUrl("/api/events?after=" + std::to_string(s_lastEventId) + "&" + kEventTopic),
-                 "GET", "", 35, {{"Accept", "application/x-ndjson"}}},
-                onHttpDone, new ApiCtx(ApiPollEvents));
+        // 成功续拉走唯一入口：与初始/重试同参（stallSec、低速、建连超时），
+        // 且继承当前 generation —— 不再手搓请求导致丢参数/丢世代
+        if (s_pollRunning.load()) {
+            schedulePoll(0);
         }
         break;
     }

@@ -374,6 +374,7 @@ struct HttpRequest {
     int stallSec;      // 无进展停滞超时（秒）；0=禁用；默认 kDefaultStallSec；看门狗 boottime
     long lowSpeedLimit = 0;   // curl 原生低速中止（B/s）；0=禁用
     long lowSpeedTime  = 0;   // 低于 lowSpeedLimit 持续 lowSpeedTime 秒 → CURLE_OPERATION_TIMEDOUT
+    int connectTimeoutSec = 0;   // 建连阶段超时（秒）；0=用系统默认；切网后重试快速失败
     int delayMs = 0;          // 延迟调度毫秒；>0 时 delayMs 后才真正发出（非阻塞，pump 照常运转）
     bool followRedirects = false;   // 是否跟随 3xx（默认关，保持既有请求行为不变）
     std::map<std::string, std::string> extraHeaders;

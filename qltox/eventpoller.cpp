@@ -169,6 +169,9 @@ CURL* EventPoller::buildHandle(const HttpRequest& req,
     curl_easy_setopt(easy, CURLOPT_HEADERFUNCTION, headerCb);
     curl_easy_setopt(easy, CURLOPT_HEADERDATA, &ctx->headers);
     curl_easy_setopt(easy, CURLOPT_TIMEOUT, (long)req.timeoutSec);
+    if (req.connectTimeoutSec > 0) {
+        curl_easy_setopt(easy, CURLOPT_CONNECTTIMEOUT, (long)req.connectTimeoutSec);
+    }
     curl_easy_setopt(easy, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(easy, CURLOPT_TCP_KEEPALIVE, 1L);
     curl_easy_setopt(easy, CURLOPT_FORBID_REUSE, 1L);
