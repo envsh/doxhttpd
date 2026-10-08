@@ -30,8 +30,39 @@
 
 注：**浏览器信息与凭据须同源**——grok 的 Cloudflare `cf_clearance`/`__cf_bm` 绑定 UA 与 IP，
 因此 Copy as cURL 时应连带抓 `user-agent:` / `sec-ch-ua:` 的值，填到 `kWebCredUA`（或保持其空值、
-用内置默认 Chrome/126，此时抓 cookie 的浏览器须同为该 UA）；grok 另抓 `x-statsig-id` 头/挑战常量
-（见 §3.3/§6.2）。
+  用内置默认 Chrome/126，此时抓 cookie 的浏览器须同为该 UA）；grok 另抓 `x-statsig-id` 头/挑战常量
+  （见 §3.3/§6.2）。
+
+### 3.0 凭据配置管理（webcreds 加密存储，阶段一落地）
+
+凭据可走**加密侧车**，不必全量改源码重编译；侧车命中优先于源码常量。
+
+- 侧车：`~/.config/qltox/webcreds.enc`（0600，JSON）；令牌：`~/.config/qltox/webcreds.key`
+  （0600，hex 的 256-bit 随机密钥）。
+- 字段格式：裸字符串 = 明文；信封对象 `{"m":"token"|"pass","s","i","iv","ct","mac"}` = 加密。
+  `token`（机器令牌，零交互解密）与 `pass`（口令加密，需口令）可同文件混用，逐字段独立。
+- 算法（本地实现，无 OpenSSL）：`PBKDF2-HMAC-SHA256` → `AES-256-CBC`+PKCS7，`HMAC-SHA256` 做
+  encrypt-then-MAC；`token` 模式密钥 = `SHA256("webcreds:enc:"+令牌)` 等域分离派生。
+- 环境变量：`QTOX_WEB_CRED_PASS` / `QTOX_WEB_CRED_PASS_COMMAND`（如
+  `secret-tool lookup service qltox key webcreds`）/ `QTOX_WEB_CRED_FILE` / `QTOX_WEB_CRED_TOKEN` /
+  `QTOX_WEB_CRED_ITERS`（默认 60000）。
+- 语义不变式：**无口令/无令牌也绝不阻塞** —— 缺失口令时 app 继续可跑（该字段状态=`口令加密`
+  不可用）；解密失败（MAC 不过）= `解不开(Broken)`，**不回退**旧常量；**显式删除字段**才回退源码
+  常量兜底。
+- CLI（`build_webcreds.sh` 产 `webcreds`，Qt-free，与 qt3/qt4 串行勿并行）：
+
+```
+./webcreds create --field deepseek --value <token> --mode plain|token|pass [--pass PW] ...
+./webcreds set --field gemini --value <cookie行> --mode token
+./webcreds rm     --field deepseek
+./webcreds show [--reveal] [--pass PW]     # 默认遮蔽 `*** ENCRYPTED [mode] ***`
+./webcreds check
+./webcreds wipe [--yes]
+```
+
+- 阶段说明：阶段一仅落存储层（构建验证/CLI/单测 `test_webcreds.cpp`，56 断言）；
+  `aigptbot.cpp` 尚未接入，仍读源码常量。**阶段二**把 `webCredGet()`/状态接进
+  `webCredOf()` 与五处 header 构造点（见 §4 映射）。
 
 ### 3.1 deepseek-web → `kDeepseekWebCred`
 
