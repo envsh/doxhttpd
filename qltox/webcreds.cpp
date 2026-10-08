@@ -818,14 +818,14 @@ bool webCredsWipe(std::string& err) {
 
 const char* const* webCredsKnownFields(size_t& count) {
     static const char* const kKnown[] = {
-        "deepseek", "gemini", "grok", "chatgpt",
+        "deepseek", "gemini", "grok", "chatgpt", "meta",
         "deepseek_cookie", "deepseek_device_id",
-        // 非 web（OpenAI 兼容）API key 管理字段：仅存储/UI，调用处尚未读取
+        // 非 web（OpenAI 兼容）API key 管理字段：仅存储/UI（noweb_meta 已接入 meta provider）
         "noweb_pollinations", "noweb_zhipu", "noweb_siliconflow", "noweb_nvidia",
         "noweb_openrouter", "noweb_llm7", "noweb_cloudflare", "noweb_dashscope",
         "noweb_ovh", "noweb_volcengine", "noweb_modelscope", "noweb_modelscope_intl",
         "noweb_groq", "noweb_huggingface", "noweb_gemini", "noweb_zai",
-        "noweb_groq_viacf", "noweb_gemini_viacf", "noweb_aihorde",
+        "noweb_groq_viacf", "noweb_gemini_viacf", "noweb_aihorde", "noweb_meta",
     };
     count = sizeof(kKnown) / sizeof(kKnown[0]);
     return kKnown;

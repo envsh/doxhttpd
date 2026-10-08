@@ -3,12 +3,12 @@
 ## 0. 概述
 
 - 核对日期：**2026-10-08**
-- 用途：为 qltox `aigptbot` 新增 4 个 web provider（`chatgpt-web` / `deepseek-web` / `gemini-web` / `grok-web`）提供接口依据、凭据提取方法与参考来源清单。
+- 用途：为 qltox `aigptbot` 新增 4 个 web provider（`chatgpt-web` / `deepseek-web` / `gemini-web` / `grok-web`）与 `meta`（官方 Model API）/ `meta-web`（网页版，实验性）提供接口依据、凭据提取方法与参考来源清单。
 - 范围：仅文档记录。对应实现见 `qltox/aigptbot.h` / `aigptbot.cpp`。凭据读取走加密侧车
   （webcreds，见 §3.0；`工具→Web 凭据` 或 CLI 配置）；`aigptbot.cpp` 顶部各 `kXxxWebCred`
   常量降为默认定底（侧车未配置且常量非空时才生效）。
 
-## 1. 四家接口核对表
+## 1. 六家接口核对表
 
 | Provider | 端点（要点） | 凭据 | 反爬 | 响应格式 | 状态 |
 |---|---|---|---|---|---|
@@ -16,6 +16,8 @@
 | gemini-web | GET 首页取 `SNlM0e` 作 `at` → `POST gemini.google.com/_/BardChatUi/data/assistant.lamda.BardFrontendService/StreamGenerate`（batchexecute `f.req` 表单，`?hl=&_reqid=&rt=c`） | Cookie `__Secure-1PSID` + `__Secure-1PSIDTS` | Google 按 TLS/JA3 指纹 429（2026-05 起 curl_cffi 全被拦，仅真浏览器可过；**qltox libcurl 无指纹伪装 → 已知限制，可能 429**） | `)]}'` 前缀 + 长度分帧 JSON | ✅ 当前有效 |
 | grok-web | `POST grok.com/rest/app-chat/conversations/new`（及 `conversations/:id/message`） | Cookie `sso` + `sso-rw`（JWT） | `x-statsig-id` 本地生成挑战（算法见 §6.2，填 3 个常量启用）+ Cloudflare（`cf_clearance` 绑定 UA/IP，UA 须与 Cookie 源一致） | **NDJSON 流**（非标准 SSE，camelCase 字段） | ⚠️ 有效但易变 |
 | chatgpt-web | sentinel `chat-requirements/prepare` → PoW → `finalize` → `POST /backend-api/f/conversation`（详见 §6.4） | accessToken（session 接口） | PoW（SHA-256 可解）+ **Turnstile**（普遍被卡） | SSE | ❌ 受限，实验性 |
+| meta | 官方 Model API `POST api.meta.ai/v1/chat/completions`（OpenAI 兼容，`Bearer $MODEL_API_KEY`；1M 上下文） | `noweb_meta` 字段（Bearer key，dev.meta.ai dashboard 创建） | 无（官方 API；$1.25/$4.25 每 M，新账号 $20 免费额度，3000 RPM） | 标准 OpenAI JSON（`choices[0].message.content`） | ✅ 当前有效 |
+| meta-web | `GET www.meta.ai` 取 `lsd` → `POST www.meta.ai/api/graphql/`（useAbraAcceptTOSForTempUserMutation，doc_id=7604648749596940）→ `POST graph.meta.ai/graphql`（useAbraSendMessageMutation，doc_id=7783822248314888，详见 §6.6） | `meta` 字段（浏览器 Cookie，`datr`+`ecto_1_sess`） | 旧 HTTP GraphQL；Meta 已迁 DGW WebSocket（消息完整性校验、不可手工构造）→ **随时可能整体失效** | NDJSON（`data.node.bot_response_message.composed_text`） | ❌ 实验性 |
 
 ## 2. 参考来源清单（时效性核对）
 
@@ -25,11 +27,13 @@
 | gemini | `github.com/HanaokaYuzu/Gemini-API`（gemini-webapi，3564★）、`github.com/Sophomoresty/gemini-web2api` | pushed 2026-08-27；最新 issue 2026-10-03/04 均为正常使用中的改进讨论（如 #364 `card_content` 解析），无"失效"报告 | ✅ 当前有效：`__Secure-1PSID`/`__Secure-1PSIDTS` + StreamGenerate；PR #361 指出 `__Secure-1PSID` 会变、库依赖 curl_cffi **TLS 指纹伪装** |
 | grok | `github.com/imjustprism/grok-web-api`（Rust）、`github.com/ManojINaik/grokAPI`、`github.com/anojndr/grok-to-openai`、`github.com/mem0ai/grok3-api`、`pypi.org/project/grok-api`、`github.com/Sexlovr/grok-2-api`、`github.com/carzygod/grok2api` | grok-web-api pushed 2026-06-17；PR #7（2026-07-26）live 验证 | ⚠️ 有效但易变：响应为 NDJSON 流；`modelMode` wire 值为 `MODEL_MODE_*` 枚举（2026-07 Grok 4.5 升级曾致 403），免费账号仅 `fast` 模式可用；另有 `x-statsig-id` 挑战头与 WebSocket 网关路线并存（`anojndr/grok-to-openai`），实现时需实测确认 |
 | chatgpt | `github.com/Octo-Lex/ChatGPT-Web2API`（协议参考）、`github.com/adam-s/toolkit`（TURNSTILE.md）、`gpt2agent` 实测报告（2026-09-08） | gpt2agent 实测：sentinel Turnstile 阶段 blocked | ❌ 受限：PoW 可解，Turnstile 第三方普遍被卡，`/backend-api/f/conversation` 返回 403 → 按既定决策标"实验性" |
+| meta（官方） | `dev.meta.ai/docs/protocols/chat-completions`、`dev.meta.ai/docs/api-reference` | 官方文档 2026-10-08 核对：`max_tokens` deprecated alias 仍接受、`stream:false` 支持、system 角色可用、不支持参数（stop/n>1/logit_bias → HTTP 400），与现有 sendHost 请求体逐字段兼容 | ✅ 当前有效：model/messages/stream/max_tokens 全兼容 |
+| meta-web | `github.com/Strvm/meta-ai-api`（409★，2024 旧 HTTP GraphQL 逆向）、`github.com/mir-ashiq/metaai-api`（metaai-sdk v5.3.0，活跃）+ 其 `CHANGES_AND_COOKIES.md` | metaai-sdk changelog：**Meta 已从 HTTP GraphQL 迁到 DGW WebSocket**（GraphQL schema 移除 sendMessageStream 等，旧 HTTP 失效）；chat 现需浏览器自动化或 DGW frame replay | ❌ 实验性：按 Strvm 旧流程实现（取页→token→发消息），随时可能整体失效；DGW 无法在 C++/Qt 实现，不再跟进 |
 
 ## 3. 凭据手工提取指南
 
 通用：登录目标站点 → F12 DevTools → Application（Chrome/Edge）/ Storage（Firefox）查看 Cookie 与 Local Storage；或 Network 面板右键请求 **Copy as cURL** 从 `-H 'cookie: ...'` / `authorization: ...` 抄取。写入 webcreds 侧车（字段名见 §3.0：`deepseek`/`gemini`/`grok`/
-`chatgpt` + 可选 `deepseek_cookie`/`deepseek_device_id`；另有 19 个 `noweb_*` 非 web API key 字段）
+`chatgpt`/`meta` + 可选 `deepseek_cookie`/`deepseek_device_id`；另有 20 个 `noweb_*` 非 web API key 字段（含已接入的 `noweb_meta`））
 即可即时生效；亦可填 `qltox/aigptbot.cpp`
 顶部对应 `kXxxWebCred` 常量作为默认定底（需重编译，Qt3 → Qt4 顺序，勿并行）。
 
@@ -51,10 +55,12 @@
 - 环境变量：`QTOX_WEB_CRED_PASS` / `QTOX_WEB_CRED_PASS_COMMAND`（如
   `secret-tool lookup service qltox key webcreds`）/ `QTOX_WEB_CRED_FILE` / `QTOX_WEB_CRED_TOKEN` /
   `QTOX_WEB_CRED_ITERS`（默认 60000）。
-- 非 web（OpenAI 兼容）provider 的 API key 字段：`noweb_*` 共 19 个（pollinations/智谱/硅基流动/
+- 非 web（OpenAI 兼容）provider 的 API key 字段：`noweb_*` 共 20 个（pollinations/智谱/硅基流动/
   NVIDIA NIM/OpenRouter/LLM7/Cloudflare/百炼/OVH/豆包/ModelScope 国内/国际/Groq/HuggingFace/
-  Gemini/Z.ai/groq-viacf/gemini-viacf/aihorde），仅提供加密存储与 CLI/GUI 管理（模式三选一同上），
-  **暂未接入 aigptbot 调用处**（后续以 `webCredGet("noweb_xxx", …)` 读取）。
+  Gemini/Z.ai/groq-viacf/gemini-viacf/aihorde/meta），均提供加密存储与 CLI/GUI 管理（模式三选一同上）；
+  其中 **`noweb_meta` 已接入调用处**（`aigptbot.cpp` sendHost 对 `meta` provider 读取为
+  `Authorization: Bearer`，且 any/all 按其 key 配置状态决定是否入选），
+  其余 19 个**暂未接入 aigptbot 调用处**（后续以 `webCredGet("noweb_xxx", …)` 读取）。
 - 语义不变式：**无口令/无令牌也绝不阻塞** —— 缺失口令时 app 继续可跑（该字段状态=`口令加密`
   不可用）；解密失败（MAC 不过）= `解不开(Broken)`，**不回退**旧常量；**显式删除字段**才回退源码
   常量兜底。
@@ -72,7 +78,7 @@
 - GUI：主菜单 **工具 → Web 凭据(&W)** 打开配置对话框，等价 CLI 的
   `show`（列表含状态列，`显示明文`/`遮蔽值` 切换，口令加密字段首次需输入口令并
   在会话内缓存，关窗即弃）/ `set`（`配置/修改`，模式三选一：明文/令牌加密/口令
-  加密，字段名限已知字段：6 个 web + 19 个 `noweb_*`，下拉显示友好名）/
+  加密，字段名限已知字段：7 个 web + 20 个 `noweb_*`，下拉显示友好名）/
   `rm`（`删除`，删除后回退源码常量兜底）。
 - 阶段说明：阶段一=存储层（构建验证/CLI/单测 `test_webcreds.cpp`，56 断言）；
   **阶段二=UI 配置管理**（`qltox/webcredsdialog.h/.cpp`，入口 工具→Web 凭据）；
@@ -164,9 +170,9 @@ sso=<值1>; sso-rw=<值2>
 - `buildCandidates()` 中凭据不可用（`ok=false`：未配置/解不开/口令缺失均算）→ `any`/`all`
   跳过，并记 `cred=` 日志；点名单选按细分（未配置/口令缺失/解不开）报错。
 - 每条消息新会话（无状态，不缓存 session id）；内部可请求 SSE 但聚合后单次返回（`parseSseContent()` 聚合 delta），保持现有完成事件语义。
-- 协议细节：见下方 §6（deepseek / grok / gemini / chatgpt 分节）。
+- 协议细节：见下方 §6（deepseek / grok / gemini / chatgpt / meta 分节）。
 - 哈希库：`qlcomp/obsd_sha2.c/.h`（OpenBSD SHA-2，供 chatgpt PoW）与 `qlcomp/dspow_solve.c/.h`（DeepSeekHashV1，供 deepseek PoW），经 `qlcomp/qlite.pri` 编入所有构建。
-- 阶段划分：P0 架构（enum/`webKind` 字段/`sendWebHost()` 分派/哈希库）→ P1 deepseek-web → P2 gemini-web → P3 grok-web → P4 chatgpt-web（实验性，失败给明确报错）。
+- 阶段划分：P0 架构（enum/`webKind` 字段/`sendWebHost()` 分派/哈希库）→ P1 deepseek-web → P2 gemini-web → P3 grok-web → P4 chatgpt-web（实验性，失败给明确报错）→ P5 meta（官方 API，接 `noweb_meta`）+ meta-web（实验性，旧 GraphQL）。
 - 不改：Go server、`web/`、设置对话框、`build.sh`。`messageattribbar.cpp` 仅 provider
   下拉追加凭据状态后缀标签（显示层，wire 值不变）。
 
@@ -352,3 +358,32 @@ issue #323 已 closed 无解）。qltox 的 libcurl 无法伪装指纹，运行�
 | gemini 协议 | `HanaokaYuzu/Gemini-API`（gemini-webapi） | 见上游仓库 |
 | chatgpt 协议 | `Octo-Lex/ChatGPT-Web2API` | 见上游仓库 |
 | deepseek 协议 | `NIyueeE/ds-free-api` 及 ds_api.md 抓包参考 | 见上游仓库 |
+| meta-web 协议 | `Strvm/meta-ai-api`（协议参考，实现为 C++ 原创，未拷贝代码） | 上游 GPLv3（仅协议参考） |
+
+### 6.6 meta（官方 Model API）与 meta-web（实验性）
+
+**meta（官方，OpenAI 兼容，走现有 sendHost）**
+- `POST https://api.meta.ai/v1/chat/completions`，`Authorization: Bearer <MODEL_API_KEY>`。
+- 兼容性（2026-10-08 dev.meta.ai 核对）：`model`/`messages` 必需；`"stream":false` 支持；
+  **`max_tokens` 仍接受**（deprecated alias；`max_output_tokens` 反而 400）；`system` 角色可用；
+  现有 sendHost 只发 model/stream/max_tokens/messages，全兼容，无需改请求体。
+- 模型 `muse-spark-1.3`（默认）/`1.2`/`1.1`：**永远推理**（`reasoning_effort:"none"` → 400），
+  简洁模式 `max_tokens:512` 预算可能被 reasoning 消耗导致截断（已知行为，暂不特殊处理）。
+- 计费：$1.25/M 输入、$4.25/M 输出、$0.15/M 缓存输入；新账号 $20 免费额度；3000 RPM。
+
+**meta-web（实验性，旧 HTTP GraphQL）**
+1. `GET https://www.meta.ai/` → 从页面内嵌 JSON 提取 `LSD token`、`datr`、`_js_datr`、`abra_csrf`。
+2. `POST https://www.meta.ai/api/graphql/`（form：`lsd`、`doc_id=7604648749596940`、
+   `fb_api_req_friendly_name=useAbraAcceptTOSForTempUserMutation`、
+   `variables={"dob":"1999-01-01","icebreaker_type":"TEXT",…}`）→
+   `data.xab_abra_accept_terms_of_service.new_temp_user_auth.access_token`。
+3. `POST https://graph.meta.ai/graphql?locale=user`（form：`access_token`、`doc_id=7783822248314888`、
+   `fb_api_req_friendly_name=useAbraSendMessageMutation`、
+   `variables={message.sensitive_string_value, externalConversationId(uuid),
+   offlineThreadingId=ms<<22|rand22, entrypoint:"ABRA__CHAT__TEXT", …}`）→ NDJSON。
+4. 解析：逐行取 `data.node.bot_response_message.composed_text.content[].text` 拼接，取最后一条
+   非空（完整态）；`errors[0].message` 报错。
+5. **风险**：metaai-sdk changelog 明示 Meta 已把 chat 迁到 DGW WebSocket
+   （`wss://gateway.meta.ai/ws/clippy`，服务端校验消息完整性，需浏览器/帧重放），
+   本流程（2024 年 doc_id）随时可能整体失效 → 失败给出明确报错并降级下一候选；
+   DGW 无浏览器运行时无法实现，不再跟进。

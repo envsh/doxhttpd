@@ -31,11 +31,13 @@ enum AigptbotProviderId {
     kAigptbotGroqViaCf,
     kAigptbotGeminiViaCf,
     kAigptbotAiHorde,
+    kAigptbotMetaApi,             // meta 官方 Model API（OpenAI 兼容，key=noweb_meta）
     // web 版直连（凭据读加密侧车 webcreds，见 docs/aigptbot-web-sources.md §3.0）
     kAigptbotDeepseekWeb,
     kAigptbotGeminiWeb,
     kAigptbotGrokWeb,
     kAigptbotChatgptWeb,       // 实验性（sentinel Turnstile 可能被拦）
+    kAigptbotMetaWeb,          // meta-web 实验性（旧 HTTP GraphQL，随时可能失效）
 };
 
 // web provider 内部协议分支（=0 走 OpenAI 兼容 sendHost）
@@ -45,6 +47,7 @@ enum AigptbotWebKind {
     kAigptbotWebGemini,
     kAigptbotWebGrok,
     kAigptbotWebChatgpt,
+    kAigptbotWebMeta,
 };
 
 // 单个 provider 的静态契约

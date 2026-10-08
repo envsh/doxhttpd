@@ -63,6 +63,8 @@ QString webCredFieldDisplay(const std::string& name) {
     if (name == "noweb_groq_viacf")      { return qFromUtf8("groq-viacf"); }
     if (name == "noweb_gemini_viacf")    { return qFromUtf8("gemini-viacf"); }
     if (name == "noweb_aihorde")         { return qFromUtf8("aihorde"); }
+    if (name == "noweb_meta")            { return qFromUtf8("Meta Model API"); }
+    if (name == "meta")                  { return qFromUtf8("Meta AI"); }
     return qFromUtf8(name.c_str());
 }
 

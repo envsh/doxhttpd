@@ -910,8 +910,9 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
         for (size_t i = 0; i < plist.size(); ++i) {
             svc << qFromUtf8(plist[i].name);
             QString nm = qFromUtf8(plist[i].name);
-            if (plist[i].webKind != kAigptbotWebNone) {
-                // web：凭据状态后缀标签（仅显示层，wire 值仍为纯 provider 名）
+            if (plist[i].webKind != kAigptbotWebNone
+                    || plist[i].id == kAigptbotMetaApi) {
+                // web / meta(API key)：凭据状态后缀标签（仅显示层，wire 值仍为纯 provider 名）
                 const std::string st = aigptbotWebCredStatusName(plist[i].name);
                 if (!st.empty()) {
                     nm += qFromUtf8(" [") + qFromUtf8(st.c_str()) + qFromUtf8("]");

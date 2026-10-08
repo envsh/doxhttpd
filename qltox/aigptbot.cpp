@@ -30,6 +30,7 @@ const char* const kDeepseekWebCred = "";
 const char* const kGeminiWebCred   = "";
 const char* const kGrokWebCred     = "";
 const char* const kChatgptWebCred  = "";
+const char* const kMetaWebCred     = "";
 
 // ── 浏览器指纹对齐（可选；空 = 各 provider 内置默认 UA）──
 // 从 cookie/token 来源浏览器 Copy as cURL 抓实际 UA 填入 kWebCredUA 可覆盖全部
@@ -127,6 +128,8 @@ const AigptbotProvider kAigptProviders[] = {
       "https://gateway.ai.cloudflare.com/v1/%1/%2/compat/chat/completions", "" },
     { kAigptbotAiHorde,       "aihorde",         true,  false,
       "", "" }, // 不走 OpenAI 兼容
+    { kAigptbotMetaApi,       "meta",            true,  false,
+      "https://api.meta.ai/v1/chat/completions", "muse-spark-1.3" },
     // ── web 版直连（不走 OpenAI 协议；webKind 分派 sendWebHost）──
     { kAigptbotDeepseekWeb,   "deepseek-web",    false, true,
       "https://chat.deepseek.com", "", kAigptbotWebDeepseek },
@@ -136,6 +139,8 @@ const AigptbotProvider kAigptProviders[] = {
       "https://grok.com", "", kAigptbotWebGrok },
     { kAigptbotChatgptWeb,    "chatgpt-web",     false, true,
       "https://chatgpt.com", "", kAigptbotWebChatgpt },
+    { kAigptbotMetaWeb,       "meta-web",        false, true,
+      "https://www.meta.ai", "", kAigptbotWebMeta },
 };
 const int kAigptProviderCount = int(sizeof(kAigptProviders) / sizeof(kAigptProviders[0]));
 
@@ -146,6 +151,7 @@ WebCredResult webCredResult(const AigptbotProvider& p) {
     case kAigptbotWebGemini:   { return webCredGet("gemini", kGeminiWebCred); }
     case kAigptbotWebGrok:     { return webCredGet("grok", kGrokWebCred); }
     case kAigptbotWebChatgpt:  { return webCredGet("chatgpt", kChatgptWebCred); }
+    case kAigptbotWebMeta:     { return webCredGet("meta", kMetaWebCred); }
     case kAigptbotWebNone:     { break; }
     }
     return WebCredResult();
@@ -164,6 +170,13 @@ const char* webCredTag(WebCredStatus s) {
     return "none";
 }
 
+// non-web provider 的 key 是否已配置（目前仅 meta 读侧车 noweb_meta）
+bool nonWebKeyReady(const AigptbotProvider& p) {
+    if (p.id != kAigptbotMetaApi) { return false; }
+    const WebCredResult r = webCredGet("noweb_meta", "");
+    return r.ok && !r.value.empty();
+}
+
 struct Session {
     AigptbotRequest req;
     QObject* target = nullptr;
@@ -173,7 +186,7 @@ struct Session {
     std::string lastError;
     std::vector<std::string> tried;
     // web 分步请求状态：step = 当前步骤序号，wv = 步骤间中间值
-    // （deepseek: hif/pow/session；gemini: at/reqid；grok: conversationId；chatgpt: prepare_token）
+    // （deepseek: hif/pow/session；gemini: at/reqid；grok: conversationId；chatgpt: prepare_token；meta: lsd/datr/token/conv）
     int step = 0;
     std::map<std::string, std::string> wv;
 };
@@ -333,7 +346,7 @@ void sendHttp(Session* s, const std::string& url, const std::string& body,
 
 void startNext(Session* s);
 
-// web provider 分派（实现分阶段加入：P1 deepseek → P2 gemini → P3 grok → P4 chatgpt）
+// web provider 分派（实现分阶段加入：P1 deepseek → P2 gemini → P3 grok → P4 chatgpt → P5 meta-web）
 void sendWebHost(Session* s, const AigptbotProvider& p);
 void sendDeepseek(Session* s, const AigptbotProvider& p);
 void sendGemini(Session* s, const AigptbotProvider& p);
@@ -413,6 +426,13 @@ void sendHost(Session* s, const AigptbotProvider& p) {
     headers["Content-Type"] = "application/json";
     // Authorization：仅非 allowEmptyKey
     if (!p.allowEmptyKey) {
+        if (p.id == kAigptbotMetaApi) {
+            // meta：读侧车 noweb_meta（首个接入调用处的 non-web key）
+            const WebCredResult key = webCredGet("noweb_meta", "");
+            if (key.ok && !key.value.empty()) {
+                headers["Authorization"] = "Bearer " + key.value;
+            }
+        }
         // 不读取配置文件，key 为空→不添加
         // （直接指定场景将发出无 auth 请求，失败由 onDone 处理）
     }
@@ -1795,6 +1815,237 @@ void sendChatgpt(Session* s, const AigptbotProvider& p) {
     }
 }
 
+// ── meta-web（实验性；协议见 docs/aigptbot-web-sources.md §6.6）──
+// 取页(lsd/datr) → useAbraAcceptTOSForTempUserMutation 取 token →
+// useAbraSendMessageMutation。Meta 已把聊天迁到 DGW WebSocket（消息完整性校验，手工
+// 无法构造），本实现走旧 HTTP GraphQL，随时可能整体失效 → 失败给明确报错并降级。
+
+std::string metaExtract(const std::string& text, const char* start, const char* end) {
+    const size_t p = text.find(start);
+    if (p == std::string::npos) { return std::string(); }
+    const size_t b = p + std::string(start).size();
+    const size_t e = text.find(end, b);
+    if (e == std::string::npos) { return std::string(); }
+    return text.substr(b, e - b);
+}
+
+std::string metaOfflineThreadingId() {
+    const unsigned long long ms = (unsigned long long)time(nullptr) * 1000ULL;
+    const unsigned long long rnd =
+            ((unsigned long long)rand() << 16 ^ (unsigned long long)rand()) & 0x3FFFFFULL;
+    return std::to_string((ms << 22) | rnd);
+}
+
+// 配置 cookie（meta 字段）与页面提取 cookie 合并
+std::string metaCookie(Session* s) {
+    std::string c = webCredGet("meta", kMetaWebCred).value;
+    if (!s) { return c; }
+    const char* keys[] = { "_js_datr", "datr", "abra_csrf" };
+    for (int i = 0; i < 3; ++i) {
+        const std::map<std::string, std::string>::iterator it = s->wv.find(keys[i]);
+        if (it == s->wv.end() || it->second.empty()) { continue; }
+        if (c.find(std::string(keys[i]) + "=") != std::string::npos) { continue; }
+        if (!c.empty()) { c += "; "; }
+        c += std::string(keys[i]) + "=" + it->second;
+    }
+    return c;
+}
+
+// 解析 meta NDJSON：取最后一条含 composed_text 的 bot_response_message 正文
+bool parseMetaNdjson(const std::string& body, std::string& out, std::string& err) {
+    out.clear();
+    err.clear();
+    int lines = 0;
+    size_t pos = 0;
+    const size_t n = body.size();
+    while (pos <= n) {
+        size_t eol = body.find('\n', pos);
+        std::string line = (eol == std::string::npos)
+                ? body.substr(pos) : body.substr(pos, eol - pos);
+        pos = (eol == std::string::npos) ? n + 1 : eol + 1;
+        if (!line.empty() && line[line.size() - 1] == '\r') { line.erase(line.size() - 1); }
+        line = trimStr(line);
+        if (line.empty()) { continue; }
+        cJSON* j = cJSON_Parse(line.c_str());
+        if (!j) { ++lines; continue; }
+        ++lines;
+        if (cJSON_IsObject(j)) {
+            cJSON* e = cJSON_GetObjectItem(j, "errors");
+            if (e && cJSON_IsArray(e) && cJSON_GetArraySize(e) > 0) {
+                cJSON* first = cJSON_GetArrayItem(e, 0);
+                std::string m = first ? jStr(first, "message") : std::string();
+                if (m.empty()) { m = "GraphQL 错误"; }
+                err = m;
+            }
+            cJSON* d = cJSON_GetObjectItem(j, "data");
+            cJSON* node = d ? cJSON_GetObjectItem(d, "node") : 0;
+            cJSON* bot = node ? cJSON_GetObjectItem(node, "bot_response_message") : 0;
+            if (bot && cJSON_IsObject(bot)) {
+                std::string txt;
+                cJSON* ct = cJSON_GetObjectItem(bot, "composed_text");
+                cJSON* content = ct ? cJSON_GetObjectItem(ct, "content") : 0;
+                if (content && cJSON_IsArray(content)) {
+                    for (int i = 0; i < cJSON_GetArraySize(content); ++i) {
+                        cJSON* item = cJSON_GetArrayItem(content, i);
+                        const std::string t = item ? jStr(item, "text") : std::string();
+                        if (!t.empty()) { txt += t + "\n"; }
+                    }
+                }
+                if (!txt.empty()) { out = txt; }
+            }
+        }
+        cJSON_Delete(j);
+        if (!err.empty()) { break; }
+    }
+    if (!err.empty()) { return false; }
+    out = trimStr(out);
+    if (out.empty()) {
+        err = "回复为空（lines=" + std::to_string(lines)
+             + "；协议可能已迁 DGW，见 docs §6.6）";
+        return false;
+    }
+    return true;
+}
+
+void sendMetaWeb(Session* s, const AigptbotProvider& p) {
+    if (s->step == 0) {
+        std::map<std::string, std::string> h;
+        h["User-Agent"] = webUA(false);
+        h["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+        webBrowserHeaders(h);
+        const std::string ck = webCredGet("meta", kMetaWebCred).value;
+        if (!ck.empty()) { h["Cookie"] = ck; }
+        sendWebHttp(s, "https://www.meta.ai/", "GET", "", h, 35, 30);
+        return;
+    }
+    if (s->step == 1) {
+        const std::string variables =
+            "{\"dob\":\"1999-01-01\",\"icebreaker_type\":\"TEXT\","
+            "\"__relay_internal__pv__WebPixelRatiorelayprovider\":1}";
+        std::string form = "lsd=" + urlEncode(s->wv["lsd"])
+            + "&fb_api_caller_class=RelayModern"
+              "&fb_api_req_friendly_name=useAbraAcceptTOSForTempUserMutation"
+              "&doc_id=7604648749596940"
+            + "&variables=" + urlEncode(variables);
+        std::map<std::string, std::string> h;
+        h["User-Agent"] = webUA(false);
+        h["Accept"] = "*/*";
+        h["Origin"] = "https://www.meta.ai";
+        h["Referer"] = "https://www.meta.ai/";
+        h["Cookie"] = metaCookie(s);
+        h["Content-Type"] = "application/x-www-form-urlencoded;charset=utf-8";
+        h["x-fb-friendly-name"] = "useAbraAcceptTOSForTempUserMutation";
+        h["sec-fetch-mode"] = "cors";
+        h["sec-fetch-site"] = "same-origin";
+        sendWebHttp(s, "https://www.meta.ai/api/graphql/", "POST", form, h, 35, 30);
+        return;
+    }
+    if (s->step == 2) {
+        std::string prompt = s->req.text;
+        if (s->req.brief) {
+            prompt = std::string("请尽量用最简洁的方式回答，简短直接，避免冗长。\n\n") + prompt;
+        }
+        const std::string variables =
+            "{\"message\":{\"sensitive_string_value\":\"" + jsonEscape(prompt) + "\"},"
+            "\"externalConversationId\":\"" + s->wv["conv"] + "\","
+            "\"offlineThreadingId\":\"" + metaOfflineThreadingId() + "\","
+            "\"suggestedPromptIndex\":null,\"promptPrefix\":null,"
+            "\"entrypoint\":\"ABRA__CHAT__TEXT\",\"icebreaker_type\":\"TEXT\","
+            "\"__relay_internal__pv__AbraDebugDevOnlyrelayprovider\":false,"
+            "\"__relay_internal__pv__WebPixelRatiorelayprovider\":1}";
+        std::string form = "access_token=" + urlEncode(s->wv["token"])
+            + "&fb_api_caller_class=RelayModern"
+              "&fb_api_req_friendly_name=useAbraSendMessageMutation"
+              "&doc_id=7783822248314888&server_timestamps=true"
+            + "&variables=" + urlEncode(variables);
+        std::map<std::string, std::string> h;
+        h["User-Agent"] = webUA(false);
+        h["Accept"] = "*/*";
+        h["Origin"] = "https://www.meta.ai";
+        h["Referer"] = "https://www.meta.ai/";
+        h["Cookie"] = metaCookie(s);
+        h["Content-Type"] = "application/x-www-form-urlencoded;charset=utf-8";
+        h["x-fb-friendly-name"] = "useAbraSendMessageMutation";
+        h["sec-fetch-mode"] = "cors";
+        h["sec-fetch-site"] = "same-origin";
+        sendWebHttp(s, "https://graph.meta.ai/graphql?locale=user", "POST", form, h, 120, 60);
+        return;
+    }
+    webFail(s, p.name, "内部错误：未知 step=" + std::to_string(s->step));
+}
+
+void metaOnDone(const HttpResponse& resp, Session* s, const AigptbotProvider& p) {
+    if (s->step == 0) {
+        if (resp.httpCode != 200) {
+            webFail(s, p.name, "GET www.meta.ai HTTP " + std::to_string(resp.httpCode)
+                    + (resp.curlErrStr.empty() ? "" : " " + resp.curlErrStr));
+            return;
+        }
+        const std::string lsd   = metaExtract(resp.body, "\"LSD\",[],{\"token\":\"", "\"");
+        const std::string datr  = metaExtract(resp.body, "datr\":{\"value\":\"", "\"");
+        const std::string jsDatr = metaExtract(resp.body, "_js_datr\":{\"value\":\"", "\"");
+        const std::string csrf  = metaExtract(resp.body, "abra_csrf\":{\"value\":\"", "\"");
+        if (lsd.empty()) {
+            webFail(s, p.name, "页面解析失败（lsd 为空：地区受限或页面改版）");
+            return;
+        }
+        s->wv["lsd"] = lsd;
+        if (!datr.empty())   { s->wv["datr"] = datr; }
+        if (!jsDatr.empty()) { s->wv["_js_datr"] = jsDatr; }
+        if (!csrf.empty())   { s->wv["abra_csrf"] = csrf; }
+        s->wv["conv"] = uuidV4();
+        ++s->step;
+        sendMetaWeb(s, p);
+        return;
+    }
+    if (s->step == 1) {
+        if (resp.httpCode != 200) {
+            webFail(s, p.name, "graphql/token HTTP " + std::to_string(resp.httpCode));
+            return;
+        }
+        std::string token;
+        std::string gerr;
+        cJSON* root = cJSON_Parse(resp.body.c_str());
+        if (root && cJSON_IsObject(root)) {
+            cJSON* d = cJSON_GetObjectItem(root, "data");
+            cJSON* mut = d ? cJSON_GetObjectItem(d, "xab_abra_accept_terms_of_service") : 0;
+            cJSON* nu = mut ? cJSON_GetObjectItem(mut, "new_temp_user_auth") : 0;
+            token = (nu && cJSON_IsObject(nu)) ? jStr(nu, "access_token") : std::string();
+            if (token.empty()) {
+                cJSON* e = cJSON_GetObjectItem(root, "errors");
+                cJSON* first = (e && cJSON_IsArray(e) && cJSON_GetArraySize(e) > 0)
+                        ? cJSON_GetArrayItem(e, 0) : 0;
+                gerr = first ? jStr(first, "message") : std::string();
+            }
+            cJSON_Delete(root);
+        }
+        if (token.empty()) {
+            webFail(s, p.name, "取 access_token 失败"
+                    + (gerr.empty() ? std::string() : std::string("（") + gerr + "）")
+                    + "：旧 GraphQL 可能已失效，见 docs §6.6");
+            return;
+        }
+        s->wv["token"] = token;
+        ++s->step;
+        sendMetaWeb(s, p);
+        return;
+    }
+    if (s->step == 2) {
+        if (resp.httpCode != 200) {
+            webFail(s, p.name, "sendMessage HTTP " + std::to_string(resp.httpCode));
+            return;
+        }
+        std::string out, err;
+        if (!parseMetaNdjson(resp.body, out, err)) {
+            webFail(s, p.name, err.empty() ? std::string("回复为空") : err);
+            return;
+        }
+        webSucceed(s, p.name, out);
+        return;
+    }
+    webFail(s, p.name, "内部错误：未知 step=" + std::to_string(s->step));
+}
+
 void sendWebHost(Session* s, const AigptbotProvider& p) {
     s->step = 0;
     s->wv.clear();
@@ -1803,6 +2054,7 @@ void sendWebHost(Session* s, const AigptbotProvider& p) {
     case kAigptbotWebGemini:   { sendGemini(s, p); break; }
     case kAigptbotWebGrok:     { sendGrok(s, p); break; }
     case kAigptbotWebChatgpt:  { sendChatgpt(s, p); break; }
+    case kAigptbotWebMeta:     { sendMetaWeb(s, p); break; }
     case kAigptbotWebNone:     { webFail(s, p.name, "内部错误：webKind 为空"); break; }
     }
 }
@@ -1832,6 +2084,7 @@ void onWebDone(const HttpResponse& resp, void* udata) {
     case kAigptbotWebGemini:   { gemOnDone(resp, s, *h); break; }
     case kAigptbotWebGrok:     { grokOnDone(resp, s, *h); break; }
     case kAigptbotWebChatgpt:  { cgptOnDone(resp, s, *h); break; }
+    case kAigptbotWebMeta:     { metaOnDone(resp, s, *h); break; }
     default: {
         webFail(s, h->name, "内部错误：该 webKind 尚无状态机（step="
                 + std::to_string(s->step) + "）");
@@ -1899,7 +2152,7 @@ std::vector<const AigptbotProvider*> buildCandidates(const AigptbotRequest& req,
                     continue;
                 }
             } else if (p.needsKey) {
-                continue; // 不读配置文件，视为未配置→跳过
+                if (!nonWebKeyReady(p)) { continue; } // 跳过未配置（meta 读 noweb_meta）
             }
             out.push_back(&p);
         }
@@ -1920,7 +2173,7 @@ std::vector<const AigptbotProvider*> buildCandidates(const AigptbotRequest& req,
                     continue;
                 }
             } else if (p.needsKey) {
-                continue; // 跳过未配置
+                if (!nonWebKeyReady(p)) { continue; } // 跳过未配置（meta 读 noweb_meta）
             }
             out.push_back(&p);
         }
@@ -1960,9 +2213,14 @@ std::string aigptbotWebCredStatusName(const char* providerName) {
     if (!providerName || !providerName[0]) { return std::string(); }
     for (int i = 0; i < kAigptProviderCount; ++i) {
         const AigptbotProvider& p = kAigptProviders[i];
-        if (p.webKind != kAigptbotWebNone && std::string(p.name) == providerName) {
+        if (std::string(p.name) != providerName) { continue; }
+        if (p.webKind != kAigptbotWebNone) {
             return std::string(webCredStatusName(webCredResult(p).status));
         }
+        if (p.id == kAigptbotMetaApi) {
+            return std::string(webCredStatusName(webCredGet("noweb_meta", "").status));
+        }
+        return std::string();
     }
     return std::string();
 }
