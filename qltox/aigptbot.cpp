@@ -1,6 +1,7 @@
 #include "aigptbot.h"
 #include "compatcore34.h"
 #include "eventpoller.h"
+#include "webcreds.h"
 #include "cJSON.h"
 #include "obsd_sha2.h"
 #include "dspow_solve.h"
@@ -138,16 +139,29 @@ const AigptbotProvider kAigptProviders[] = {
 };
 const int kAigptProviderCount = int(sizeof(kAigptProviders) / sizeof(kAigptProviders[0]));
 
-// web provider 对应的凭据常量（空串 = 未配置）
-const char* webCredOf(const AigptbotProvider& p) {
+// web provider 对应凭据结果（默认读 webcreds 侧车，源码常量为默认定底）
+WebCredResult webCredResult(const AigptbotProvider& p) {
     switch (p.webKind) {
-    case kAigptbotWebDeepseek: { return kDeepseekWebCred; }
-    case kAigptbotWebGemini:   { return kGeminiWebCred; }
-    case kAigptbotWebGrok:     { return kGrokWebCred; }
-    case kAigptbotWebChatgpt:  { return kChatgptWebCred; }
+    case kAigptbotWebDeepseek: { return webCredGet("deepseek", kDeepseekWebCred); }
+    case kAigptbotWebGemini:   { return webCredGet("gemini", kGeminiWebCred); }
+    case kAigptbotWebGrok:     { return webCredGet("grok", kGrokWebCred); }
+    case kAigptbotWebChatgpt:  { return webCredGet("chatgpt", kChatgptWebCred); }
     case kAigptbotWebNone:     { break; }
     }
-    return "";
+    return WebCredResult();
+}
+
+// 日志统一状态前缀 cred=<none|builtin|plain|token|pass|broken>
+const char* webCredTag(WebCredStatus s) {
+    switch (s) {
+    case kWebCredNone:     { return "none"; }
+    case kWebCredConstant: { return "builtin"; }
+    case kWebCredPlain:    { return "plain"; }
+    case kWebCredTokenEnc: { return "token"; }
+    case kWebCredPassEnc:  { return "pass"; }
+    case kWebCredBroken:   { return "broken"; }
+    }
+    return "none";
 }
 
 struct Session {
@@ -332,12 +346,28 @@ void sendHost(Session* s, const AigptbotProvider& p) {
     s->tried.push_back(p.name);
     // web provider：凭据检查 + 协议分派（不走 OpenAI 兼容请求体）
     if (p.webKind != kAigptbotWebNone) {
-        qWarning("aigptbot: 候选[%d/%d] provider=%s host=%s webKind=%d brief=%d textlen=%d B",
+        const WebCredResult cr = webCredResult(p);
+        qWarning("aigptbot: 候选[%d/%d] provider=%s host=%s webKind=%d cred=%s brief=%d textlen=%d B",
                  s->index, (int)s->cands.size(), p.name, p.baseUrl,
-                 (int)p.webKind, (int)s->req.brief, (int)s->req.text.size());
-        if (std::string(webCredOf(p)).empty()) {
-            s->lastError = std::string(p.name) + ": 未配置凭据（见 docs/aigptbot-web-sources.md §3）";
-            qWarning("aigptbot: provider=%s 未配置凭据 → 切换候选", p.name);
+                 (int)p.webKind, webCredTag(cr.status), (int)s->req.brief, (int)s->req.text.size());
+        if (!cr.ok) {
+            std::string why;
+            switch (cr.status) {
+            case kWebCredPassEnc: {
+                why = std::string(p.name) + ": 口令加密凭据未提供口令（配置时输入口令，或设 QTOX_WEB_CRED_PASS/PASS_COMMAND）";
+                break;
+            }
+            case kWebCredBroken: {
+                why = std::string(p.name) + ": 凭据解不开（密钥/口令错误或文件损坏，建议 工具→Web 凭据 中删除重建）";
+                break;
+            }
+            default: {
+                why = std::string(p.name) + ": 未配置凭据（工具→Web 凭据 或 docs/aigptbot-web-sources.md §3）";
+                break;
+            }
+            }
+            s->lastError = why;
+            qWarning("aigptbot: provider=%s 凭据不可用(cred=%s) → 切换候选", p.name, webCredTag(cr.status));
             ++s->index;
             startNext(s);
             return;
@@ -540,7 +570,8 @@ void sendWebHttp(Session* s, const std::string& url, const std::string& method,
 std::string g_dsDeviceId;   // 进程内稳定设备 ID（首启生成后复用）
 
 std::string dsDeviceId() {
-    if (kDeepseekDeviceIdCred[0]) { return kDeepseekDeviceIdCred; }
+    const WebCredResult r = webCredGet("deepseek_device_id", kDeepseekDeviceIdCred);
+    if (r.ok && !r.value.empty()) { return r.value; }
     if (g_dsDeviceId.empty()) { g_dsDeviceId = uuidV4(); }
     return g_dsDeviceId;
 }
@@ -550,7 +581,8 @@ std::map<std::string, std::string> dsHeaders(bool auth) {
     h["User-Agent"] = webUA(true);
     h["Accept"] = "*/*";
     h["Referer"] = "https://chat.deepseek.com/";
-    if (kDeepseekWebCookie[0]) { h["Cookie"] = kDeepseekWebCookie; }
+    const WebCredResult dsCookie = webCredGet("deepseek_cookie", kDeepseekWebCookie);
+    if (!dsCookie.value.empty()) { h["Cookie"] = dsCookie.value; }
     h["X-Client-Version"] = "2.5.0";
     h["X-Client-Platform"] = "android";
     h["X-Client-Locale"] = "zh_CN";
@@ -560,7 +592,7 @@ std::map<std::string, std::string> dsHeaders(bool auth) {
     h["X-Client-Timezone-Offset"] = "28800";
     if (auth) {
         h["Content-Type"] = "application/json";
-        h["Authorization"] = std::string("Bearer ") + kDeepseekWebCred;
+        h["Authorization"] = std::string("Bearer ") + webCredGet("deepseek", kDeepseekWebCred).value;
     }
     return h;
 }
@@ -1015,7 +1047,7 @@ void sendDeepseek(Session* s, const AigptbotProvider& p) {
 std::map<std::string, std::string> gemHeaders(bool form) {
     std::map<std::string, std::string> h;
     h["User-Agent"] = webUA(false);
-    h["Cookie"] = kGeminiWebCred;
+    h["Cookie"] = webCredGet("gemini", kGeminiWebCred).value;
     h["Accept"] = "*/*";
     webBrowserHeaders(h);
     if (form) {
@@ -1384,7 +1416,7 @@ std::map<std::string, std::string> grokHeaders(const std::string& urlPath) {
     std::map<std::string, std::string> h;
     h["User-Agent"] = webUA(false);
     h["Content-Type"] = "application/json";
-    h["Cookie"] = kGrokWebCred;
+    h["Cookie"] = webCredGet("grok", kGrokWebCred).value;
     h["Accept"] = "*/*";
     h["Origin"] = "https://grok.com";
     h["Referer"] = "https://grok.com";
@@ -1509,7 +1541,7 @@ void sendGrok(Session* s, const AigptbotProvider& p) {
 
 std::map<std::string, std::string> cgptHeaders(Session* s) {
     std::map<std::string, std::string> h;
-    h["Authorization"] = std::string("Bearer ") + kChatgptWebCred;
+    h["Authorization"] = std::string("Bearer ") + webCredGet("chatgpt", kChatgptWebCred).value;
     h["Content-Type"] = "application/json";
     h["Accept"] = "*/*";
     h["User-Agent"] = webUA(false);
@@ -1861,7 +1893,11 @@ std::vector<const AigptbotProvider*> buildCandidates(const AigptbotRequest& req,
             if (p.id == kAigptbotAiHorde) { continue; } // any/all 跳过
             if (p.webKind != kAigptbotWebNone) {
                 // web：凭据为空 → 视为未配置，跳过
-                if (std::string(webCredOf(p)).empty()) { continue; }
+                const WebCredResult cr = webCredResult(p);
+                if (!cr.ok) {
+                    qWarning("aigptbot: skip provider=%s cred=%s", p.name, webCredTag(cr.status));
+                    continue;
+                }
             } else if (p.needsKey) {
                 continue; // 不读配置文件，视为未配置→跳过
             }
@@ -1878,7 +1914,11 @@ std::vector<const AigptbotProvider*> buildCandidates(const AigptbotRequest& req,
             if (p.id == kAigptbotAiHorde) { continue; } // any/all 跳过
             if (p.webKind != kAigptbotWebNone) {
                 // web：凭据为空 → 视为未配置，跳过
-                if (std::string(webCredOf(p)).empty()) { continue; }
+                const WebCredResult cr = webCredResult(p);
+                if (!cr.ok) {
+                    qWarning("aigptbot: skip provider=%s cred=%s", p.name, webCredTag(cr.status));
+                    continue;
+                }
             } else if (p.needsKey) {
                 continue; // 跳过未配置
             }
@@ -1914,6 +1954,17 @@ const std::vector<AigptbotProvider>& aigptbotProviders() {
     static std::vector<AigptbotProvider> list(
         kAigptProviders, kAigptProviders + kAigptProviderCount);
     return list;
+}
+
+std::string aigptbotWebCredStatusName(const char* providerName) {
+    if (!providerName || !providerName[0]) { return std::string(); }
+    for (int i = 0; i < kAigptProviderCount; ++i) {
+        const AigptbotProvider& p = kAigptProviders[i];
+        if (p.webKind != kAigptbotWebNone && std::string(p.name) == providerName) {
+            return std::string(webCredStatusName(webCredResult(p).status));
+        }
+    }
+    return std::string();
 }
 
 void aigptbotChatStart(const AigptbotRequest& req, QObject* target) {

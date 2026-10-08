@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <mutex>
 #include <sstream>
 #include <vector>
 
@@ -51,6 +52,7 @@ std::string g_tokenOverride;
 cJSON* g_root = nullptr;
 bool g_loaded = false;
 bool g_broken = false;   // 侧车文件存在但解析失败/MAC 错 → 全体字段 Broken
+std::mutex g_lock;       // 保护 g_root/g_loaded/g_broken 与路径 override（aigptbot 工作线程 + UI/CLI 并发）
 
 // ── 路径 ────────────────────────────────────────────────────────────────
 std::string homeDir() {
@@ -653,14 +655,8 @@ bool addFieldToRoot(cJSON* root, const std::string& name, const std::string& val
 } // namespace
 
 // ── 公开接口 ────────────────────────────────────────────────────────────
-void webCredsSetFileOverride(const std::string& sidecarPath,
-                             const std::string& tokenPath) {
-    g_fileOverride = sidecarPath;
-    g_tokenOverride = tokenPath;
-    webCredsReload();
-}
-
-void webCredsReload() {
+// 无锁重置缓存（所有持锁路径统一调用，勿直接走公开 webCredsReload 以免嵌套死锁）
+static void reloadNoLock() {
     if (g_root) {
         cJSON_Delete(g_root);
         g_root = nullptr;
@@ -669,7 +665,21 @@ void webCredsReload() {
     g_broken = false;
 }
 
+void webCredsSetFileOverride(const std::string& sidecarPath,
+                             const std::string& tokenPath) {
+    std::lock_guard<std::mutex> lock(g_lock);
+    g_fileOverride = sidecarPath;
+    g_tokenOverride = tokenPath;
+    reloadNoLock();
+}
+
+void webCredsReload() {
+    std::lock_guard<std::mutex> lock(g_lock);
+    reloadNoLock();
+}
+
 WebCredResult webCredGet(const std::string& field, const std::string& fallback) {
+    std::lock_guard<std::mutex> lock(g_lock);
     ensureLoaded();
     WebCredResult r;
     if (g_broken) {
@@ -703,6 +713,7 @@ bool webCredsTokenFileExists() {
 bool webCredsCreate(const std::string& passphrase,
                     const std::vector<WebCredFieldIn>& fields,
                     std::string& err) {
+    std::lock_guard<std::mutex> lock(g_lock);
     cJSON* root = newRoot();
     for (size_t i = 0; i < fields.size(); ++i) {
         const WebCredFieldIn& f = fields[i];
@@ -717,19 +728,20 @@ bool webCredsCreate(const std::string& passphrase,
         err = "写入侧车文件失败: " + sidecarPath();
         return false;
     }
-    webCredsReload();
+    reloadNoLock();
     return true;
 }
 
 bool webCredsSetField(const std::string& name, const std::string& value,
                       WebCredMode mode, const std::string& passphrase,
                       std::string& err) {
+    std::lock_guard<std::mutex> lock(g_lock);
     cJSON* root = loadRootForWrite(err);
     if (!root) { return false; }
     const bool ok = addFieldToRoot(root, name, value, mode, passphrase, err);
     if (ok && saveRoot(root)) {
         cJSON_Delete(root);
-        webCredsReload();
+        reloadNoLock();
         return true;
     }
     cJSON_Delete(root);
@@ -738,6 +750,7 @@ bool webCredsSetField(const std::string& name, const std::string& value,
 }
 
 bool webCredsRemoveField(const std::string& name, std::string& err) {
+    std::lock_guard<std::mutex> lock(g_lock);
     cJSON* root = loadRootForWrite(err);
     if (!root) { return false; }
     cJSON* fields = cJSON_GetObjectItem(root, "fields");
@@ -748,12 +761,13 @@ bool webCredsRemoveField(const std::string& name, std::string& err) {
         err = "写入侧车文件失败: " + sidecarPath();
         return false;
     }
-    webCredsReload();
+    reloadNoLock();
     return true;
 }
 
 bool webCredsList(bool reveal, const std::string& passphrase,
                   std::vector<WebCredListEntry>& out, std::string& err) {
+    std::lock_guard<std::mutex> lock(g_lock);
     ensureLoaded();
     out.clear();
     if (g_broken) {
@@ -790,10 +804,11 @@ bool webCredsList(bool reveal, const std::string& passphrase,
 }
 
 bool webCredsWipe(std::string& err) {
+    std::lock_guard<std::mutex> lock(g_lock);
     bool ok = true;
     if (::unlink(sidecarPath().c_str()) != 0 && errno != ENOENT) { ok = false; }
     if (::unlink(tokenPath().c_str()) != 0 && errno != ENOENT) { ok = false; }
-    webCredsReload();
+    reloadNoLock();
     if (!ok) {
         err = "删除侧车/令牌文件失败";
         return false;

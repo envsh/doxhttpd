@@ -100,7 +100,7 @@ QString WebCredDialog::rowText(const WebCredListEntry& e) const {
     QString valuePart = qFromUtf8(" ");
     switch (e.status) {
     case kWebCredNone:
-        valuePart = qFromUtf8("未配置");
+        valuePart = qFromUtf8("-");
         break;
     case kWebCredConstant:
         valuePart = qFromUtf8("内置常量（侧车未配置）");
@@ -125,6 +125,7 @@ QString WebCredDialog::rowText(const WebCredListEntry& e) const {
 }
 
 void WebCredDialog::refresh() {
+    webCredsReload();   // 踢掉进程内缓存，让 CLI/外部改动可被「刷新」看到
     std::vector<WebCredListEntry> out;
     std::string err;
     QByteArray passUtf8 = qToUtf8(sessionPass);
@@ -259,6 +260,7 @@ WebCredEditDialog::WebCredEditDialog(QWidget* parent, const std::string& field,
     size_t kc = 0;
     const char* const* known = webCredsKnownFields(kc);
     int wantIdx = 0;
+    bool knowKnown = false;
     for (size_t i = 0; i < kc; ++i) {
 #ifdef QT3_BUILD
         nameCombo->insertItem(qFromUtf8(known[i]));
@@ -267,7 +269,17 @@ WebCredEditDialog::WebCredEditDialog(QWidget* parent, const std::string& field,
 #endif
         if (field == known[i]) {
             wantIdx = (int)i;
+            knowKnown = true;
         }
+    }
+    if (!field.empty() && !knowKnown) {
+        // CLI 自定义字段名：临时加入列表并选中，避免静默改写已知字段
+#ifdef QT3_BUILD
+        nameCombo->insertItem(qFromUtf8(field.c_str()));
+#else
+        nameCombo->addItem(qFromUtf8(field.c_str()));
+#endif
+        wantIdx = (int)kc;
     }
 #ifdef QT3_BUILD
     nameCombo->setCurrentItem(wantIdx);

@@ -4,7 +4,9 @@
 
 - 核对日期：**2026-10-08**
 - 用途：为 qltox `aigptbot` 新增 4 个 web provider（`chatgpt-web` / `deepseek-web` / `gemini-web` / `grok-web`）提供接口依据、凭据提取方法与参考来源清单。
-- 范围：仅文档记录。对应实现见 `qltox/aigptbot.h` / `aigptbot.cpp`（凭据常量为 `aigptbot.cpp` 顶部各 `kXxxWebCred` 空变量，填值后重编译）。
+- 范围：仅文档记录。对应实现见 `qltox/aigptbot.h` / `aigptbot.cpp`。凭据读取走加密侧车
+  （webcreds，见 §3.0；`工具→Web 凭据` 或 CLI 配置）；`aigptbot.cpp` 顶部各 `kXxxWebCred`
+  常量降为默认定底（侧车未配置且常量非空时才生效）。
 
 ## 1. 四家接口核对表
 
@@ -26,7 +28,9 @@
 
 ## 3. 凭据手工提取指南
 
-通用：登录目标站点 → F12 DevTools → Application（Chrome/Edge）/ Storage（Firefox）查看 Cookie 与 Local Storage；或 Network 面板右键请求 **Copy as cURL** 从 `-H 'cookie: ...'` / `authorization: ...` 抄取。填入 `qltox/aigptbot.cpp` 顶部对应 `kXxxWebCred` 空常量后重编译（Qt3 → Qt4 顺序，勿并行）。
+通用：登录目标站点 → F12 DevTools → Application（Chrome/Edge）/ Storage（Firefox）查看 Cookie 与 Local Storage；或 Network 面板右键请求 **Copy as cURL** 从 `-H 'cookie: ...'` / `authorization: ...` 抄取。写入 webcreds 侧车（字段名见 §3.0：`deepseek`/`gemini`/`grok`/
+`chatgpt` + 可选 `deepseek_cookie`/`deepseek_device_id`）即可即时生效；亦可填 `qltox/aigptbot.cpp`
+顶部对应 `kXxxWebCred` 常量作为默认定底（需重编译，Qt3 → Qt4 顺序，勿并行）。
 
 注：**浏览器信息与凭据须同源**——grok 的 Cloudflare `cf_clearance`/`__cf_bm` 绑定 UA 与 IP，
 因此 Copy as cURL 时应连带抓 `user-agent:` / `sec-ch-ua:` 的值，填到 `kWebCredUA`（或保持其空值、
@@ -65,11 +69,19 @@
   在会话内缓存，关窗即弃）/ `set`（`配置/修改`，模式三选一：明文/令牌加密/口令
   加密，字段名限 6 个已知字段）/ `rm`（`删除`，删除后回退源码常量兜底）。
 - 阶段说明：阶段一=存储层（构建验证/CLI/单测 `test_webcreds.cpp`，56 断言）；
-  **阶段二=UI 配置管理**（`qltox/webcredsdialog.h/.cpp`，入口在 `mainwindow`
-  工具菜单，`qltox.pro` 已加入源文件）。`aigptbot.cpp` 尚未接入，仍读源码常量；
-  把 `webCredGet()`/状态接进 `webCredOf()` 与五处 header 构造点在后续阶段（见 §4 映射）。
+  **阶段二=UI 配置管理**（`qltox/webcredsdialog.h/.cpp`，入口 工具→Web 凭据）；
+  **阶段三=读取链路接入**：`aigptbot.cpp` 新增 `webCredResult()`/`webCredTag()`，
+  五处 header 与 deepseek `device_id`/`cookie` 改读侧车（字段 `deepseek`/`gemini`/`grok`/
+  `chatgpt`/`deepseek_cookie`/`deepseek_device_id`），常量降为默认定底；any/all 过滤按
+  ok 状态；点名报错按 未配置/口令缺失/解不开 细分；日志带 `cred=` 前缀；webcreds 缓存加
+  线程锁。**阶段四=provider 下拉凭据状态标签**：`messageattribbar.cpp` 对 web provider
+  项追加 `[状态]` 后缀（`MessageAttrDef::displayOptions` 实现显示与 wire 值解耦，发送值
+  仍为纯 provider 名），新增公开 `aigptbotWebCredStatusName()`；ack 回执尾部状态留后续
+  （见 §4 映射）。
 
 ### 3.1 deepseek-web → `kDeepseekWebCred`
+
+> 也可写入侧车字段 `deepseek`（§3.0，优先于常量）；`deepseek_cookie`/`deepseek_device_id` 同理。
 
 1. 登录 `chat.deepseek.com`
 2. DevTools → Application → Local Storage → `https://chat.deepseek.com`
@@ -87,6 +99,8 @@
 
 ### 3.2 gemini-web → `kGeminiWebCred`
 
+> 也可写入侧车字段 `gemini`（§3.0，优先于常量）。
+
 1. 登录 `gemini.google.com`
 2. DevTools → Application → Cookies → `https://gemini.google.com`
 3. 分别复制 **`__Secure-1PSID`** 和 **`__Secure-1PSIDTS`** 的值
@@ -101,6 +115,8 @@ __Secure-1PSID=<值1>; __Secure-1PSIDTS=<值2>
 注：`at`（SNlM0e）由代码运行时自动获取，无需手工提取；`__Secure-1PSID` 会不定期变化（参考来源 PR #361），失效后需重新提取。
 
 ### 3.3 grok-web → `kGrokWebCred`
+
+> 也可写入侧车字段 `grok`（§3.0，优先于常量）。
 
 1. 登录 `grok.com` 并发送一条消息
 2. Network → 过滤 `conversations/new` → 右键 **Copy as cURL**
@@ -122,6 +138,8 @@ sso=<值1>; sso-rw=<值2>
 
 ### 3.4 chatgpt-web → `kChatgptWebCred`（实验性）
 
+> 也可写入侧车字段 `chatgpt`（§3.0，优先于常量）。
+
 1. 登录 `chatgpt.com`
 2. 浏览器地址栏打开 `https://chatgpt.com/api/auth/session`
 3. 取 JSON 中 **`accessToken`** 字段值（`eyJ...` 开头）填入常量
@@ -135,13 +153,16 @@ sso=<值1>; sso-rw=<值2>
 - 凭据/指纹常量：`aigptbot.cpp` 顶部 `kDeepseekWebCred` / `kGeminiWebCred` / `kGrokWebCred` /
   `kChatgptWebCred`，加 `kWebCredUA`（统一浏览器 UA）、`kDeepseekDeviceIdCred` / `kDeepseekWebCookie`
   （deepseek 可选）、`kGrokChallengeHeaderHex` / `kGrokChallengeSuffix` / `kGrokChallengeTrailer`
-  （grok 挑战）。均 `""`，填值重编译；**不改 config.json、不做设置页**。
-- `buildCandidates()` 中凭据为空 → `any`/`all` 跳过、点名单选报"未配置凭据"。
+  （grok 挑战）。常量均为默认定底（优先读 webcreds 侧车，见 §3.0）；**不改
+  config.json、不做独立设置页**。
+- `buildCandidates()` 中凭据不可用（`ok=false`：未配置/解不开/口令缺失均算）→ `any`/`all`
+  跳过，并记 `cred=` 日志；点名单选按细分（未配置/口令缺失/解不开）报错。
 - 每条消息新会话（无状态，不缓存 session id）；内部可请求 SSE 但聚合后单次返回（`parseSseContent()` 聚合 delta），保持现有完成事件语义。
 - 协议细节：见下方 §6（deepseek / grok / gemini / chatgpt 分节）。
 - 哈希库：`qlcomp/obsd_sha2.c/.h`（OpenBSD SHA-2，供 chatgpt PoW）与 `qlcomp/dspow_solve.c/.h`（DeepSeekHashV1，供 deepseek PoW），经 `qlcomp/qlite.pri` 编入所有构建。
 - 阶段划分：P0 架构（enum/`webKind` 字段/`sendWebHost()` 分派/哈希库）→ P1 deepseek-web → P2 gemini-web → P3 grok-web → P4 chatgpt-web（实验性，失败给明确报错）。
-- 不改：Go server、`web/`、`messageattribbar.cpp`（provider 下拉动态生成，新 provider 自动出现）、设置对话框、`build.sh`。
+- 不改：Go server、`web/`、设置对话框、`build.sh`。`messageattribbar.cpp` 仅 provider
+  下拉追加凭据状态后缀标签（显示层，wire 值不变）。
 
 ## 5. 共性风险
 

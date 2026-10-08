@@ -482,10 +482,12 @@ void MessageAttribBar::rebuildChildren() {
         case MessageAttrDef::kCombo: {
             QComboBox* cb = new QComboBox(this);
             for (int j = 0; j < d.options.count(); ++j) {
+                const QString txt = (d.displayOptions.count() == d.options.count())
+                        ? d.displayOptions[j] : d.options[j];
 #ifdef QT3_BUILD
-                cb->insertItem(d.options[j]);
+                cb->insertItem(txt);
 #else
-                cb->addItem(d.options[j]);
+                cb->addItem(txt);
 #endif
             }
             cb->setFixedWidth(120);
@@ -900,16 +902,27 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
         defs << comboDef("platform", qFromUtf8("平台"), pf, "all",
                          qFromUtf8("贴图/短视频平台：all=自动选优 / instagram / snapchat / giphy（占位属性，暂不生效）"));
     } else if (type == kAichatType) {
+        const auto& plist = aigptbotProviders();
         QStringList svc;
+        QStringList svcDisp;
         svc << "any" << "all";
-        {
-            const auto& plist = aigptbotProviders();
-            for (size_t i = 0; i < plist.size(); ++i) {
-                svc << qFromUtf8(plist[i].name);
+        svcDisp << "any" << "all";
+        for (size_t i = 0; i < plist.size(); ++i) {
+            svc << qFromUtf8(plist[i].name);
+            QString nm = qFromUtf8(plist[i].name);
+            if (plist[i].webKind != kAigptbotWebNone) {
+                // web：凭据状态后缀标签（仅显示层，wire 值仍为纯 provider 名）
+                const std::string st = aigptbotWebCredStatusName(plist[i].name);
+                if (!st.empty()) {
+                    nm += qFromUtf8(" [") + qFromUtf8(st.c_str()) + qFromUtf8("]");
+                }
             }
+            svcDisp << nm;
         }
-        defs << comboDef("provider", qFromUtf8("接入服务商"), svc, "any",
-                         qFromUtf8("客户端直连：any=随机降级 / all=固定顺序降级 / 指定单一服务商"));
+        MessageAttrDef def = comboDef("provider", qFromUtf8("接入服务商"), svc, "any",
+                                      qFromUtf8("客户端直连：any=随机降级 / all=固定顺序降级 / 指定单一服务商"));
+        def.displayOptions = svcDisp;
+        defs << def;
         defs << lineDef("model", qFromUtf8("模型"), QString(),
                         qFromUtf8("留空使用服务商默认模型"));
         {

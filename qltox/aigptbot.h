@@ -31,7 +31,7 @@ enum AigptbotProviderId {
     kAigptbotGroqViaCf,
     kAigptbotGeminiViaCf,
     kAigptbotAiHorde,
-    // web 版直连（凭据见 aigptbot.cpp 顶部 kXxxWebCred、docs/aigptbot-web-sources.md §3）
+    // web 版直连（凭据读加密侧车 webcreds，见 docs/aigptbot-web-sources.md §3.0）
     kAigptbotDeepseekWeb,
     kAigptbotGeminiWeb,
     kAigptbotGrokWeb,
@@ -59,6 +59,9 @@ struct AigptbotProvider {
 };
 
 const std::vector<AigptbotProvider>& aigptbotProviders();
+
+// 返回 provider 名对应的 web 凭据状态名（非 web provider / 未知名称返回空串）
+std::string aigptbotWebCredStatusName(const char* providerName);
 
 struct AigptbotRequest {
     std::string text;      // 待发送文本（UTF-8 原样）

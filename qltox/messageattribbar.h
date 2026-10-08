@@ -20,7 +20,8 @@ struct MessageAttrDef {
     QString key;
     QString label;
     Kind kind;
-    QStringList options;      // kCombo
+    QStringList options;      // kCombo（wire 值：itemValue() 恒取此列）
+    QStringList displayOptions; // kCombo：非空且与 options 等长时作为下拉显示文本（发送值仍取 options）
     int spinMin; int spinMax; int spinStep;   // kSpin
     QString defValue;         // 默认值(combo=选项文本 / check="0"/"1" / spin=数字串 / line,tags=文本)
     QString hint;             // 全局/简短用法提示(Qt3 无 placeholder,仅 tooltip)
