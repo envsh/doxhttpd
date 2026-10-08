@@ -26,7 +26,8 @@ QTCOMP_CPP = $$PWD/limelog.cpp $$PWD/appsetup.cpp $$PWD/compat34.cpp $$PWD/trans
 			$$PWD/screenshotpreview.cpp \
 			$$PWD/sleepblocker.cpp \
 			$$PWD/systemtrayicon.cpp \
-			$$PWD/tagutil.cpp
+			$$PWD/tagutil.cpp \
+			$$PWD/obsd_sha2.c $$PWD/dspow_solve.c
 
 QTCOMP_HDR = $$PWD/limelog.h $$PWD/appsetup.h $$PWD/appsetup_c.h $$PWD/translator.h $$PWD/compat34.h \
 			$$PWD/emojiutil.h $$PWD/emojiwidgets.h $$PWD/emojiitems.h \
@@ -47,7 +48,8 @@ QTCOMP_HDR = $$PWD/limelog.h $$PWD/appsetup.h $$PWD/appsetup_c.h $$PWD/translato
 			$$PWD/screenshotpreview.h \
 			$$PWD/sleepblocker.h \
 			$$PWD/systemtrayicon.h \
-			$$PWD/tagutil.h
+			$$PWD/tagutil.h \
+			$$PWD/obsd_sha2.h $$PWD/dspow_solve.h
 
 # SystemTrayIcon 平台依赖：Qt3 分支用 Psi TrayIcon（qpopupmenu.h 等 Qt3 专属 API，
 # 不能进 Qt4 构建）；Qt4 分支用原生 QSystemTrayIcon，无需平台文件。
