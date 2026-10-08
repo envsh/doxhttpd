@@ -60,3 +60,12 @@ TEST_CASE("parseOpenAiLike 基本解析") {
     CHECK(parseOpenAiLike("not json").empty());
     CHECK(parseOpenAiLike("{}").empty());
 }
+
+TEST_CASE("grokStatsigChallenge 结构自检") {
+    const std::string id = grokStatsigChallenge("POST", "/rest/app-chat/conversations/new");
+    CHECK(id.size() == 94);                 // 70B 无 padding base64
+    CHECK(id.find('=') == std::string::npos);
+    const std::string id2 = grokStatsigChallenge("POST", "/rest/app-chat/conversations/new");
+    CHECK(id2.size() == id.size());         // 随机 XOR 字节 → 两次不同
+    CHECK(id != id2);
+}

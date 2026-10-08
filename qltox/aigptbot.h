@@ -31,6 +31,20 @@ enum AigptbotProviderId {
     kAigptbotGroqViaCf,
     kAigptbotGeminiViaCf,
     kAigptbotAiHorde,
+    // web 版直连（凭据见 aigptbot.cpp 顶部 kXxxWebCred、docs/aigptbot-web-sources.md §3）
+    kAigptbotDeepseekWeb,
+    kAigptbotGeminiWeb,
+    kAigptbotGrokWeb,
+    kAigptbotChatgptWeb,       // 实验性（sentinel Turnstile 可能被拦）
+};
+
+// web provider 内部协议分支（=0 走 OpenAI 兼容 sendHost）
+enum AigptbotWebKind {
+    kAigptbotWebNone = 0,
+    kAigptbotWebDeepseek,
+    kAigptbotWebGemini,
+    kAigptbotWebGrok,
+    kAigptbotWebChatgpt,
 };
 
 // 单个 provider 的静态契约
@@ -41,6 +55,7 @@ struct AigptbotProvider {
     bool allowEmptyKey;         // true 表示不发送 Authorization 头（BlockRun/OVH/Ollama）
     const char* baseUrl;        // 完整 chat/completions URL（CF Gateway 含模板化 %1/%2）
     const char* modelDefault;   // 文本默认模型名（可为空字符串）
+    AigptbotWebKind webKind;    // 末位：非 None 时走 sendWebHost 分派（聚合初始化省略=0，存量表行不动）
 };
 
 const std::vector<AigptbotProvider>& aigptbotProviders();
