@@ -35,13 +35,21 @@
  */
 
 /* 本地适配（相对 openbsd/src sys/crypto/sha2.c v1.21，改动仅限移植所需）：
- * - <sys/time.h>/<sys/systm.h>/<crypto/sha2.h> → <endian.h>/<string.h>/"obsd_sha2.h"
- * - BYTE_ORDER/LITTLE_ENDIAN/BIG_ENDIAN 经 <endian.h> 的 __BYTE_ORDER 映射
- *   （glibc 严格 -std=c11 下 BYTE_ORDER 默认不暴露）
+ * - <sys/time.h>/<sys/systm.h>/<crypto/sha2.h> → 字节序宏/string.h/"obsd_sha2.h"
+ * - BYTE_ORDER/LITTLE_ENDIAN/BIG_ENDIAN 优先用编译器预定义宏（gcc≥4.6 与
+ *   所有 clang 均提供 __BYTE_ORDER__/__ORDER_LITTLE_ENDIAN__/__ORDER_BIG_ENDIAN__，
+ *   跨平台且不受 -std 影响，macOS 无 <endian.h> 也能编译）；
+ *   <endian.h> 仅在没有该内置宏的环境（远古编译器）兜底
  * - uint8_t/uint32_t/uint64_t → uint8_t/uint32_t/uint64_t
  * - explicit_bzero → 本地 volatile 擦除（glibc 2.17 无 explicit_bzero）
  */
+#ifdef __BYTE_ORDER__
+#define __BYTE_ORDER    __BYTE_ORDER__
+#define __LITTLE_ENDIAN __ORDER_LITTLE_ENDIAN__
+#define __BIG_ENDIAN    __ORDER_BIG_ENDIAN__
+#else
 #include <endian.h>
+#endif
 #include <string.h>
 #include <stdint.h>
 #include <stddef.h>
