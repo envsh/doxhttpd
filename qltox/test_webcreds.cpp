@@ -184,6 +184,7 @@ TEST_CASE("webcreds: list/status 名称/known-fields/wipe" * doctest::timeout(10
     size_t kc = 0;
     const char* const* known = webCredsKnownFields(kc);
     CHECK(kc >= 4);
+    CHECK(kc >= 25);   // 6 web + 19 noweb API key，防字段数回退
     CHECK(known != nullptr);
 
     // 状态名非空

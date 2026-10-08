@@ -53,12 +53,13 @@ private slots:
     void onOk();
 
 private:
-    QComboBox* nameCombo;   // 仅 6 个已知字段
+    QComboBox* nameCombo;   // 已知字段（下拉显示友好名，真实名见 m_comboFields）
     QComboBox* modeCombo;   // 明文 / 令牌加密 / 口令加密
     QLineEdit* valueEdit;
     QLabel* passLabel;
     QLineEdit* passEdit;
     QString m_sessionPass;
+    std::vector<std::string> m_comboFields;   // 与 nameCombo 项平行的真实字段名
 };
 
 #endif // WEBCREDSDIALOG_H

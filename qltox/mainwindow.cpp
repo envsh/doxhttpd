@@ -870,11 +870,13 @@ MainWindow::MainWindow(QWidget* parent)
 
     MenuWidget34* tool = mb->addMenu(qFromUtf8("工具(&T)"));
     EmbeddedMenuBar::addItem(tool, qFromUtf8("统计(&T)..."), this, SLOT(openStatistics()));
-    EmbeddedMenuBar::addItem(tool, qFromUtf8("Web 凭据(&W)..."), this, SLOT(openWebCreds()));
     EmbeddedMenuBar::addItem(tool, qFromUtf8("日志(&L)..."), this, SLOT(onMenu1Stub()));
     EmbeddedMenuBar::addItem(tool, qFromUtf8("贴纸管理器(&S)..."), this, SLOT(openStickerManager()));
-    EmbeddedMenuBar::addItem(tool, qFromUtf8("设置(&S)...\tCtrl+,"), this, SLOT(openSettings()));
     EmbeddedMenuBar::addItem(tool, qFromUtf8("Markdown编辑器(&M)...\tCtrl+M"), this, SLOT(openMdEditor()));
+
+    MenuWidget34* settingsMenu = mb->addMenu(qFromUtf8("设置(&S)"));
+    EmbeddedMenuBar::addItem(settingsMenu, qFromUtf8("设置(&S)...\tCtrl+,"), this, SLOT(openSettings()));
+    EmbeddedMenuBar::addItem(settingsMenu, qFromUtf8("Web 凭据(&W)..."), this, SLOT(openWebCreds()));
 
     // ── Etapps 菜单 ──
     m_etappsMenu = mb->addMenu(qFromUtf8("Etapps(&E)"));

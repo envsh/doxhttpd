@@ -100,6 +100,7 @@ bool webCredsList(bool reveal, const std::string& passphrase,
 bool webCredsWipe(std::string& err);
 
 // 已知字段名（check 展示顺序；可含侧车主键之外的字段）
+// 6 个 web 凭据 + 19 个非 web API key（noweb_*，仅管理存储，调用方暂未读取）
 const char* const* webCredsKnownFields(size_t& count);
 
 #endif // WEBCREDS_H

@@ -42,6 +42,30 @@ QString qPasswordPrompt(QWidget* parent, const QString& title,
 
 // ── WebCredDialog ──────────────────────────────────────────────
 
+// 字段显示名：noweb_* API key 映射为品牌/中文名，其余（web 字段/自定义名）原样
+QString webCredFieldDisplay(const std::string& name) {
+    if (name == "noweb_pollinations")    { return qFromUtf8("Pollinations"); }
+    if (name == "noweb_zhipu")           { return qFromUtf8("智谱"); }
+    if (name == "noweb_siliconflow")     { return qFromUtf8("硅基流动"); }
+    if (name == "noweb_nvidia")          { return qFromUtf8("NVIDIA NIM"); }
+    if (name == "noweb_openrouter")      { return qFromUtf8("OpenRouter"); }
+    if (name == "noweb_llm7")            { return qFromUtf8("LLM7"); }
+    if (name == "noweb_cloudflare")      { return qFromUtf8("Cloudflare"); }
+    if (name == "noweb_dashscope")       { return qFromUtf8("百炼"); }
+    if (name == "noweb_ovh")             { return qFromUtf8("OVH"); }
+    if (name == "noweb_volcengine")      { return qFromUtf8("豆包"); }
+    if (name == "noweb_modelscope")      { return qFromUtf8("ModelScope(国内)"); }
+    if (name == "noweb_modelscope_intl") { return qFromUtf8("ModelScope(国际)"); }
+    if (name == "noweb_groq")            { return qFromUtf8("Groq"); }
+    if (name == "noweb_huggingface")     { return qFromUtf8("HuggingFace"); }
+    if (name == "noweb_gemini")          { return qFromUtf8("Gemini"); }
+    if (name == "noweb_zai")             { return qFromUtf8("Z.ai(国际)"); }
+    if (name == "noweb_groq_viacf")      { return qFromUtf8("groq-viacf"); }
+    if (name == "noweb_gemini_viacf")    { return qFromUtf8("gemini-viacf"); }
+    if (name == "noweb_aihorde")         { return qFromUtf8("aihorde"); }
+    return qFromUtf8(name.c_str());
+}
+
 WebCredDialog::WebCredDialog(QWidget* parent)
     : QDialog(parent), listWidget(nullptr), revealBtn(nullptr), revealed(false) {
     qSetWindowTitle(this, qFromUtf8("Web 凭据配置"));
@@ -119,7 +143,7 @@ QString WebCredDialog::rowText(const WebCredListEntry& e) const {
         break;
     }
     return QString("%1  |  %2  |  %3")
-        .arg(qFromUtf8(e.name.c_str()), -22)
+        .arg(webCredFieldDisplay(e.name), -22)
         .arg(statusName, -12)
         .arg(valuePart);
 }
@@ -263,10 +287,11 @@ WebCredEditDialog::WebCredEditDialog(QWidget* parent, const std::string& field,
     bool knowKnown = false;
     for (size_t i = 0; i < kc; ++i) {
 #ifdef QT3_BUILD
-        nameCombo->insertItem(qFromUtf8(known[i]));
+        nameCombo->insertItem(webCredFieldDisplay(known[i]));
 #else
-        nameCombo->addItem(qFromUtf8(known[i]));
+        nameCombo->addItem(webCredFieldDisplay(known[i]));
 #endif
+        m_comboFields.push_back(known[i]);
         if (field == known[i]) {
             wantIdx = (int)i;
             knowKnown = true;
@@ -275,10 +300,11 @@ WebCredEditDialog::WebCredEditDialog(QWidget* parent, const std::string& field,
     if (!field.empty() && !knowKnown) {
         // CLI 自定义字段名：临时加入列表并选中，避免静默改写已知字段
 #ifdef QT3_BUILD
-        nameCombo->insertItem(qFromUtf8(field.c_str()));
+        nameCombo->insertItem(webCredFieldDisplay(field));
 #else
-        nameCombo->addItem(qFromUtf8(field.c_str()));
+        nameCombo->addItem(webCredFieldDisplay(field));
 #endif
+        m_comboFields.push_back(field);
         wantIdx = (int)kc;
     }
 #ifdef QT3_BUILD
@@ -363,7 +389,15 @@ WebCredMode WebCredEditDialog::getMode() const {
 }
 
 QString WebCredEditDialog::getFieldName() const {
-    return nameCombo->currentText();
+#ifdef QT3_BUILD
+    const int idx = nameCombo->currentItem();
+#else
+    const int idx = nameCombo->currentIndex();
+#endif
+    if (idx < 0 || idx >= (int)m_comboFields.size()) {
+        return QString();
+    }
+    return qFromUtf8(m_comboFields[idx].c_str());
 }
 
 QString WebCredEditDialog::getValue() const {

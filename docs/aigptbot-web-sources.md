@@ -29,7 +29,8 @@
 ## 3. 凭据手工提取指南
 
 通用：登录目标站点 → F12 DevTools → Application（Chrome/Edge）/ Storage（Firefox）查看 Cookie 与 Local Storage；或 Network 面板右键请求 **Copy as cURL** 从 `-H 'cookie: ...'` / `authorization: ...` 抄取。写入 webcreds 侧车（字段名见 §3.0：`deepseek`/`gemini`/`grok`/
-`chatgpt` + 可选 `deepseek_cookie`/`deepseek_device_id`）即可即时生效；亦可填 `qltox/aigptbot.cpp`
+`chatgpt` + 可选 `deepseek_cookie`/`deepseek_device_id`；另有 19 个 `noweb_*` 非 web API key 字段）
+即可即时生效；亦可填 `qltox/aigptbot.cpp`
 顶部对应 `kXxxWebCred` 常量作为默认定底（需重编译，Qt3 → Qt4 顺序，勿并行）。
 
 注：**浏览器信息与凭据须同源**——grok 的 Cloudflare `cf_clearance`/`__cf_bm` 绑定 UA 与 IP，
@@ -50,6 +51,10 @@
 - 环境变量：`QTOX_WEB_CRED_PASS` / `QTOX_WEB_CRED_PASS_COMMAND`（如
   `secret-tool lookup service qltox key webcreds`）/ `QTOX_WEB_CRED_FILE` / `QTOX_WEB_CRED_TOKEN` /
   `QTOX_WEB_CRED_ITERS`（默认 60000）。
+- 非 web（OpenAI 兼容）provider 的 API key 字段：`noweb_*` 共 19 个（pollinations/智谱/硅基流动/
+  NVIDIA NIM/OpenRouter/LLM7/Cloudflare/百炼/OVH/豆包/ModelScope 国内/国际/Groq/HuggingFace/
+  Gemini/Z.ai/groq-viacf/gemini-viacf/aihorde），仅提供加密存储与 CLI/GUI 管理（模式三选一同上），
+  **暂未接入 aigptbot 调用处**（后续以 `webCredGet("noweb_xxx", …)` 读取）。
 - 语义不变式：**无口令/无令牌也绝不阻塞** —— 缺失口令时 app 继续可跑（该字段状态=`口令加密`
   不可用）；解密失败（MAC 不过）= `解不开(Broken)`，**不回退**旧常量；**显式删除字段**才回退源码
   常量兜底。
@@ -67,7 +72,8 @@
 - GUI：主菜单 **工具 → Web 凭据(&W)** 打开配置对话框，等价 CLI 的
   `show`（列表含状态列，`显示明文`/`遮蔽值` 切换，口令加密字段首次需输入口令并
   在会话内缓存，关窗即弃）/ `set`（`配置/修改`，模式三选一：明文/令牌加密/口令
-  加密，字段名限 6 个已知字段）/ `rm`（`删除`，删除后回退源码常量兜底）。
+  加密，字段名限已知字段：6 个 web + 19 个 `noweb_*`，下拉显示友好名）/
+  `rm`（`删除`，删除后回退源码常量兜底）。
 - 阶段说明：阶段一=存储层（构建验证/CLI/单测 `test_webcreds.cpp`，56 断言）；
   **阶段二=UI 配置管理**（`qltox/webcredsdialog.h/.cpp`，入口 工具→Web 凭据）；
   **阶段三=读取链路接入**：`aigptbot.cpp` 新增 `webCredResult()`/`webCredTag()`，
