@@ -60,9 +60,14 @@
 ./webcreds wipe [--yes]
 ```
 
-- 阶段说明：阶段一仅落存储层（构建验证/CLI/单测 `test_webcreds.cpp`，56 断言）；
-  `aigptbot.cpp` 尚未接入，仍读源码常量。**阶段二**把 `webCredGet()`/状态接进
-  `webCredOf()` 与五处 header 构造点（见 §4 映射）。
+- GUI：主菜单 **工具 → Web 凭据(&W)** 打开配置对话框，等价 CLI 的
+  `show`（列表含状态列，`显示明文`/`遮蔽值` 切换，口令加密字段首次需输入口令并
+  在会话内缓存，关窗即弃）/ `set`（`配置/修改`，模式三选一：明文/令牌加密/口令
+  加密，字段名限 6 个已知字段）/ `rm`（`删除`，删除后回退源码常量兜底）。
+- 阶段说明：阶段一=存储层（构建验证/CLI/单测 `test_webcreds.cpp`，56 断言）；
+  **阶段二=UI 配置管理**（`qltox/webcredsdialog.h/.cpp`，入口在 `mainwindow`
+  工具菜单，`qltox.pro` 已加入源文件）。`aigptbot.cpp` 尚未接入，仍读源码常量；
+  把 `webCredGet()`/状态接进 `webCredOf()` 与五处 header 构造点在后续阶段（见 §4 映射）。
 
 ### 3.1 deepseek-web → `kDeepseekWebCred`
 

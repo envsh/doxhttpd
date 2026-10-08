@@ -13,6 +13,7 @@
 #include "groupinvitedialog.h"
 #include "friendinfodialog.h"
 #include "memberlistdialog.h"
+#include "webcredsdialog.h"
 #include "storage.h"
 #include "channel_db.h"
 #include "cache_db.h"
@@ -869,6 +870,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     MenuWidget34* tool = mb->addMenu(qFromUtf8("工具(&T)"));
     EmbeddedMenuBar::addItem(tool, qFromUtf8("统计(&T)..."), this, SLOT(openStatistics()));
+    EmbeddedMenuBar::addItem(tool, qFromUtf8("Web 凭据(&W)..."), this, SLOT(openWebCreds()));
     EmbeddedMenuBar::addItem(tool, qFromUtf8("日志(&L)..."), this, SLOT(onMenu1Stub()));
     EmbeddedMenuBar::addItem(tool, qFromUtf8("贴纸管理器(&S)..."), this, SLOT(openStickerManager()));
     EmbeddedMenuBar::addItem(tool, qFromUtf8("设置(&S)...\tCtrl+,"), this, SLOT(openSettings()));
@@ -4755,6 +4757,11 @@ void MainWindow::openStickerManager() {
 void MainWindow::openStatistics() {
     StatisticsDialog* dlg = new StatisticsDialog(this);
     dlg->show();
+}
+
+void MainWindow::openWebCreds() {
+    WebCredDialog dlg(this);
+    dlg.exec();
 }
 
 void MainWindow::openCombineSearch() {

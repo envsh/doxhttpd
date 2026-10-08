@@ -20,6 +20,7 @@
 #include "screenshotmanager.h"
 #include "screenshotpreview.h"
 #include "memberlistdialog.h"
+#include "webcredsdialog.h"
 #include "ConfigDialog.h"
 #include "sleepblocker.h"
 #include "systemtrayicon.h"
@@ -89,6 +90,7 @@ protected slots:
     void openSettings();
     void openStickerManager();
     void openStatistics();
+    void openWebCreds();
     void openCombineSearch();
     void onMenu1Stub();
     void onMenu2Stub();
