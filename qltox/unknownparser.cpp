@@ -461,50 +461,85 @@ static bool tryParseMtxliteRoom(const std::string& rawStr, ParseResult& ret) {
         }
     }
 
-    // m.room.message 提及（content.m.mentions.user_ids[]）
-    cJSON* mentions = jsonPath(root, "content.m.mentions.user_ids");
-    if (mentions && cJSON_IsArray(mentions)) {
-        int mn = cJSON_GetArraySize(mentions);
-        for (int j = 0; j < mn; j++) {
-            cJSON* m = cJSON_GetArrayItem(mentions, j);
-            if (m && cJSON_IsString(m))
-                hm.mentions.push_back(cJSON_GetStringValue(m));
+    // Matrix 键名内含 '.'（"m.relates_to"/"m.mentions"/…），jsonPath 按 '.' 分段取不到，
+    // 必须像 gomuks 分支一样用 cJSON_GetObjectItem 直接导航。
+    cJSON* content = jsonPath(root, "content");
+
+    // 提及 content."m.mentions".user_ids[]
+    cJSON* mentions = content ? cJSON_GetObjectItem(content, "m.mentions") : NULL;
+    if (mentions) {
+        cJSON* uids = cJSON_GetObjectItem(mentions, "user_ids");
+        if (uids && cJSON_IsArray(uids)) {
+            int mn = cJSON_GetArraySize(uids);
+            for (int j = 0; j < mn; j++) {
+                cJSON* m = cJSON_GetArrayItem(uids, j);
+                if (m && cJSON_IsString(m)) {
+                    hm.mentions.push_back(cJSON_GetStringValue(m));
+                }
+            }
         }
     }
 
-    // m.room.message 关系（回复 content.m.relates_to.m.in_reply_to.event_id；
-    // 线程 content.m.relates_to.rel_type=="m.thread" 的 event_id 为线程根）
-    cJSON* relatesTo = jsonPath(root, "content.m.relates_to");
+    // 关系 content."m.relates_to"：回复 "m.in_reply_to".event_id；线程 rel_type=="m.thread"
+    cJSON* relatesTo = content ? cJSON_GetObjectItem(content, "m.relates_to") : NULL;
     if (relatesTo) {
-        std::string replyEid = jsonGetString(root, "content.m.relates_to.m.in_reply_to.event_id");
-        if (!replyEid.empty()) {
-            hm.relatesTos.push_back(replyEid);
+        std::string relType = jsonGetString(relatesTo, "rel_type");
+        cJSON* inReply = cJSON_GetObjectItem(relatesTo, "m.in_reply_to");
+        if (inReply) {
+            std::string replyEid = jsonGetString(inReply, "event_id");
+            if (!replyEid.empty()) {
+                hm.relatesTos.push_back(replyEid);
+            }
         }
-        if (jsonGetString(root, "content.m.relates_to.rel_type") == "m.thread") {
-            std::string threadRoot = jsonGetString(root, "content.m.relates_to.event_id");
+        if (relType == "m.thread") {
+            std::string threadRoot = jsonGetString(relatesTo, "event_id");
             if (!threadRoot.empty()) {
                 hm.relatesTos.push_back(threadRoot);
             }
         }
         // 编辑（rel_type=="m.replace"）：真实正文在 m.new_content.body，优先取用
-        if (jsonGetString(root, "content.m.relates_to.rel_type") == "m.replace") {
-            std::string newBody = jsonGetString(root, "content.m.new_content.body");
-            if (!newBody.empty() && msgtype.find("m.file") != 0) {
+        if (relType == "m.replace" && msgtype.find("m.file") != 0) {
+            cJSON* newContent = cJSON_GetObjectItem(relatesTo, "m.new_content");
+            std::string newBody = newContent ? jsonGetString(newContent, "body") : "";
+            if (!newBody.empty()) {
                 hm.message = newBody;
             }
         }
     }
 
-    // 镜像 gomuks：文本消息的提及追加 " -- Re: @id ..."，供客户端渲染为可点击链接
-    if (!hm.mentions.empty()
-        && msgtype.find("m.image") != 0 && msgtype.find("m.video") != 0
-        && msgtype.find("m.audio") != 0 && msgtype.find("m.file") != 0) {
-        std::string ms;
-        for (size_t j = 0; j < hm.mentions.size(); ++j) {
-            if (j) { ms += " "; }
-            ms += hm.mentions[j];
+    bool textMsg = msgtype.find("m.image") != 0 && msgtype.find("m.video") != 0
+                && msgtype.find("m.audio") != 0 && msgtype.find("m.file") != 0;
+
+    // 引用/提及标尾：" -- Re: @id ..."，供客户端渲染为可点链接。
+    // 优先 m.mentions（@user:server）；否则从正文首行 "> <@user:server> 原文" 提取；
+    // 两者皆无而存在 relates_to 时回退为不可点的 event_id（仅作"这是回复"的指示）。
+    // 正文已自带标尾（桥接消息）时不重复追加。
+    if (textMsg && hm.message.find(" -- Re: ") == std::string::npos) {
+        std::string reSuffix;
+        if (!hm.mentions.empty()) {
+            for (size_t j = 0; j < hm.mentions.size(); ++j) {
+                if (j) { reSuffix += " "; }
+                reSuffix += hm.mentions[j];
+            }
+        } else if (!hm.relatesTos.empty()) {
+            size_t nl = hm.message.find('\n');
+            std::string first = (nl == std::string::npos) ? hm.message : hm.message.substr(0, nl);
+            if (first.size() >= 2 && first[0] == '>' && first[1] == ' ') {
+                size_t a = first.find("<@");
+                if (a != std::string::npos) {
+                    size_t b = first.find('>', a + 2);
+                    if (b != std::string::npos && b > a + 2) {
+                        reSuffix = first.substr(a + 1, b - a - 1);
+                    }
+                }
+            }
+            if (reSuffix.empty()) {
+                reSuffix = hm.relatesTos[0];
+            }
         }
-        hm.message += " -- Re: " + ms;
+        if (!reSuffix.empty()) {
+            hm.message += " -- Re: " + reSuffix;
+        }
     }
 
     ret.messages.push_back(hm);

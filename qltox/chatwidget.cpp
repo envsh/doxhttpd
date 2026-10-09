@@ -1127,9 +1127,10 @@ void ChatWidget::onReplyRequested(int msgIndex) {
 
     if (!target.messageId.isEmpty()) {
         // 引用条为单值：新回复覆盖旧引用，并把旧引用捆绑的提到先撤掉
-        if (!m_replyMentionedName.isEmpty())
+        if (!m_replyMentionedName.isEmpty()) {
             removeCsvField(m_pendingCtx, "mentions", m_replyMentionedName);
-            appendCsvField(m_pendingCtx, "relates_to", target.messageId);
+        }
+        appendCsvField(m_pendingCtx, "relates_to", target.messageId);
         m_replyDisplayName = target.senderName;
         m_replySnippetText = snippetOneLine(target.messageText);
     } else {
