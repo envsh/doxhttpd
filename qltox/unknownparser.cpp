@@ -54,6 +54,100 @@ static std::string jsonGetStrNum(cJSON* root, const char* path) {
     return "";
 }
 
+static double jsonGetDouble(cJSON* root, const char* path) {
+    cJSON* item = jsonPath(root, path);
+    return (item && cJSON_IsNumber(item)) ? item->valuedouble : 0.0;
+}
+
+// ── 信封 Value.from 的 PeerId 解码 ──
+// from = identity-multihash(0x00 0x24) + libp2p protobuf 公钥，逐字节：
+//   0x00 0x24   identity 多哈希编码头（code=0x00，length=36）
+//   0x08 0x01   protobuf 头字节：field1 varint（KeyType），0x01 = Ed25519
+//   0x12 0x20   field2 varint（Data），长度 32
+//   0x00…0xFF   ed25519 公钥 32 字节（部分被上游替换为 \ufffd → 丢失占位 0xF8）
+// 上游以 Go 字符串直塞二进制（未 base64）：<=0x7F 的字节/HTML 转义可精确还原，
+// >=0x80 的非 UTF-8 字节已被替换为 \ufffd（丢失）。cJSON 以 C 字符串承载
+// valuestring，strlen 遇前导 NUL 即截断为空 → 必须绕开 cJSON，从原始 JSON
+// 文本按转义逐字节重建，再统一 base58 → 12D3KooW… 形态、逐 peer 稳定的标识。
+
+static const char kBase58Alphabet[] =
+    "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+static std::string base58Encode(const std::vector<uint8_t>& in) {
+    size_t zeros = 0;
+    while (zeros < in.size() && in[zeros] == 0) zeros++;
+    std::vector<uint8_t> tmp(in.size() * 138 / 100 + 1, 0);
+    size_t length = 0;
+    for (size_t i = zeros; i < in.size(); i++) {
+        unsigned int carry = in[i];
+        for (size_t j = 0; j < length; j++) {
+            carry += tmp[j] * 256;
+            tmp[j] = (uint8_t)(carry % 58);
+            carry /= 58;
+        }
+        while (carry > 0) {
+            tmp[length++] = (uint8_t)(carry % 58);
+            carry /= 58;
+        }
+    }
+    std::string out(std::string::size_type(zeros), '1');
+    while (length > 0) {
+        length--;
+        out += kBase58Alphabet[tmp[length]];
+    }
+    return out;
+}
+
+static bool decodeEnvelopeFromBytes(const std::string& jsonData, std::vector<uint8_t>& out) {
+    size_t pos = jsonData.find("\"Value\"");
+    if (pos == std::string::npos) return false;
+    pos = jsonData.find("\"from\"", pos);
+    if (pos == std::string::npos) return false;
+    pos = jsonData.find(':', pos);
+    if (pos == std::string::npos) return false;
+    pos = jsonData.find('"', pos);
+    if (pos == std::string::npos) return false;
+    pos++;   // 越过值左引号
+    const size_t n = jsonData.size();
+    out.clear();
+    while (pos < n) {
+        unsigned char c = (unsigned char)jsonData[pos];
+        if (c == '"') return !out.empty();
+        if (c != '\\') { out.push_back(c); pos++; continue; }
+        pos++;
+        if (pos >= n) return false;
+        char e = jsonData[pos++];
+        switch (e) {
+            case 'b': out.push_back('\b'); break;
+            case 'f': out.push_back('\f'); break;
+            case 'n': out.push_back('\n'); break;
+            case 'r': out.push_back('\r'); break;
+            case 't': out.push_back('\t'); break;
+            case '"': out.push_back('"'); break;
+            case '\\': out.push_back('\\'); break;
+            case '/': out.push_back('/'); break;
+            case 'u': {
+                if (pos + 4 > n) return false;
+                unsigned int v = 0;
+                for (int k = 0; k < 4; k++) {
+                    char h = jsonData[pos + k];
+                    v <<= 4;
+                    if (h >= '0' && h <= '9') v |= (unsigned)(h - '0');
+                    else if (h >= 'a' && h <= 'f') v |= (unsigned)(h - 'a' + 10);
+                    else if (h >= 'A' && h <= 'F') v |= (unsigned)(h - 'A' + 10);
+                    else return false;
+                }
+                pos += 4;
+                // <=0xFF 精确还原原字节；>0xFF（即 \ufffd）为丢失字节，0xF8 占位保长度/确定性
+                out.push_back((v <= 0xFF) ? (uint8_t)v : (uint8_t)0xF8);
+                break;
+            }
+            default: return false;
+        }
+    }
+    return false;
+}
+
 // ── Matrix/gomuks sync_complete 解析 ──
 
 static void parseGomuksEvents(cJSON* roomObj, const std::string& roomId, ParseResult& ret) {
@@ -2064,6 +2158,204 @@ static bool tryParseHongguoHotlist(const std::string& rawStr, ParseResult& ret) 
     return true;
 }
 
+// ── sysinfo 系统信息公告板解析 ──
+// 识别: Value.data 为系统信息 JSON（proto_type=="sysinfo" / kind=="sysinfo"），字段集合独有，天然互斥。
+// peer id 与载荷无关：id 来自信封 ret.envelopeFrom（Value.from），hash 后得稳定 int id；
+// name = host.hostname。正文格式化为 Markdown 表格（chatview 以纯文本按宽度换行）。
+static bool tryParseSysinfo(const std::string& rawStr, ParseResult& ret) {
+    cJSON* root = cJSON_Parse(rawStr.c_str());
+    if (!root) return false;
+
+    std::string protoType = jsonGetString(root, "proto_type");
+    std::string kind      = jsonGetString(root, "kind");
+    if (protoType != "sysinfo" && kind != "sysinfo") {
+        cJSON_Delete(root);
+        return false;
+    }
+
+    const std::string& from = ret.envelopeFrom;
+    if (from.empty()) {
+        cJSON_Delete(root);
+        return false;
+    }
+
+    std::string hostname = jsonGetString(root, "host.hostname");
+    if (hostname.empty()) hostname = kSysinfoBoardName;
+
+    ContactData cd;
+    cd.id          = kSysinfoBoardId;     // 固定板 id：所有 sysinfo 消息汇聚同一联系人（不做 hash）
+    cd.name        = kSysinfoBoardType;   // 联系人名 = "sysinfo_board"
+    cd.type        = kSysinfoBoardType;
+    cd.chatId      = kSysinfoBoardType;   // type == chatId == roomId（路由匹配用）
+    cd.status      = "online";
+    cd.isConnected = true;
+    ret.contacts.push_back(cd);
+    ret.contactName = qFromUtf8(cd.name);
+
+    // ── Markdown 表格 ──
+    std::string buf;
+    buf.reserve(2048);
+    const double GiB = 1073741824.0;
+    char tmp[96];
+
+    buf += "| " + std::string(kSysinfoBoardName) + " | " + hostname + " |\n";
+    buf += "|---|---|\n";
+    buf += "| 类别 | 字段 | 值 |\n";
+    buf += "|---|---|---|\n";
+
+    std::string arch   = jsonGetString(root, "host.arch");
+    std::string os     = jsonGetString(root, "host.os");
+    std::string plats  = jsonGetString(root, "host.platform");
+    std::string kernel = jsonGetString(root, "host.kernel");
+    buf += "| host | 主机 | " + hostname;
+    if (!arch.empty()) buf += " · " + arch;
+    if (!plats.empty()) buf += " · " + plats + "/" + os;
+    buf += " |\n";
+    buf += "| host | 内核/进程 | " + kernel
+         + " · procs " + std::to_string(jsonGetInt64(root, "host.procs"))
+         + " · up " + std::to_string(jsonGetInt64(root, "host.uptime_sec")) + "s |\n";
+
+    std::string cpuModel = jsonGetString(root, "cpu.model");
+    int64_t phy = jsonGetInt64(root, "cpu.counts_physical");
+    int64_t lgc = jsonGetInt64(root, "cpu.counts_logical");
+    buf += "| cpu | CPU | " + cpuModel;
+    if (phy > 0) buf += " · " + std::to_string(phy) + "物理/" + std::to_string(lgc) + "逻辑";
+    buf += " |\n";
+    snprintf(tmp, sizeof(tmp), "| cpu | 使用率 | %.1f%% |", jsonGetDouble(root, "cpu.percent"));
+    buf += tmp; buf += "\n";
+
+    snprintf(tmp, sizeof(tmp), "| mem | 内存 | %.2f/%.2f GiB (%.1f%%) |",
+             jsonGetDouble(root, "mem.used") / GiB,
+             jsonGetDouble(root, "mem.total") / GiB,
+             jsonGetDouble(root, "mem.used_percent"));
+    buf += tmp; buf += "\n";
+    if (jsonGetDouble(root, "mem.swap_total") > 0) {
+        snprintf(tmp, sizeof(tmp), "| mem | swap | %.2f/%.2f GiB (%.1f%%) |",
+                 jsonGetDouble(root, "mem.swap_used") / GiB,
+                 jsonGetDouble(root, "mem.swap_total") / GiB,
+                 jsonGetDouble(root, "mem.swap_used_percent"));
+        buf += tmp; buf += "\n";
+    }
+
+    snprintf(tmp, sizeof(tmp), "| load | 负载 | 1m %.2f / 5m %.2f / 15m %.2f |",
+             jsonGetDouble(root, "load.load1"), jsonGetDouble(root, "load.load5"),
+             jsonGetDouble(root, "load.load15"));
+    buf += tmp; buf += "\n";
+
+    // disk：逐块一行（最多 8 块）
+    cJSON* diskArr = cJSON_GetObjectItem(root, "disk");
+    if (cJSON_IsArray(diskArr)) {
+        int n = cJSON_GetArraySize(diskArr);
+        for (int i = 0; i < n && i < 8; i++) {
+            cJSON* d = cJSON_GetArrayItem(diskArr, i);
+            if (!d) continue;
+            snprintf(tmp, sizeof(tmp), "| disk | %s | %s · %.2f/%.2f GiB (%.1f%%) |",
+                     jsonGetString(d, "mountpoint").c_str(),
+                     jsonGetString(d, "device").c_str(),
+                     jsonGetDouble(d, "used") / GiB, jsonGetDouble(d, "total") / GiB,
+                     jsonGetDouble(d, "used_percent"));
+            buf += tmp; buf += "\n";
+        }
+    }
+
+    // net：仅 up+broadcast+multicast 物理口（跳过 loopback / pointtopoint）
+    cJSON* netArr = cJSON_GetObjectItem(root, "net");
+    if (cJSON_IsArray(netArr)) {
+        int n = cJSON_GetArraySize(netArr);
+        for (int i = 0; i < n && i < 8; i++) {
+            cJSON* it = cJSON_GetArrayItem(netArr, i);
+            if (!it) continue;
+            std::string nname = jsonGetString(it, "name");
+            std::string flags = jsonGetString(it, "flags");
+            if (nname.empty() || nname == "lo" ||
+                flags.find("broadcast") == std::string::npos) continue;
+            snprintf(tmp, sizeof(tmp), "| net | %s | ↓%.1fKB/s · ↑%.1fKB/s |",
+                     nname.c_str(),
+                     jsonGetDouble(it, "recv_speed") / 1024.0,
+                     jsonGetDouble(it, "send_speed") / 1024.0);
+            buf += tmp; buf += "\n";
+        }
+    }
+
+    // temp：合并一行（最多 8 个）
+    cJSON* tempArr = cJSON_GetObjectItem(root, "temp");
+    if (cJSON_IsArray(tempArr)) {
+        int n = cJSON_GetArraySize(tempArr);
+        std::string tl;
+        for (int i = 0; i < n && i < 8; i++) {
+            cJSON* t = cJSON_GetArrayItem(tempArr, i);
+            if (!t) continue;
+            char tb[24];
+            snprintf(tb, sizeof(tb), "%.0f°C", jsonGetDouble(t, "celsius"));
+            if (!tl.empty()) tl += " · ";
+            tl += jsonGetString(t, "sensor") + " " + tb;
+        }
+        if (!tl.empty()) buf += "| temp | 温度 | " + tl + " |\n";
+    }
+
+    // errors：合并一行（最多 8 条）
+    cJSON* errArr = cJSON_GetObjectItem(root, "errors");
+    if (cJSON_IsArray(errArr)) {
+        int n = cJSON_GetArraySize(errArr);
+        std::string el;
+        for (int i = 0; i < n && i < 8; i++) {
+            cJSON* e = cJSON_GetArrayItem(errArr, i);
+            if (!e || !cJSON_IsString(e)) continue;
+            if (!el.empty()) el += " · ";
+            el += cJSON_GetStringValue(e);
+        }
+        if (!el.empty()) buf += "| err | 异常 | " + el + " |\n";
+    }
+
+    // 时间（published_at 转本地）
+    int64_t pub = jsonGetInt64(root, "published_at");
+    std::string timeStr;
+    if (pub > 0) {
+        time_t sec = (time_t)pub;
+        struct tm tmv;
+        localtime_r(&sec, &tmv);
+        char tbuf[32] = {0};
+        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", &tmv);
+        timeStr = tbuf;
+    }
+    buf += "| time | 时间 | " + timeStr + " |\n";
+
+    HistoryMessage hm;
+    hm.message       = buf;
+    hm.sender_pubkey = from;
+    hm.sender_number = 0;
+    hm.direction     = "received";
+    hm.created_at    = timeStr;
+    hm.roomId        = kSysinfoBoardType;     // 与 cd.chatId 相等 → 通用路由命中单板
+    {
+        char eid[48];
+        snprintf(eid, sizeof(eid), "sysinfo_%lld_%x", (long long)pub,
+                 (unsigned)(std::hash<std::string>{}(from) & 0xffffffffu));
+        hm.eventId = eid;   // published_at+from 双重去重：同源快照不重插，跨源同秒不误吞
+    }
+    ret.messages.push_back(hm);
+
+    // uname -a 式显示名：sysname nodename release machine（os hostname kernel arch），缺省自动跳过
+    std::string unameLike;
+    if (!os.empty()) unameLike = os + " ";
+    unameLike += hostname;
+    if (!kernel.empty()) unameLike += " " + kernel;
+    if (!arch.empty())   unameLike += " " + arch;
+
+    PeerInfo pi;
+    pi.publicKey  = from;
+    pi.userName   = from;       // sendername == peerid == peerpubkey == value.from（独立于 payload）
+    pi.nickname   = unameLike;  // 气泡显示名（例：linux node 5.15.0-91-generic x86_64）
+    pi.peerNumber = 0;
+    ret.peers.push_back(pi);
+
+    ret.senderName = qFromUtf8(from);   // peerid == sendername == value.from
+    ret.handled    = true;
+
+    cJSON_Delete(root);
+    return true;
+}
+
 // ── 酷安时线订阅流解析 ──
 // 识别: Value.data 为酷安 feed JSON（proto_type==news + feedType/uid/username/title 正向特征）
 //   正向互斥：feedType/uid/username 为酷安独有，头条新闻无 → 不与 tryParseToutiaoNews 冲突；
@@ -2307,6 +2599,17 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
     // Value → 路由 Matrix sync / Tox 事件 / 旧逻辑
     cJSON* valueItem = cJSON_GetObjectItem(root, "Value");
     if (valueItem) {
+        // peer 身份取信封 Value.from（libp2p ed25519 PeerId 字节序列）。
+        // 转发过程中 from 恒定（ReceivedFrom 为上一跳，随链路变化，不可用于身份）。
+        // 上游以原始二进制直塞 JSON（未 base64）：前导含 NUL、非 UTF-8 字节已损毁，
+        // cJSON 按 C 字符串承载会截断为空 → 绕开 cJSON 从原始 JSON 文本逐字节重建
+        //（decodeEnvelopeFromBytes），再 base58 编码为 12D3KooW… 稳定标识。
+        std::vector<uint8_t> fromBytes;
+        if (decodeEnvelopeFromBytes(jsonData, fromBytes)) {
+            ret.envelopeFrom = base58Encode(fromBytes);
+        } else {
+            ret.envelopeFrom.clear();
+        }
         cJSON* dataItem = cJSON_GetObjectItem(valueItem, "data");
         if (dataItem && cJSON_IsString(dataItem)) {
             const char* dataStr = cJSON_GetStringValue(dataItem);
@@ -2360,6 +2663,8 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
             if (tryParseXiaohongshuNote(dataStr, ret))
                 goto done;
             if (tryParseHongguoHotlist(dataStr, ret))
+                goto done;
+            if (tryParseSysinfo(dataStr, ret))
                 goto done;
         }
         fallbackAsPlainText(valueItem, ret);

@@ -54,6 +54,10 @@ constexpr int kHongguoHotlistId = -116;                                    // �
 constexpr const char* const kXiaohongshuNoteType = "xiaohongshu_note";     // 小红书笔记卡片订阅流（type == chatId == roomId）
 constexpr int kXiaohongshuNoteId = -117;                                   // 小红书笔记保留 id（-117，固定不 hash）
 
+constexpr const char* const kSysinfoBoardType = "sysinfo_board";   // 系统信息公告板（字符名，订阅流 type == chatId）
+constexpr const char* const kSysinfoBoardName = "系统信息公告板";    // 显示名（表格标题 / hostname 缺失回退）
+constexpr int kSysinfoBoardId = -121;                               // 系统信息公告板保留 id（-121，固定不 hash）
+
 constexpr int kMisskeyTimelineId = -118;
 constexpr int kOutlookGraphId = -119;
 constexpr int kImapBareId = -120;
@@ -100,6 +104,7 @@ constexpr TypeEmojiDef kTypeEmojiDefs[] = {
     { kXiaohongshuHotnewsType,    0x1F4C8, "📈" },
     { kCoolapkTimelineType,       0x1F4F1, "📱" },
     { kMisskeyType,               0x1F431, "🐱" },
+    { kSysinfoBoardType,          0x1F4CA, "📊" },
 };
 
 inline uint32_t typeToEmojiCp(const QString& type) {

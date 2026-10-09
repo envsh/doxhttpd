@@ -1912,6 +1912,7 @@ static QString protoStreamEmoji(const QString& type) {
     if (type == kXiaohongshuHotnewsType)   return qFromUtf8("📈");
     if (type == kCoolapkTimelineType)      return qFromUtf8("📱");
     if (type == kMisskeyType)              return qFromUtf8("🐱");
+    if (type == kSysinfoBoardType)         return qFromUtf8("📊");
     return QString();
 }
 
