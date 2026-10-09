@@ -64,11 +64,12 @@ static double jsonGetDouble(cJSON* root, const char* path) {
 //   0x00 0x24   identity 多哈希编码头（code=0x00，length=36）
 //   0x08 0x01   protobuf 头字节：field1 varint（KeyType），0x01 = Ed25519
 //   0x12 0x20   field2 varint（Data），长度 32
-//   0x00…0xFF   ed25519 公钥 32 字节（部分被上游替换为 \ufffd → 丢失占位 0xF8）
-// 上游以 Go 字符串直塞二进制（未 base64）：<=0x7F 的字节/HTML 转义可精确还原，
-// >=0x80 的非 UTF-8 字节已被替换为 \ufffd（丢失）。cJSON 以 C 字符串承载
-// valuestring，strlen 遇前导 NUL 即截断为空 → 必须绕开 cJSON，从原始 JSON
-// 文本按转义逐字节重建，再统一 base58 → 12D3KooW… 形态、逐 peer 稳定的标识。
+//   0x00…0xFF   ed25519 公钥 32 字节
+// 上游把每个原始字节编码成一个 Unicode code point（byte → U+00XX）后再 JSON 序列化：
+//   0x00–0x1F 及 " \ & < > 等以 \uXXXX 转义出现，取低字节 (v & 0xFF) 即原值；
+//   0x80–0xFF 以裸 UTF-8 出现（如 0xD6 → U+00D6 → C3 96），需按 UTF-8 解出 code point 再取 cp & 0xFF。
+// 因此绕开 cJSON 的 UTF-16→UTF-8 解码，从原始 JSON 文本按上述规则重建字节，
+// 再统一 base58btc 编码为 libp2p PeerId。
 
 static const char kBase58Alphabet[] =
     "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -113,7 +114,28 @@ static bool decodeEnvelopeFromBytes(const std::string& jsonData, std::vector<uin
     while (pos < n) {
         unsigned char c = (unsigned char)jsonData[pos];
         if (c == '"') return !out.empty();
-        if (c != '\\') { out.push_back(c); pos++; continue; }
+        if (c != '\\') {
+            if (c < 0x80) { out.push_back(c); pos++; continue; }
+            // 上游把每个字节编码成一个 code point：0x80–0xFF 以裸 UTF-8 出现，
+            // 解出 code point 后取低字节即还原为原始字节。
+            unsigned int cp;
+            int extra;
+            if ((c & 0xE0) == 0xC0) { cp = c & 0x1Fu; extra = 1; }
+            else if ((c & 0xF0) == 0xE0) { cp = c & 0x0Fu; extra = 2; }
+            else if ((c & 0xF8) == 0xF0) { cp = c & 0x07u; extra = 3; }
+            else { out.push_back(c); pos++; continue; }
+            if (pos + (size_t)extra >= n) return false;
+            bool ok = true;
+            for (int k = 1; k <= extra; k++) {
+                unsigned char cc = (unsigned char)jsonData[pos + (size_t)k];
+                if ((cc & 0xC0) != 0x80) { ok = false; break; }
+                cp = (cp << 6) | (cc & 0x3Fu);
+            }
+            if (!ok) { out.push_back(c); pos++; continue; }
+            pos += (size_t)extra + 1;
+            out.push_back((uint8_t)(cp & 0xFFu));
+            continue;
+        }
         pos++;
         if (pos >= n) return false;
         char e = jsonData[pos++];
@@ -138,8 +160,8 @@ static bool decodeEnvelopeFromBytes(const std::string& jsonData, std::vector<uin
                     else return false;
                 }
                 pos += 4;
-                // <=0xFF 精确还原原字节；>0xFF（即 \ufffd）为丢失字节，0xF8 占位保长度/确定性
-                out.push_back((v <= 0xFF) ? (uint8_t)v : (uint8_t)0xF8);
+                // \uXXXX 低字节即原始字节：\uXXXX → (v & 0xFF)
+                out.push_back((uint8_t)(v & 0xFF));
                 break;
             }
             default: return false;
@@ -2601,9 +2623,9 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
     if (valueItem) {
         // peer 身份取信封 Value.from（libp2p ed25519 PeerId 字节序列）。
         // 转发过程中 from 恒定（ReceivedFrom 为上一跳，随链路变化，不可用于身份）。
-        // 上游以原始二进制直塞 JSON（未 base64）：前导含 NUL、非 UTF-8 字节已损毁，
-        // cJSON 按 C 字符串承载会截断为空 → 绕开 cJSON 从原始 JSON 文本逐字节重建
-        //（decodeEnvelopeFromBytes），再 base58 编码为 12D3KooW… 稳定标识。
+        // 上游以原始二进制直塞 JSON（未 base64）：前导含 NUL、非 UTF-8 字节在字符串字面量中
+        // 以 Unicode 转义形式呈现。绕开 cJSON 的 UTF-8 解码语义，从原始 JSON 文本按转义逐字节重建
+        //（decodeEnvelopeFromBytes，采用 code unit 低字节视图 (v & 0xFF)），再 base58btc 编码。
         std::vector<uint8_t> fromBytes;
         if (decodeEnvelopeFromBytes(jsonData, fromBytes)) {
             ret.envelopeFrom = base58Encode(fromBytes);
