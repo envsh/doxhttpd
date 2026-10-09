@@ -8,7 +8,8 @@
 // C++11 constexpr（内部链接，每 TU 一份；消费方为内容比较/赋值，无指针同一性依赖）
 constexpr const char* const kImapMailType       = "imap_mail";
 constexpr const char* const kGomuksRoomType     = "gomuks_room";
-constexpr const char* const kMtxliteRoomType    = "mtxlite_room";
+// db中有联系人类型的字符串副本, 这个值改了无用,只在初次创建时有效,会有db遗留无效数据
+constexpr const char* const kMtxliteRoomType    = "matrix"; // fedbrg need raw name, "mtxlite_room";
 constexpr const char* const kUnktoxFriendType   = "unktox_friend";
 constexpr const char* const kUnktoxConferenceType = "unktox_conference";
 constexpr const char* const kUnktoxGroupType    = "unktox_group";
