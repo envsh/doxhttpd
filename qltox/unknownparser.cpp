@@ -365,6 +365,8 @@ static bool tryParseGomuksSync(const std::string& rawStr, ParseResult& ret) {
 //   与 gomuks sync_complete（command=="sync_complete"）天然互斥；媒体/提及/关系解析自成一体，
 //   不复用 parseGomuksEvents（仅共用文件级 jsonGetString/jsonGetInt64 工具）。
 //   时间字段走 Matrix 标准 origin_server_ts（毫秒），而非 gomuks 的 timestamp。
+//   room_profile.name → contact 名（空则回退 room_id）；room_profile.topic → cd.statusText；
+//   sender_profile.display_name/avatar_url → peer 昵称/头像。
 
 static bool tryParseMtxliteRoom(const std::string& rawStr, ParseResult& ret) {
     if (rawStr.empty()) return false;
@@ -382,13 +384,19 @@ static bool tryParseMtxliteRoom(const std::string& rawStr, ParseResult& ret) {
         return false;
     }
 
+    std::string roomName = jsonGetString(root, "room_profile.name");
+    if (roomName.empty()) {
+        roomName = roomId;                       // 回退保持现状
+    }
+
     ContactData cd;
     cd.id          = (int)(std::hash<std::string>{}(roomId) & 0x7fffffff);
-    cd.name        = roomId;
+    cd.name        = roomName;                    // contact name ← room_profile.name
     cd.type        = kMtxliteRoomType;
     cd.chatId      = roomId;
     cd.status      = "online";
     cd.isConnected = true;
+    cd.statusText  = jsonGetString(root, "room_profile.topic");   // ← room_profile.topic
     ret.contacts.push_back(cd);
 
     HistoryMessage hm;
@@ -492,6 +500,8 @@ static bool tryParseMtxliteRoom(const std::string& rawStr, ParseResult& ret) {
     PeerInfo pi;
     pi.publicKey  = sender;
     pi.userName   = sender;
+    pi.nickname   = jsonGetString(root, "sender_profile.display_name"); // 气泡显示名 ← "Feeds"
+    pi.iconUrl    = jsonGetString(root, "sender_profile.avatar_url");   // 头像 mxc://
     pi.peerNumber = 0;
     ret.peers.push_back(pi);
 
