@@ -65,11 +65,11 @@ static double jsonGetDouble(cJSON* root, const char* path) {
 //   0x08 0x01   protobuf 头字节：field1 varint（KeyType），0x01 = Ed25519
 //   0x12 0x20   field2 varint（Data），长度 32
 //   0x00…0xFF   ed25519 公钥 32 字节
-// 上游把每个原始字节编码成一个 Unicode code point（byte → U+00XX）后再 JSON 序列化：
-//   0x00–0x1F 及 " \ & < > 等以 \uXXXX 转义出现，取低字节 (v & 0xFF) 即原值；
-//   0x80–0xFF 以裸 UTF-8 出现（如 0xD6 → U+00D6 → C3 96），需按 UTF-8 解出 code point 再取 cp & 0xFF。
-// 因此绕开 cJSON 的 UTF-16→UTF-8 解码，从原始 JSON 文本按上述规则重建字节，
-// 再统一 base58btc 编码为 libp2p PeerId。
+// 上游以 string([]byte) 把原始二进制直塞 JSON 字符串：合法 UTF-8 段（>=0x80）原样保留为裸字节，
+//   0x00–0x1F 及 " \ 等以 \uXXXX/短转义出现，取低字节 (v & 0xFF) 即原值。
+// 非法 UTF-8 字节被 Go encoding/json 替换为 \ufffd（已丢失，不可还原）。
+// cJSON 以 C 字符串承载 valuestring，strlen 遇前导 NUL 截断 → 绕开 cJSON，
+// 从原始 JSON 文本逐字节重建（decodeEnvelopeFromBytes），再统一 base58btc 编码为 libp2p PeerId。
 
 static const char kBase58Alphabet[] =
     "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
@@ -114,28 +114,7 @@ static bool decodeEnvelopeFromBytes(const std::string& jsonData, std::vector<uin
     while (pos < n) {
         unsigned char c = (unsigned char)jsonData[pos];
         if (c == '"') return !out.empty();
-        if (c != '\\') {
-            if (c < 0x80) { out.push_back(c); pos++; continue; }
-            // 上游把每个字节编码成一个 code point：0x80–0xFF 以裸 UTF-8 出现，
-            // 解出 code point 后取低字节即还原为原始字节。
-            unsigned int cp;
-            int extra;
-            if ((c & 0xE0) == 0xC0) { cp = c & 0x1Fu; extra = 1; }
-            else if ((c & 0xF0) == 0xE0) { cp = c & 0x0Fu; extra = 2; }
-            else if ((c & 0xF8) == 0xF0) { cp = c & 0x07u; extra = 3; }
-            else { out.push_back(c); pos++; continue; }
-            if (pos + (size_t)extra >= n) return false;
-            bool ok = true;
-            for (int k = 1; k <= extra; k++) {
-                unsigned char cc = (unsigned char)jsonData[pos + (size_t)k];
-                if ((cc & 0xC0) != 0x80) { ok = false; break; }
-                cp = (cp << 6) | (cc & 0x3Fu);
-            }
-            if (!ok) { out.push_back(c); pos++; continue; }
-            pos += (size_t)extra + 1;
-            out.push_back((uint8_t)(cp & 0xFFu));
-            continue;
-        }
+        if (c != '\\') { out.push_back(c); pos++; continue; }
         pos++;
         if (pos >= n) return false;
         char e = jsonData[pos++];
@@ -2259,6 +2238,42 @@ static bool tryParseSysinfo(const std::string& rawStr, ParseResult& ret) {
         buf += tmp; buf += "\n";
     }
 
+    // battery：逐块一行（最多 4 块）；present<=0 且 state 空 → 无电池，跳过
+    cJSON* batArr = cJSON_GetObjectItem(root, "battery");
+    if (cJSON_IsArray(batArr)) {
+        int nb = cJSON_GetArraySize(batArr);
+        for (int i = 0; i < nb && i < 4; i++) {
+            cJSON* b = cJSON_GetArrayItem(batArr, i);
+            if (!b) continue;
+            int64_t present = jsonGetInt64(b, "present");
+            std::string st  = jsonGetString(b, "state");
+            if (present <= 0 && st.empty()) continue;
+            std::string bl = "| bat | 电池";
+            if (nb > 1) bl += std::to_string((long long)jsonGetInt64(b, "index"));
+            bl += " | ";
+            bl += st.empty() ? std::string("—") : st;        // 原样显示（不中文化）
+            double pct = jsonGetDouble(b, "percent");
+            double hp  = jsonGetDouble(b, "health_percent");
+            double tp  = jsonGetDouble(b, "temperature");
+            double vt  = jsonGetDouble(b, "voltage");
+            int64_t cyc = jsonGetInt64(b, "cycles");
+            int64_t ful = jsonGetInt64(b, "full");
+            int64_t dsn = jsonGetInt64(b, "design");
+            if (pct >= 0) { snprintf(tmp, sizeof(tmp), " · %.1f%%", pct); bl += tmp; }
+            if (hp  >= 0) { snprintf(tmp, sizeof(tmp), " · health %.0f%%", hp); bl += tmp; }
+            if (cyc >= 0) bl += " · cycles " + std::to_string((long long)cyc);
+            if (tp  > 0)  { snprintf(tmp, sizeof(tmp), " · %.1f°C", tp); bl += tmp; }
+            if (vt  > 0)  { snprintf(tmp, sizeof(tmp), " · %.2fV", vt); bl += tmp; }
+            if (ful > 0 && dsn > 0) {
+                snprintf(tmp, sizeof(tmp), " · %lld/%lldmAh",
+                         (long long)ful, (long long)dsn); bl += tmp;
+            }
+            if (jsonGetInt64(b, "ac_power") > 0) bl += " · AC";
+            bl += " |\n";
+            buf += bl;
+        }
+    }
+
     snprintf(tmp, sizeof(tmp), "| load | 负载 | 1m %.2f / 5m %.2f / 15m %.2f |",
              jsonGetDouble(root, "load.load1"), jsonGetDouble(root, "load.load5"),
              jsonGetDouble(root, "load.load15"));
@@ -2623,9 +2638,9 @@ ParseResult UnknownParser::parse(const std::string& eventType, const std::string
     if (valueItem) {
         // peer 身份取信封 Value.from（libp2p ed25519 PeerId 字节序列）。
         // 转发过程中 from 恒定（ReceivedFrom 为上一跳，随链路变化，不可用于身份）。
-        // 上游以原始二进制直塞 JSON（未 base64）：前导含 NUL、非 UTF-8 字节在字符串字面量中
-        // 以 Unicode 转义形式呈现。绕开 cJSON 的 UTF-8 解码语义，从原始 JSON 文本按转义逐字节重建
-        //（decodeEnvelopeFromBytes，采用 code unit 低字节视图 (v & 0xFF)），再 base58btc 编码。
+        // 上游以 string([]byte) 把原始二进制直塞 JSON（未 base64）：前导含 NUL、非 UTF-8 字节
+        // 已被替换为 \ufffd。cJSON 按 C 字符串承载会截断为空 → 绕开 cJSON 从原始 JSON 文本
+        // 逐字节重建（decodeEnvelopeFromBytes），再 base58btc 编码为 12D3KooW… 稳定标识。
         std::vector<uint8_t> fromBytes;
         if (decodeEnvelopeFromBytes(jsonData, fromBytes)) {
             ret.envelopeFrom = base58Encode(fromBytes);
