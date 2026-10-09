@@ -2242,7 +2242,7 @@ static bool tryParseSysinfo(const std::string& rawStr, ParseResult& ret) {
 
     ContactData cd;
     cd.id          = kSysinfoBoardId;     // 固定板 id：所有 sysinfo 消息汇聚同一联系人（不做 hash）
-    cd.name        = kSysinfoBoardType;   // 联系人名 = "sysinfo_board"
+    cd.name        = kSysinfoBoardName;   // 显示名 = "系统信息公告板"
     cd.type        = kSysinfoBoardType;
     cd.chatId      = kSysinfoBoardType;   // type == chatId == roomId（路由匹配用）
     cd.status      = "online";
