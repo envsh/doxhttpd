@@ -622,6 +622,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(chatWidget, SIGNAL(favoriteClicked(int)), this, SLOT(onFavoriteClicked(int)));
     connect(chatWidget, SIGNAL(peerInfoRequested(int,const QString&,const QString&)),
             this, SLOT(onChatPeerInfoRequested(int,const QString&,const QString&)));
+    connect(chatWidget, SIGNAL(replyLinkActivated(const QString&,const QString&)),
+            this, SLOT(onReplyLinkActivated(const QString&,const QString&)));
     connect(chatWidget, SIGNAL(screenshotRequested()), this, SLOT(onChatScreenshotRequested()));
     connect(chatWidget, SIGNAL(fileSendRequested(const QString&, const QString&)),
             this, SLOT(onFileSendRequested(const QString&, const QString&)));
@@ -2069,6 +2071,7 @@ void MainWindow::onContactSelected(int id, const QString& type, const QString& n
             els.reserve(rows.size());
             for (auto& row : rows) {
                 ChatElement el = msgRowToElement(row);
+                attachReplyLinks(el);
                 // 已恢复动画源/本地文件的消息不显示下载覆盖（内容仍在缓存盘/DB）
                 if (el.etype == ChatElement::Video && !el.gifPath.isEmpty()) {
                     el.downloadState = ChatElement::Completed;
@@ -2966,7 +2969,8 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
                         msg.mediaUrl    = qFromUtf8(hm.mediaUrl);
                         msg.fileSize    = hm.fileSize;
                     }
-                
+                    attachReplyLinks(msg);
+
                     qWarning("Cache PUSH to %s %d: sender=%s",
                              chatType.c_str(), chatId, qToUtf8(msg.senderName).data());
                     QString lastTimeStr = contactListTimeStr(msg.time);
@@ -3329,6 +3333,82 @@ void MainWindow::onChatPeerInfoRequested(int peerNumber, const QString& senderNa
         dialog.setInfo(peerNumber,
                        senderName.isEmpty() ? _("no_name") : senderName,
                        currentChatType.isEmpty() ? QString("friend") : currentChatType);
+    }
+    dialog.exec();
+}
+
+void MainWindow::attachReplyLinks(ChatElement& el) {
+    if (el.etype != ChatElement::Text) { return; }
+    if (el.messageText.isEmpty()) { return; }
+    const QString marker = " -- Re: ";
+#ifdef QT3_BUILD
+    int pos = el.messageText.findRev(marker);
+#else
+    int pos = el.messageText.lastIndexOf(marker);
+#endif
+    if (pos < 0) { return; }
+    int tailStart = pos + marker.length();
+    QString tail = el.messageText.mid(tailStart);
+
+    std::vector<std::pair<QString,int> > tokens;   // token, 在 tail 中的偏移
+    int i = 0, n = tail.length();
+    while (i < n) {
+        while (i < n && tail[i].isSpace()) { i++; }
+        int ts = i;
+        while (i < n && !tail[i].isSpace()) { i++; }
+        if (i > ts) { tokens.push_back(std::make_pair(tail.mid(ts, i - ts), ts)); }
+    }
+    if (tokens.empty()) { return; }
+
+    std::vector<ReplyLinkSpan> spans;
+    QString display = el.messageText;
+    // 从右往左替换，避免位移；左侧 span 的绝对索引不受右侧替换影响
+    for (int t = (int)tokens.size() - 1; t >= 0; --t) {
+        const QString& tok = tokens[t].first;
+#ifdef QT3_BUILD
+        bool hasColon = (tok.find(':') >= 0);
+#else
+        bool hasColon = (tok.indexOf(':') >= 0);
+#endif
+        if (tok.isEmpty() || tok[0] != '@' || !hasColon) { continue; }
+        QString name = tok;
+        std::string key = "unknown_" + std::string(qToUtf8(tok).data());
+        auto it = peerInfoMap.find(key);
+        if (it != peerInfoMap.end()) {
+            if (!it->second.nickname.empty()) {
+                name = qFromUtf8(it->second.nickname);
+            } else if (!it->second.userName.empty()) {
+                name = qFromUtf8(it->second.userName);
+            }
+        }
+        int absStart = tailStart + tokens[t].second;
+        ReplyLinkSpan sp;
+        sp.start = absStart;
+        sp.end = absStart + name.length();
+        sp.peerId = tok;
+        display.replace(absStart, tok.length(), name);
+        spans.push_back(sp);
+    }
+    if (spans.empty()) { return; }
+    el.displayText = display;
+    el.replyLinks = spans;
+}
+
+void MainWindow::onReplyLinkActivated(const QString& peerId, const QString& name) {
+    FriendInfoDialog dialog(this);
+    std::string key = "unknown_" + std::string(qToUtf8(peerId).data());
+    auto it = peerInfoMap.find(key);
+    if (it != peerInfoMap.end()) {
+        QString title = it->second.nickname.empty()
+            ? qFromUtf8(it->second.userName) : qFromUtf8(it->second.nickname);
+        if (title.isEmpty()) { title = name; }
+        if (title.isEmpty()) { title = _("no_name"); }
+        dialog.setTitle(title);
+        dialog.setInfo(friendInfoFromPeer(it->second, it->second.peerNumber));
+    } else {
+        QString fallback = name.isEmpty() ? _("no_name") : name;
+        dialog.setTitle(fallback);
+        dialog.setInfo(0, fallback, "unknown");
     }
     dialog.exec();
 }
@@ -3904,6 +3984,7 @@ void MainWindow::renderHistoryMessages(const std::vector<HistoryMessage>& messag
             el.etype = ChatElement::File;
         }
 
+        attachReplyLinks(el);
         m_chatbuf.append(currentChatId, typeStr, el);
         db_writeMessage(currentChatId, typeStr, el);
     }

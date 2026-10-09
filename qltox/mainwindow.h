@@ -36,6 +36,7 @@
 #endif
 
 class QProcess;   // macOS 异步 screencapture（仅在 .cpp 包含头文件）
+struct ChatElement;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -62,6 +63,7 @@ protected slots:
     void handleEvents(const EventList& events);
     void onViewInfoRequested(int id, const QString& type);
     void onChatPeerInfoRequested(int peerNumber, const QString& senderName, const QString& senderPubkey);
+    void onReplyLinkActivated(const QString& peerId, const QString& name);
     void onDeleteOrLeaveRequested(int id, const QString& type);
     void onInviteToConferenceRequested(int friendId);
     void onInviteToGroupRequested(int friendId);
@@ -132,6 +134,8 @@ private:
                           std::vector<uint8_t> data);
     void launchPlayer(const QString& filePath, bool gifLike);
     void handleMediaPostproc(MediaDownloadEvent* e);
+    // 依据 messageText 中的 "-- Re: @id" 生成 displayText 与 replyLinks（零 DB，仅查 peerInfoMap）
+    void attachReplyLinks(ChatElement& el);
     FramelessHelper* framelessHelper;
     std::string selfPubkey;  // 自己的公钥（地址前64字符）
     std::map<std::string, PeerInfo> peerInfoMap;  // 会议/群组 peer info 缓存: "conf_N_M" / "group_N_M"

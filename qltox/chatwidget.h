@@ -116,6 +116,7 @@ signals:
     void favoriteClicked(int msgIndex);
     void screenshotRequested();
     void peerInfoRequested(int peerNumber, const QString& senderName, const QString& pubkey);
+    void replyLinkActivated(const QString& peerId, const QString& name);
 
 private slots:
     void onSendClicked();

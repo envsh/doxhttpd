@@ -40,6 +40,14 @@ struct MsgBlock {
     int cumulativeHeight;
 };
 
+// 回复链接：displayText 中的一段（start/end 为 QString 索引），
+// peerId 为矩阵用户标识（@id），用于 tooltip 与点击
+struct ReplyLinkSpan {
+    int start;
+    int end;
+    QString peerId;
+};
+
 struct ChatElement {
     enum SendState { SendSending, SendSent, SendFailed };
     enum ElementType { Text, Image, File, Video, Gif, Audio };
@@ -57,6 +65,11 @@ struct ChatElement {
 
     // Text only
     QString messageText;
+    // 渲染用文本：-- Re: 目标已替换为显示名；为空则回退 messageText。
+    // messageText 始终保留原始文本（落库/复制/翻译/搜索不受影响）。
+    QString displayText;
+    // 回复链接区间（索引指向 displayText）
+    std::vector<ReplyLinkSpan> replyLinks;
     QString category;          // "self" / "other" / "friend"
 
     // Translation (Text only)
@@ -225,6 +238,7 @@ signals:
     void favoriteClicked(int msgIndex);
     void forwardClicked(int msgIndex);
     void peerInfoRequested(int peerNumber, const QString& senderName, const QString& pubkey);
+    void replyLinkActivated(const QString& peerId, const QString& name);
 
 private slots:
     void onScrollChanged(int value);

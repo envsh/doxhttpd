@@ -495,6 +495,18 @@ static bool tryParseMtxliteRoom(const std::string& rawStr, ParseResult& ret) {
         }
     }
 
+    // 镜像 gomuks：文本消息的提及追加 " -- Re: @id ..."，供客户端渲染为可点击链接
+    if (!hm.mentions.empty()
+        && msgtype.find("m.image") != 0 && msgtype.find("m.video") != 0
+        && msgtype.find("m.audio") != 0 && msgtype.find("m.file") != 0) {
+        std::string ms;
+        for (size_t j = 0; j < hm.mentions.size(); ++j) {
+            if (j) { ms += " "; }
+            ms += hm.mentions[j];
+        }
+        hm.message += " -- Re: " + ms;
+    }
+
     ret.messages.push_back(hm);
 
     PeerInfo pi;

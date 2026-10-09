@@ -358,6 +358,8 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     connect(messageArea, SIGNAL(forwardClicked(int)), this, SLOT(onForwardRequested(int)));
     connect(messageArea, SIGNAL(peerInfoRequested(int,const QString&,const QString&)),
             this, SIGNAL(peerInfoRequested(int,const QString&,const QString&)));
+    connect(messageArea, SIGNAL(replyLinkActivated(const QString&,const QString&)),
+            this, SIGNAL(replyLinkActivated(const QString&,const QString&)));
     
     // 输入区域 (2行 x 3列)
 #ifdef QT3_BUILD

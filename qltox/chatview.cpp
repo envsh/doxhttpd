@@ -92,6 +92,11 @@ QPixmap makeScaledThumb(const QPixmap& src, int mediaW, int mediaH, int maxConta
 #include <dlfcn.h>
 #include <cstdint>
 
+// 渲染/命中用文本：displayText 非空则用之（-- Re: 目标已替换为显示名），否则用原始 messageText
+static inline const QString& displayOf(const ChatElement& el) {
+    return el.displayText.isEmpty() ? el.messageText : el.displayText;
+}
+
 bool isWebP(const std::string& d) {
     return d.size() >= 12 &&
            d[0]=='R'&&d[1]=='I'&&d[2]=='F'&&d[3]=='F' &&
@@ -807,6 +812,7 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
     switch (etype) {
     case Text: {
         if (viewWidth <= 0) { viewWidth = 400; }
+        const QString& dtext = displayOf(*this);
 
         int kAvatarSize = ChatView::kAvatarSize;
         int kPad = ChatView::kPad;
@@ -822,7 +828,7 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
 
         int lineCount = 0;
 #ifdef EMOJI_RENDER_QT34
-        auto cps = toCodepoints(messageText);
+        auto cps = toCodepoints(dtext);
         int tLen = (int)cps.size();
         int pos = 0;
         while (pos < tLen) {
@@ -844,9 +850,9 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
             pos = end;
         }
 #else
-        int textLen = messageText.length();
+        int textLen = dtext.length();
         for (int i = 0; i < textLen; ) {
-            if (messageText[i] == '\n') {
+            if (dtext[i] == '\n') {
                 lineCount++;
                 i++;
                 continue;
@@ -854,9 +860,9 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
             int lineWidth = 0;
             int lastSpace = -1;
             int end = i;
-            while (end < textLen && messageText[end] != '\n') {
-                lineWidth += qFontWidth(fm, QChar(messageText[end]));
-                if (messageText[end].isSpace()) lastSpace = end;
+            while (end < textLen && dtext[end] != '\n') {
+                lineWidth += qFontWidth(fm, QChar(dtext[end]));
+                if (dtext[end].isSpace()) lastSpace = end;
                 if (lineWidth >= bubbleTextWidth) {
                     if (lastSpace > i && end - i > 10) {
                         end = lastSpace + 1;
@@ -1308,22 +1314,23 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
         p.setPen(pal.textPrimary);
         p.setFont(baseFont);
 #ifdef EMOJI_RENDER_QT34
-        EmojiRenderer::instance().drawText(p, textRect, messageText);
+        EmojiRenderer::instance().drawText(p, textRect, displayOf(*this));
 #else
 #ifdef QT3_BUILD
-        p.drawText(textRect, Qt::WordBreak | Qt::AlignLeft | Qt::AlignTop, messageText);
+        p.drawText(textRect, Qt::WordBreak | Qt::AlignLeft | Qt::AlignTop, displayOf(*this));
 #else
-        p.drawText(textRect, Qt::TextWordWrap | Qt::AlignLeft | Qt::AlignTop, messageText);
+        p.drawText(textRect, Qt::TextWordWrap | Qt::AlignLeft | Qt::AlignTop, displayOf(*this));
 #endif
 #endif
 
         // Translated text
         if (showTranslation && !translatedText.isEmpty()) {
             int origLineCount = 0;
+            const QString& dtext = displayOf(*this);
             int textW = textRect.width();
             if (textW < 20) { textW = 20; }
 #ifdef EMOJI_RENDER_QT34
-            auto cps = toCodepoints(messageText);
+            auto cps = toCodepoints(dtext);
             int tLen = (int)cps.size();
             int pos = 0;
             while (pos < tLen) {
@@ -1345,14 +1352,14 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
                 pos = end;
             }
 #else
-            int tLen3 = messageText.length();
+            int tLen3 = dtext.length();
             int pos = 0;
             while (pos < tLen3) {
-                if (messageText[pos] == '\n') { origLineCount++; pos++; continue; }
+                if (dtext[pos] == '\n') { origLineCount++; pos++; continue; }
                 int lineWidth = 0, lastSpace = -1, end = pos;
-                while (end < tLen3 && messageText[end] != '\n') {
-                    lineWidth += qFontWidth(fm, QChar(messageText[end]));
-                    if (messageText[end].isSpace()) lastSpace = end;
+                while (end < tLen3 && dtext[end] != '\n') {
+                    lineWidth += qFontWidth(fm, QChar(dtext[end]));
+                    if (dtext[end].isSpace()) lastSpace = end;
                     if (lineWidth >= textW) {
                         if (lastSpace > pos && end - pos > 10) {
                             end = lastSpace + 1;
@@ -2798,7 +2805,7 @@ int ChatView::charPosAt(int msgIndex, int localX, int localY) {
     bool mediaTop = (msg.etype == ChatElement::Image ||
                      msg.etype == ChatElement::Gif ||
                      msg.etype == ChatElement::Video) && !msg.caption.isEmpty();
-    const QString& text = mediaTop ? msg.caption : msg.messageText;
+    const QString& text = mediaTop ? msg.caption : displayOf(msg);
     int textLen = text.length();
     if (textLen == 0) { return 0; }
 
@@ -2900,7 +2907,8 @@ std::vector<QRect> ChatView::selectionRects(int msgIndex) {
     if (start == end) { return rects; }
 
     const ChatElement& msg = (*m_history)[msgIndex];
-    int textLen = msg.messageText.length();
+    const QString& dtext = displayOf(msg);
+    int textLen = dtext.length();
     if (start >= textLen || end <= 0) { return rects; }
 
     // Compute text rectangle
@@ -2940,15 +2948,15 @@ std::vector<QRect> ChatView::selectionRects(int msgIndex) {
     lineStarts.push_back(0);
     int cpos = 0;
     while (cpos < textLen) {
-        if (msg.messageText[cpos] == '\n') {
+        if (dtext[cpos] == '\n') {
             cpos++;
             lineStarts.push_back(cpos);
             continue;
         }
         int lineWidth = 0, lastSpace = -1, end = cpos;
-        while (end < textLen && msg.messageText[end] != '\n') {
-            lineWidth += qFontWidth(fm, QChar(msg.messageText[end]));
-            if (msg.messageText[end].isSpace()) lastSpace = end;
+        while (end < textLen && dtext[end] != '\n') {
+            lineWidth += qFontWidth(fm, QChar(dtext[end]));
+            if (dtext[end].isSpace()) lastSpace = end;
             if (lineWidth >= bubbleTextWidth) {
                 if (lastSpace > cpos && end - cpos > 10) {
                     end = lastSpace + 1;
@@ -2970,10 +2978,10 @@ std::vector<QRect> ChatView::selectionRects(int msgIndex) {
         if (selStartInLine < selEndInLine) {
             int x1 = 0, x2 = 0;
             for (int i = lineStart; i < selStartInLine; i++) {
-                x1 += qFontWidth(fm, QChar(msg.messageText[i]));
+                x1 += qFontWidth(fm, QChar(dtext[i]));
             }
             for (int i = lineStart; i < selEndInLine; i++) {
-                x2 += qFontWidth(fm, QChar(msg.messageText[i]));
+                x2 += qFontWidth(fm, QChar(dtext[i]));
             }
             QRect selRect(textRect.x() + x1, textRect.y() + li * lineHeight, x2 - x1, lineHeight);
             rects.push_back(selRect);
@@ -2987,13 +2995,13 @@ QString ChatView::selectedText() const {
     int start = std::min(m_selStart, m_selEnd);
     int end = std::max(m_selStart, m_selEnd);
     if (start == end) { return QString(); }
-    return (*m_history)[m_selMsgIndex].messageText.mid(start, end - start);
+    return displayOf((*m_history)[m_selMsgIndex]).mid(start, end - start);
 }
 
 void ChatView::selectWordAt(int msgIndex, int charPos) {
     if (msgIndex < 0 || msgIndex >= (int)m_history->size()) return;
     int oldIdx = m_selMsgIndex;
-    const QString& text = (*m_history)[msgIndex].messageText;
+    const QString& text = displayOf((*m_history)[msgIndex]);
     int start, end;
     wordBoundaries(text, charPos, start, end);
     m_selMsgIndex = msgIndex;
@@ -3012,7 +3020,7 @@ void ChatView::selectWordAt(int msgIndex, int charPos) {
 void ChatView::selectLineAt(int msgIndex, int charPos) {
     if (msgIndex < 0 || msgIndex >= (int)m_history->size()) return;
     int oldIdx = m_selMsgIndex;
-    const QString& text = (*m_history)[msgIndex].messageText;
+    const QString& text = displayOf((*m_history)[msgIndex]);
     int start, end;
     lineBoundaries(text, charPos, start, end);
     m_selMsgIndex = msgIndex;
@@ -3295,13 +3303,28 @@ void ChatView::mousePressEvent(QMouseEvent* event) {
                 m_clickMsgIndex = msgIndex;
                 m_clickTime = now;
 
+                // -- Re: 回复链接优先于 URL
+                {
+                    const ChatElement& rcel = (*m_history)[msgIndex];
+                    if (!rcel.replyLinks.empty()) {
+                        const QString& dt = displayOf(rcel);
+                        for (size_t ri = 0; ri < rcel.replyLinks.size(); ++ri) {
+                            const ReplyLinkSpan& rl = rcel.replyLinks[ri];
+                            if (charPos >= rl.start && charPos < rl.end) {
+                                emit replyLinkActivated(
+                                    rl.peerId, dt.mid(rl.start, rl.end - rl.start));
+                                return;
+                            }
+                        }
+                    }
+                }
                 // Check if clicked on a URL
                 {
                     const ChatElement& cel = (*m_history)[msgIndex];
                     const QString& linkSrc = (cel.etype == ChatElement::Image ||
                                               cel.etype == ChatElement::Gif ||
                                               cel.etype == ChatElement::Video)
-                                          ? cel.caption : cel.messageText;
+                                          ? cel.caption : displayOf(cel);
                     auto links = extractLinks(linkSrc);
                     for (const LinkSpan& link : links) {
                         qWarning("  PRESS link [%d,%d): %s",
@@ -3467,11 +3490,23 @@ void ChatView::mouseMoveEvent(QMouseEvent* event) {
         int localX = event->x();
         int charPos = charPosAt(msgIndex, localX, localY);
         if (charPos >= 0) {
+            const ChatElement& rcel = (*m_history)[msgIndex];
+            if (!rcel.replyLinks.empty()) {
+                for (size_t ri = 0; ri < rcel.replyLinks.size(); ++ri) {
+                    const ReplyLinkSpan& rl = rcel.replyLinks[ri];
+                    if (charPos >= rl.start && charPos < rl.end) {
+                        setCursor(QCursor(Qt::PointingHandCursor));
+                        showTempTooltip(this, QRect(event->pos(), QSize(1, 1)), rl.peerId);
+                        QWidget::mouseMoveEvent(event);
+                        return;
+                    }
+                }
+            }
             const ChatElement& cel = (*m_history)[msgIndex];
             const QString& linkSrc = (cel.etype == ChatElement::Image ||
                                       cel.etype == ChatElement::Gif ||
                                       cel.etype == ChatElement::Video)
-                                  ? cel.caption : cel.messageText;
+                                  ? cel.caption : displayOf(cel);
             auto links = extractLinks(linkSrc);
             for (const LinkSpan& link : links) {
                 if (charPos >= link.start && charPos < link.end) {
@@ -3764,7 +3799,7 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         // Select all text in all messages
         m_selMsgIndex = 0;
         m_selStart = 0;
-        m_selEnd = m_history->empty() ? 0 : m_history->back().messageText.length();
+        m_selEnd = m_history->empty() ? 0 : displayOf(m_history->back()).length();
         updateFull();
     } else if (choice == searchGoogleId) {
         openSearchInBrowser(this, searchOk, searchSel, "https://www.google.com/search?q=");
@@ -3818,7 +3853,7 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
     } else if (chosen == selectAllAction) {
         m_selMsgIndex = 0;
         m_selStart = 0;
-        m_selEnd = m_history->empty() ? 0 : m_history->back().messageText.length();
+        m_selEnd = m_history->empty() ? 0 : displayOf(m_history->back()).length();
         updateFull();
     } else if (chosen == searchGoogleAction) {
         openSearchInBrowser(this, searchOk, searchSel, "https://www.google.com/search?q=");
