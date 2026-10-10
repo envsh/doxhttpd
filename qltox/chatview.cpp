@@ -2895,7 +2895,12 @@ int ChatView::charPosAt(int msgIndex, int localX, int localY) {
         }
         xOffset += chW;
     }
-    return lineEnd - 1;
+    // xOffset 现为本行实际字形宽度；落在最后一个字符右半仍算命中，
+    // 超出该行文本宽度的空白区域视为“无字符”，避免行尾链接命中区右扩到气泡/窗口边缘。
+    if (localX <= xOffset) {
+        return lineEnd - 1;
+    }
+    return -1;
 }
 
 // Get rectangles for selection in a message
