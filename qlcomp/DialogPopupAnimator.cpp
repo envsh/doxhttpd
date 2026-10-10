@@ -1,8 +1,14 @@
 #include "DialogPopupAnimator.h"
 #include "StyleParams.h"
 
-#ifdef QT3_BUILD
-#include <X11/Xlib.h>     // XInternAtom, XChangeProperty, XFlush
+#include <qpainter.h>
+#include <qcolor.h>
+#include <qpixmap.h>
+#include <qimage.h>
+#include <qpalette.h>
+
+#if defined(Q_OS_LINUX)
+#include <X11/Xlib.h>     // XInternAtom, XGetSelectionOwner, XChangeProperty
 #include <X11/Xatom.h>    // XA_CARDINAL
 // X11 的宏会污染 QEvent 的枚举值，必须 undef（与 compat34.cpp 一致）
 #ifdef KeyPress
@@ -14,8 +20,8 @@
 #endif
 
 namespace {
+const int   kTickMs            = 16;
 const int   kDefaultDurationMs = 220;
-const int   kTickMs            = 15;
 const float kStartScale        = 0.85f;
 
 float easeOutCubic(float t) {
@@ -23,18 +29,90 @@ float easeOutCubic(float t) {
     return 1.0f - u * u * u;
 }
 
-int lerpInt(int a, int b, float t) {
-    return a + (int)((b - a) * t + 0.5f);
-}
+// 是否有 X 合成器（决定窗口淡入是否有效）。仅探测 Screen 0，结果缓存。
+bool qHasCompositor() {
+#if defined(Q_OS_LINUX)
+    static int cached = -1;
+    if (cached < 0) {
+        cached = 0;
+        Display* dpy = qX11Display();
+        if (dpy) {
+            Atom a = XInternAtom(dpy, "_NET_WM_CM_S0", False);
+            if (a != None && XGetSelectionOwner(dpy, a) != None) {
+                cached = 1;
+            }
+        }
+    }
+    return cached == 1;
+#else
+    return false;
+#endif
 }
 
+// 覆盖层：固定尺寸子控件，在其内把快照从中心按比例放大后绘制。
+// 单窗口绘制 → Qt 双缓冲 → 无合成器也平滑；不触碰顶层窗口几何。
+class DialogScaleOverlay : public QWidget {
+public:
+    DialogScaleOverlay(QWidget* parent, const QPixmap& snap, const QColor& bg)
+        : QWidget(parent), m_snap(snap), m_bg(bg), m_t(0.0f) {
+#ifdef QT3_BUILD
+        setBackgroundMode(Qt::NoBackground);
+        setWFlags(Qt::WNoMousePropagation);
+        m_img = m_snap.convertToImage();
+#else
+        setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        setAttribute(Qt::WA_OpaquePaintEvent, true);
+        setAttribute(Qt::WA_NoSystemBackground, true);
+        setAutoFillBackground(false);
+#endif
+    }
+
+    void setProgress(float eased) {
+        m_t = eased;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) {
+        QPainter p(this);
+        p.fillRect(rect(), m_bg);
+        const float s = kStartScale + (1.0f - kStartScale) * m_t;
+        int w = (int)(width() * s + 0.5f);
+        int h = (int)(height() * s + 0.5f);
+        if (w < 1) { w = 1; }
+        if (h < 1) { h = 1; }
+        const QRect target((width() - w) / 2, (height() - h) / 2, w, h);
+#ifdef QT3_BUILD
+        QPixmap scaled(m_img.smoothScale(w, h));
+        p.drawPixmap(target.topLeft(), scaled);
+#else
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        p.drawPixmap(target, m_snap, m_snap.rect());
+#endif
+    }
+
+private:
+    QPixmap m_snap;
+    QColor  m_bg;
+    float   m_t;
+#ifdef QT3_BUILD
+    QImage  m_img;
+#endif
+};
+
+} // namespace
+
+bool DialogPopupAnimator::s_enabled = true;
+
 DialogPopupAnimator::DialogPopupAnimator(QWidget* dialog, int durationMs)
-    : QObject(dialog)
-    , m_dialog(dialog)
-    , m_timerId(0)
-    , m_durationMs(durationMs > 0 ? durationMs : kDefaultDurationMs)
-    , m_elapsedMs(0)
-    , m_animating(false) {}
+    : QObject(dialog),
+      m_dialog(dialog),
+      m_overlay(0),
+      m_timerId(0),
+      m_durationMs(durationMs > 0 ? durationMs : kDefaultDurationMs),
+      m_animating(false),
+      m_fade(false) {
+}
 
 DialogPopupAnimator::~DialogPopupAnimator() {
     if (m_timerId != 0) {
@@ -50,10 +128,17 @@ DialogPopupAnimator* DialogPopupAnimator::install(QWidget* dialog, int durationM
     return a;
 }
 
+void DialogPopupAnimator::setEnabled(bool on) {
+    s_enabled = on;
+}
+
+bool DialogPopupAnimator::isEnabled() {
+    return s_enabled;
+}
+
 bool DialogPopupAnimator::eventFilter(QObject* obj, QEvent* event) {
     if (event->type() == QEvent::Show && obj == m_dialog && m_dialog->isTopLevel()) {
-        // 减动效：直接跳过动画
-        if (!g_activeParams || g_activeParams->compositingMode != JumpCut) {
+        if (s_enabled && (!g_activeParams || g_activeParams->compositingMode != JumpCut)) {
             startAnimation();
         }
     }
@@ -62,22 +147,26 @@ bool DialogPopupAnimator::eventFilter(QObject* obj, QEvent* event) {
 
 void DialogPopupAnimator::startAnimation() {
     if (m_animating) { return; }
+    if (m_dialog->width() <= 0 || m_dialog->height() <= 0) { return; }
 
-    m_finalGeo = m_dialog->geometry();
-    if (m_finalGeo.width() <= 0 || m_finalGeo.height() <= 0) { return; }
+    const QPixmap snap = QPixmap::grabWidget(m_dialog);
+    if (snap.isNull()) { return; }
 
-    int w = (int)(m_finalGeo.width() * kStartScale + 0.5f);
-    int h = (int)(m_finalGeo.height() * kStartScale + 0.5f);
-    if (w < 1) { w = 1; }
-    if (h < 1) { h = 1; }
-    const int cx = m_finalGeo.x() + m_finalGeo.width() / 2;
-    const int cy = m_finalGeo.y() + m_finalGeo.height() / 2;
-    m_startGeo = QRect(cx - w / 2, cy - h / 2, w, h);
+#ifdef QT3_BUILD
+    const QColor bg = m_dialog->palette().active().background();
+#else
+    const QColor bg = m_dialog->palette().color(QPalette::Window);
+#endif
+    m_overlay = new DialogScaleOverlay(m_dialog, snap, bg);
+    m_overlay->setGeometry(0, 0, m_dialog->width(), m_dialog->height());
+    m_overlay->raise();
+    m_overlay->show();
 
-    m_elapsedMs = 0;
+    m_fade = qHasCompositor();
+    if (m_fade) { setWindowAlpha(0.0f); }
+
     m_animating = true;
-    m_dialog->setGeometry(m_startGeo);
-    setWindowAlpha(0.0f);
+    m_clock.start();
     m_timerId = startTimer(kTickMs);
 }
 
@@ -86,8 +175,7 @@ void DialogPopupAnimator::timerEvent(QTimerEvent* event) {
         QObject::timerEvent(event);
         return;
     }
-    m_elapsedMs += kTickMs;
-    float t = (float)m_elapsedMs / (float)m_durationMs;
+    const float t = (float)m_clock.elapsed() / (float)m_durationMs;
     if (t >= 1.0f) {
         applyProgress(1.0f);
         finishAnimation();
@@ -98,12 +186,8 @@ void DialogPopupAnimator::timerEvent(QTimerEvent* event) {
 
 void DialogPopupAnimator::applyProgress(float t) {
     const float e = easeOutCubic(t);
-    m_dialog->setGeometry(QRect(
-        lerpInt(m_startGeo.x(),      m_finalGeo.x(),      e),
-        lerpInt(m_startGeo.y(),      m_finalGeo.y(),      e),
-        lerpInt(m_startGeo.width(),  m_finalGeo.width(),  e),
-        lerpInt(m_startGeo.height(), m_finalGeo.height(), e)));
-    setWindowAlpha(e);
+    if (m_overlay) { static_cast<DialogScaleOverlay*>(m_overlay)->setProgress(e); }
+    if (m_fade) { setWindowAlpha(e); }
 }
 
 void DialogPopupAnimator::finishAnimation() {
@@ -111,16 +195,21 @@ void DialogPopupAnimator::finishAnimation() {
         killTimer(m_timerId);
         m_timerId = 0;
     }
+    if (m_overlay) {
+        m_overlay->hide();
+        delete m_overlay;
+        m_overlay = 0;
+    }
+    if (m_fade) {
+        setWindowAlpha(1.0f);
+        m_fade = false;
+    }
     m_animating = false;
-    m_dialog->setGeometry(m_finalGeo);
-    setWindowAlpha(1.0f);
 }
 
 void DialogPopupAnimator::setWindowAlpha(float a) {
-    if (a < 0.0f) { a = 0.0f; }
-    if (a > 1.0f) { a = 1.0f; }
 #ifdef QT3_BUILD
-    // Qt3 无 setWindowOpacity：走 X11 _NET_WM_WINDOW_OPACITY
+#if defined(Q_OS_LINUX)
     Display* dpy = qX11Display();
     if (!dpy) { return; }
     Atom atom = XInternAtom(dpy, "_NET_WM_WINDOW_OPACITY", False);
@@ -129,6 +218,7 @@ void DialogPopupAnimator::setWindowAlpha(float a) {
     XChangeProperty(dpy, (Window)m_dialog->winId(), atom, XA_CARDINAL, 32,
                     PropModeReplace, (unsigned char*)&value, 1);
     XFlush(dpy);
+#endif
 #else
     m_dialog->setWindowOpacity(a);
 #endif

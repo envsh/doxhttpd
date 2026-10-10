@@ -13,6 +13,7 @@
 #include "translation_cache.h"
 #include "globaluiutil.h"
 #include "sharedstatusbar.h"
+#include "DialogPopupAnimator.h"
 #include <stdio.h>
 #include <string.h>
 #ifdef __linux__
@@ -44,6 +45,10 @@ void stbarShowStatusMessage(const QString &msg, SticonIcon type, int timeout)
 int main(int argc, char* argv[]) {
 	// os.setenv('QT_IM_MODULE', "xim", true)
     // os.setenv('XMODIFIERS', '@im=fcitx', true)
+#if defined(Q_OS_MAC) || defined(Q_OS_MACX) || defined(Q_OS_DARWIN)
+    // macOS 自带窗口弹出动效，关闭本组件动画避免叠加/冲突。
+    DialogPopupAnimator::setEnabled(false);
+#endif
 #ifdef __linux__
     mallopt(M_MMAP_THRESHOLD, 32768);
     mallopt(M_ARENA_MAX, 2);
