@@ -40,14 +40,16 @@ static std::string b64urlFromChars(char a, char b) {
 
 TEST_CASE("fanyibotEngines 基本结构") {
     const auto& v = fanyibotEngines();
-    CHECK(v.size() == 5);
+    CHECK(v.size() == 6);
     CHECK(std::string(v[0].name) == "msedge");
     CHECK(std::string(v[1].name) == "google");
     CHECK(std::string(v[2].name) == "youdao");
     CHECK(std::string(v[3].name) == "yandex");
     CHECK(std::string(v[4].name) == "deepl");
+    CHECK(std::string(v[5].name) == "deepl-web");
     CHECK(v[1].unsupported == true);   // google 已禁用
     CHECK(v[4].unsupported == true);
+    CHECK(v[5].unsupported == false);
 }
 
 TEST_CASE("fanyibotLangCode 映射") {
@@ -56,6 +58,9 @@ TEST_CASE("fanyibotLangCode 映射") {
     CHECK(fanyibotLangCode(kFanyibotYoudao, "中文") == "zh-CHS");
     CHECK(fanyibotLangCode(kFanyibotYandex, "中文") == "zh");
     CHECK(fanyibotLangCode(kFanyibotDeepl, "English").empty());
+    CHECK(fanyibotLangCode(kFanyibotDeeplWeb, "中文") == "zh-Hans");
+    CHECK(fanyibotLangCode(kFanyibotDeeplWeb, "English") == "en-US");
+    CHECK(fanyibotLangCode(kFanyibotDeeplWeb, "地球语") == "eo");
 }
 
 TEST_CASE("buildCandidates all 随机取序") {
@@ -65,7 +70,7 @@ TEST_CASE("buildCandidates all 随机取序") {
     std::string reason;
     auto c = buildCandidates(r, reason);
     CHECK(reason.empty());
-    CHECK(c.size() == 3);
+    CHECK(c.size() == 4);
 }
 
 TEST_CASE("buildCandidates any 非空") {
@@ -75,7 +80,7 @@ TEST_CASE("buildCandidates any 非空") {
     std::string reason;
     auto c = buildCandidates(r, reason);
     CHECK(reason.empty());
-    CHECK(c.size() == 3);
+    CHECK(c.size() == 4);
 }
 
 TEST_CASE("parseMsedge 数组形/对象形") {
@@ -138,6 +143,14 @@ TEST_CASE("scrapeYandexSid") {
 
 TEST_CASE("parseYandex 基本") {
     CHECK(parseYandex("{\"code\":200,\"text\":[\"hi\"]}") == "hi");
+}
+
+TEST_CASE("parseDeeplWeb 基本") {
+    CHECK(parseDeeplWeb("{\"translations\":[{\"detected_source_language\":\"en\","
+                        "\"text\":\"你好\"}]}") == "你好");
+    CHECK(parseDeeplWeb("{\"translations\":[{\"text\":\"hi\"}]}") == "hi");
+    CHECK(parseDeeplWeb("{\"translations\":[]}").empty());
+    CHECK(parseDeeplWeb("not json").empty());
 }
 
 TEST_CASE("base64UrlDecode") {

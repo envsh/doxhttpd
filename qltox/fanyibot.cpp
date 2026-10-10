@@ -32,6 +32,7 @@ const FanyibotEngine kEngines[] = {
     { kFanyibotYoudao, "youdao", false },
     { kFanyibotYandex, "yandex", false },
     { kFanyibotDeepl,  "deepl",  true  },
+    { kFanyibotDeeplWeb, "deepl-web", false },
 };
 const int kEngineCount = int(sizeof(kEngines) / sizeof(kEngines[0]));
 
@@ -40,6 +41,8 @@ const char* kMsedgeUA = "msie 6";
 const char* kYandexUA = "msie 6";
 const char* kBrowserUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                          "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+const char* kDeepLWebUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                          "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 // ── 有道：与 touse/oai 完全一致的 URL/头/参数 ──
 const char* kYoudaoUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -72,18 +75,19 @@ struct LangRow {
     const char* google;
     const char* youdao;
     const char* yandex;
+    const char* deeplweb;
 };
 const LangRow kLangs[] = {
-    { "中文",     "zh-Hans", "zh-CN", "zh-CHS", "zh" },
-    { "繁體中文", "zh-Hant", "zh-TW",  "zh-CHT", "zh" },
-    { "日本語",   "ja",      "ja",     "ja",     "ja" },
-    { "한국어",   "ko",      "ko",     "ko",     "ko" },
-    { "English",  "en",      "en",     "en",     "en" },
-    { "Français", "fr",      "fr",     "fr",     "fr" },
-    { "Deutsch",  "de",      "de",     "de",     "de" },
-    { "Русский",  "ru",      "ru",     "ru",     "ru" },
-    { "العربية",  "ar",      "ar",     "ar",     "ar" },
-    { "地球语",   "eo",      "eo",     "eo",     "eo" },
+    { "中文",     "zh-Hans", "zh-CN", "zh-CHS", "zh", "zh-Hans" },
+    { "繁體中文", "zh-Hant", "zh-TW",  "zh-CHT", "zh", "zh-Hant" },
+    { "日本語",   "ja",      "ja",     "ja",     "ja", "ja"    },
+    { "한국어",   "ko",      "ko",     "ko",     "ko", "ko"    },
+    { "English",  "en",      "en",     "en",     "en", "en-US" },
+    { "Français", "fr",      "fr",     "fr",     "fr", "fr"    },
+    { "Deutsch",  "de",      "de",     "de",     "de", "de"    },
+    { "Русский",  "ru",      "ru",     "ru",     "ru", "ru"    },
+    { "العربية",  "ar",      "ar",     "ar",     "ar", "ar"    },
+    { "地球语",   "eo",      "eo",     "eo",     "eo", "eo"    },
 };
 const int kLangCount = int(sizeof(kLangs) / sizeof(kLangs[0]));
 
@@ -202,6 +206,7 @@ const char* engineHost(const FanyibotEngine& e, int step) {
     case kFanyibotYoudao: return step == 0 ? "fanyi.youdao.com" : "dict.youdao.com";
     case kFanyibotYandex: return "translate.yandex.com";
     case kFanyibotDeepl:  return "-";
+    case kFanyibotDeeplWeb: return "oneshot-free.www.deepl.com";
     }
     return "-";
 }
@@ -377,6 +382,34 @@ std::string parseYandex(const std::string& body) {
             const char* v = cJSON_GetStringValue(first);
             if (v) { out = v; }
         }
+        cJSON_Delete(root);
+    }
+    return out;
+}
+
+// deepl-web 实例 id（app_information.instance_id，进程内固定 32 hex）
+std::string deeplWebInstanceId() {
+    static std::string id;
+    if (id.empty()) {
+        char buf[33];
+        for (int i = 0; i < 32; i++) {
+            const int v = rand() & 0xF;
+            buf[i] = (char)(v < 10 ? '0' + v : 'a' + v - 10);
+        }
+        buf[32] = 0;
+        id = buf;
+    }
+    return id;
+}
+
+// deepl-web（oneshot）：{"translations":[{"detected_source_language":"en","text":"…"}]}
+std::string parseDeeplWeb(const std::string& body) {
+    cJSON* root = cJSON_Parse(body.c_str());
+    std::string out;
+    if (root) {
+        cJSON* arr = cJSON_GetObjectItem(root, "translations");
+        cJSON* t0 = arr ? cJSON_GetArrayItem(arr, 0) : nullptr;
+        out = t0 ? jsonStr(t0, "text") : std::string();
         cJSON_Delete(root);
     }
     return out;
@@ -735,6 +768,28 @@ void sendEngine(Session* s, const FanyibotEngine& e) {
         return;
     }
 
+    if (e.id == kFanyibotDeeplWeb) {
+        // 免鉴权 oneshot 端点（DeepL 扩展/iOS App 同款）；Authorization 字面量 "None"
+        h["User-Agent"]     = kDeepLWebUA;
+        h["Content-Type"]   = "application/json";
+        h["Accept"]         = "*/*";
+        h["Authorization"]  = "None";
+        h["Origin"]         = "chrome-extension://cofdbpoegempjloogbagkncekinflcnj";
+        h["Sec-Fetch-Site"] = "cross-site";
+        h["Sec-Fetch-Mode"] = "cors";
+        h["Sec-Fetch-Dest"] = "empty";
+        const std::string body =
+            "{\"text\":[\"" + jsonEscape(text) + "\"],"
+            "\"target_lang\":\"" + code + "\","
+            "\"usage_type\":\"Translate\","
+            "\"app_information\":{\"os\":\"brex_macOS\","
+            "\"os_version\":\"brex_chrome_120.0.0.0\","
+            "\"app_version\":\"1.86.0\",\"app_build\":\"chrome_web_store\","
+            "\"instance_id\":\"" + deeplWebInstanceId() + "\"}}";
+        sendHttp(s, "https://oneshot-free.www.deepl.com/v1/translate", "POST", body, h);
+        return;
+    }
+
     if (e.id == kFanyibotYoudao) {
         if (s->step == 0) {   // 取 key：磁盘缓存/会话命中，否则 key 接口（无需 warm cookie）
             if (s->ydAesKey.empty() || s->ydSecret.empty()) { youdaoLoadCache(s); }
@@ -880,6 +935,18 @@ void onDone(const HttpResponse& resp, void* udata) {
         return;
     }
 
+    if (e->id == kFanyibotDeeplWeb) {
+        if (httpOk) {
+            const std::string out = parseDeeplWeb(resp.body);
+            if (!out.empty()) {
+                postResult(s, true, out, e->name, std::string());
+                return;
+            }
+        }
+        failEngine(s, *e, httpErr(resp));
+        return;
+    }
+
     if (e->id == kFanyibotYoudao) {
         if (httpOk && s->step == 0) {
             std::string secretKey, aesKey, aesIv, cookie;
@@ -1009,6 +1076,7 @@ std::string fanyibotLangCode(FanyibotEngineId id, const std::string& toLang) {
         case kFanyibotYoudao: return kLangs[i].youdao;
         case kFanyibotYandex: return kLangs[i].yandex;
         case kFanyibotDeepl:  break;   // 暂不可用，无语言码
+        case kFanyibotDeeplWeb: return kLangs[i].deeplweb;
         }
         return std::string();
     }

@@ -13,13 +13,14 @@ enum FanyibotEngineId {
     kFanyibotYoudao,
     kFanyibotYandex,
     kFanyibotDeepl,
+    kFanyibotDeeplWeb,
 };
 
 // 单个引擎的静态契约
 struct FanyibotEngine {
     FanyibotEngineId id;
-    const char* name;      // msedge / google / youdao / yandex / deepl
-    bool unsupported;      // true=保留属性选项但选中即报错（deepl 需官方 auth key）
+    const char* name;      // msedge / google / youdao / yandex / deepl / deepl-web
+    bool unsupported;      // true=保留属性选项但选中即报错（deepl 需官方 auth key；deepl-web 免鉴权可用）
 };
 
 const std::vector<FanyibotEngine>& fanyibotEngines();

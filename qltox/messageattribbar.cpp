@@ -877,11 +877,12 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
         defs << tagsDef("tags", qFromUtf8("标签"));
     } else if (type == kTranslateType) {
         QStringList eng;  eng << "any" << "all" << "msedge" << "google"
-                              << "youdao" << "yandex" << "deepl";
+                              << "youdao" << "yandex" << "deepl" << "deepl-web";
         defs << comboDef("engine", qFromUtf8("翻译引擎"), eng, "any",
                          qFromUtf8("翻译引擎：any=随机取序逐个尝试，首个成功即止（默认） / "
                                    "all=按固定优先级依次尝试，成功即止 / 指定项=只用该引擎。"
                                    "客户端直连翻译服务，不经后端。"
+                                   "deepl-web=DeepL 免鉴权网页端点（oneshot）；"
                                    "deepl 需官方 auth key，暂不可用，选中即报错"));
         QStringList lang;
         lang << qFromUtf8("中文") << qFromUtf8("繁體中文") << qFromUtf8("日本語")

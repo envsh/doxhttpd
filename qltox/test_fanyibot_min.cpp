@@ -40,7 +40,7 @@ static std::string b64urlFromChars(char a, char b) {
 
 TEST_CASE("fanyibotEngines") {
     const auto& v = fanyibotEngines();
-    CHECK(v.size() == 5);
+    CHECK(v.size() == 6);
 }
 
 TEST_CASE("fanyibotLangCode 基本") {
@@ -48,6 +48,7 @@ TEST_CASE("fanyibotLangCode 基本") {
     CHECK(fanyibotLangCode(kFanyibotGoogle, "中文") == "zh-CN");
     CHECK(fanyibotLangCode(kFanyibotYoudao, "中文") == "zh-CHS");
     CHECK(fanyibotLangCode(kFanyibotYandex, "中文") == "zh");
+    CHECK(fanyibotLangCode(kFanyibotDeeplWeb, "中文") == "zh-Hans");
 }
 
 TEST_CASE("buildCandidates") {
@@ -57,7 +58,7 @@ TEST_CASE("buildCandidates") {
     std::string reason;
     auto c = buildCandidates(r, reason);
     CHECK(reason.empty());
-    CHECK(c.size() == 3);
+    CHECK(c.size() == 4);
 }
 
 TEST_CASE("parseMsedge") {
@@ -92,6 +93,10 @@ TEST_CASE("scrapeYandexSid") {
 
 TEST_CASE("parseYandex") {
     CHECK(parseYandex("{\"code\":200,\"text\":[\"hi\"]}") == "hi");
+}
+
+TEST_CASE("parseDeeplWeb") {
+    CHECK(parseDeeplWeb("{\"translations\":[{\"text\":\"你好\"}]}") == "你好");
 }
 
 TEST_CASE("base64UrlDecode") {
