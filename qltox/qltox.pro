@@ -38,6 +38,7 @@ aigptbot.cpp \
                  searchlistview.cpp \
                  sticker_db.cpp stickerpicker.cpp stickermanager.cpp \
                  seen_unknown.cpp \
+                 metavars_cache.cpp \
                  ../3rdparty/barrust_bloom/bloom.c \
                  ../etapps/plugin_loader.cpp ../etapps/plugin_manager_dialog.cpp
 
@@ -64,6 +65,7 @@ aigptbot.h \
                  searchlistview.h \
                  sticker_db.h stickerpicker.h stickermanager.h \
                  seen_unknown.h \
+                 metavars_cache.h \
                  ../3rdparty/bloom/bloom_filter.hpp \
                  ../3rdparty/barrust_bloom/bloom.h \
                  ../etapps/plugin_loader.h ../etapps/plugin_manager_dialog.h

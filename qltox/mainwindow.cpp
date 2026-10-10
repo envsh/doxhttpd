@@ -4,6 +4,7 @@
 #include "eventpoller.h"
 #include "pureconsts.hpp"
 #include "unknownparser.h"
+#include "metavars_cache.h"
 #include "version.h"
 #include "avatar_manager.h"
 #include "translator.h"
@@ -189,101 +190,7 @@ static QPixmap decodeRawToThumb(const char* data, int len, int mediaW, int media
     return makeScaledThumb(tmp, mediaW, mediaH, maxW);
 }
 
-// ── peer 持久化 helpers ──
-// key 格式: "friend_N", "group_N_M", "conference_N_M", "unknown_*"
-struct PeerKey {
-    std::string chanid;
-    int peerNum = 0;
-    bool valid = false;
-};
-static PeerKey parsePeerKey(const std::string& key) {
-    PeerKey ret;
-    if (key.compare(0, 7, "friend_") == 0) {
-        ret.chanid = "friend:" + key.substr(7);
-        ret.peerNum = std::stoi(key.substr(7));
-        ret.valid = true;
-    } else if (key.compare(0, 6, "group_") == 0) {
-        size_t us = key.find('_', 6);
-        if (us == std::string::npos) { return ret; }
-        ret.chanid = "group:" + key.substr(6, us - 6);
-        ret.peerNum = std::stoi(key.substr(us + 1));
-        ret.valid = true;
-    } else if (key.compare(0, 11, "conference_") == 0) {
-        size_t us = key.find('_', 11);
-        if (us == std::string::npos) { return ret; }
-        ret.chanid = "conference:" + key.substr(11, us - 11);
-        ret.peerNum = std::stoi(key.substr(us + 1));
-        ret.valid = true;
-    } else if (key.compare(0, 8, "unknown_") == 0) {
-        ret.chanid = "unknown:" + key.substr(8);
-        ret.peerNum = 0;
-        ret.valid = true;
-    }
-    return ret;
-}
-
-// Row→PeerInfo 转换 + 写入 peerInfoMap + 可选 avatar 下载
-// 返回 map iterator，失败返回 end()
-static std::map<std::string, PeerInfo>::iterator
-loadRowToMap(std::map<std::string, PeerInfo>& m,
-             const std::string& key,
-             std::unique_ptr<PeerRow> row)
-{
-    if (!row) return m.end();
-    PeerInfo pi;
-    pi.peerNumber = row->peer_number;
-    pi.publicKey  = row->public_key;
-    pi.userName       = row->name;
-    pi.nickname   = row->nickname;
-    pi.iconUrl    = row->avatar_url;
-    pi.statusText = row->status_text;
-    pi.statusStr  = row->status_str;
-    pi.userStatus = row->user_status;
-    pi.peerIp     = row->peer_ip;
-    pi.role       = row->role;
-    pi.roleStr    = row->role_str;
-    pi.isSelf     = row->is_self;
-    pi.lastSeen   = (time_t)row->last_seen;
-    pi.status     = row->status;
-    auto result = m.insert({key, pi});
-    if (result.second && !pi.iconUrl.empty()) {
-        QString mxc = qFromUtf8(pi.iconUrl);
-        if (AvatarManager::inst().requestDownload(mxc)) {
-            ToxAPI::downloadAvatar(pi.iconUrl);
-        }
-    }
-    return result.first;
-}
-
-static bool addPeerToDb(const std::string& key, const PeerInfo& pi) {
-    PeerKey pk = parsePeerKey(key);
-    if (!pk.valid) { return false; }
-    if (pi.nickname.empty() && pi.iconUrl.empty()) {
-        qWarning("addPeerToDb: skip, key=%s", key.c_str());
-        return false;
-    }
-    PeerRow row;
-    row.chanid = pk.chanid;
-    row.peer_number = pk.peerNum;
-    row.public_key = pi.publicKey;
-    row.name = pi.userName;
-    row.nickname = pi.nickname;
-    row.avatar_url = pi.iconUrl;
-    row.status_text = pi.statusText;
-    row.status_str = pi.statusStr;
-    row.user_status = pi.userStatus;
-    row.peer_ip = pi.peerIp;
-    row.role = pi.role;
-    row.role_str = pi.roleStr;
-    row.is_self = pi.isSelf;
-    row.last_seen = (int64_t)pi.lastSeen;
-    row.status = pi.status;
-    auto* async = Storage::instance().channelDbAsync();
-    if (async) {
-        async->add_peer(std::move(row), nullptr);
-    }
-    return true;
-}
+// ── peer/联系人 缓存 helpers 已移入 metavars_cache.{h,cpp} ──
 
 static void updateContactDb(const std::string& chanid, const std::string& name,
                             const std::string& status, int is_connected,
@@ -338,57 +245,6 @@ static void db_writeLastMessage(int id, const QString& type,
         upd.last_message_rowid = rowid;
     }
     async->update_channel(chanidStr(id, type), std::move(upd), nullptr);
-}
-
-static void updatePeerInDb(const std::string& key, const PeerInfo& pi) {
-    PeerKey pk = parsePeerKey(key);
-    if (!pk.valid) { return; }
-    if (pk.chanid.compare(0, 8, "unknown:") == 0) { return; } // unknown 不走部分更新
-    PeerRow row;
-    row.chanid = pk.chanid;
-    row.peer_number = pk.peerNum;
-    row.public_key = pi.publicKey;
-    row.name = pi.userName;
-    row.nickname = pi.nickname;
-    row.avatar_url = pi.iconUrl;
-    row.status_text = pi.statusText;
-    row.status_str = pi.statusStr;
-    row.user_status = pi.userStatus;
-    row.peer_ip = pi.peerIp;
-    row.role = pi.role;
-    row.role_str = pi.roleStr;
-    row.is_self = pi.isSelf;
-    row.last_seen = (int64_t)pi.lastSeen;
-    row.status = pi.status;
-    auto* async = Storage::instance().channelDbAsync();
-    if (async) {
-        async->update_peer(std::move(row), nullptr);
-    }
-}
-
-static PeerInfo& getOrCreatePeerEntry(std::map<std::string, PeerInfo>& m, const std::string& key) {
-    auto it = m.find(key);
-    if (it == m.end()) {
-        it = m.insert({key, PeerInfo()}).first;
-    }
-    return it->second;
-}
-
-static void mergePeerInfo(PeerInfo& dst, const PeerInfo& src) {
-    if (src.peerNumber != 0) dst.peerNumber = src.peerNumber;
-    if (!src.userName.empty()) dst.userName = src.userName;
-    if (!src.nickname.empty()) dst.nickname = src.nickname;
-    if (src.status != 0) dst.status = src.status;
-    if (!src.statusStr.empty()) dst.statusStr = src.statusStr;
-    if (!src.statusText.empty()) dst.statusText = src.statusText;
-    if (!src.iconUrl.empty()) dst.iconUrl = src.iconUrl;
-    if (src.role != 0) dst.role = src.role;
-    if (!src.roleStr.empty()) dst.roleStr = src.roleStr;
-    if (!src.publicKey.empty()) dst.publicKey = src.publicKey;
-    if (src.isSelf) dst.isSelf = true;
-    if (!src.peerIp.empty()) dst.peerIp = src.peerIp;
-    if (!src.userStatus.empty()) dst.userStatus = src.userStatus;
-    if (src.lastSeen != 0) dst.lastSeen = src.lastSeen;
 }
 
 static QString timenowhm() {
@@ -1401,18 +1257,8 @@ void MainWindow::customEvent(CustomEventBase* event) {
             if (evt->loadedMask & PartialDataEvent::kContacts) {
                 for (const auto& cd : evt->contacts) {
                     // 按 (id, type) 匹配，原地更新已有条目（如好友占位→真实数据）
-                    bool updated = false;
-                    for (auto& existing : m_accumulatedContactData) {
-                        if (existing.id == cd.id && existing.type == cd.type) {
-                            existing = cd;
-                            updated = true;
-                            break;
-                        }
-                    }
-                    if (!updated) {
-                        m_accumulatedContactData.push_back(cd);
-                    }
-                    
+                    upsertContact(m_accumulatedContactData, cd);
+
                     if (cd.type == "friend") {
                         std::string key = "friend_" + std::to_string(cd.id);
                         auto& entry = getOrCreatePeerEntry(peerInfoMap, key);
@@ -1636,11 +1482,10 @@ void MainWindow::customEvent(CustomEventBase* event) {
             MessageSentResultEvent* evt = static_cast<MessageSentResultEvent*>(event);
             chatWidget->loadingBar()->hideLoading(kLoadSendMsg);
             QString targetName;
-            for (const auto& cd : m_accumulatedContactData) {
-                if (cd.id == evt->chatId && cd.type == evt->chatType) {
-                    targetName = qFromUtf8(cd.name);
-                    break;
-                }
+            {
+                // 从联系人缓存按 (id, type) 取显示名（发送结果回显）
+                const ContactData* c = findContact(m_accumulatedContactData, evt->chatId, evt->chatType);
+                if (c) { targetName = qFromUtf8(c->name); }
             }
             if (targetName.isEmpty())
                 targetName = qFromUtf8(evt->chatType) + " " + QString::number(evt->chatId);
@@ -1808,18 +1653,8 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 chatWidget->loadingBar()->showLoading(kLoadSendMsg,
                     _("sending_message"));
                 std::string type = std::string(qToUtf8(currentChatType).data());
-                std::string idOverride;
-                if (type == kGomuksRoomType || type == kMtxliteRoomType
-        || type == kUnktoxConferenceType
-                    || type == kUnktoxFriendType || type == kUnktoxGroupType
-                    || type == kMisskeyType || type == kImapMailType) {
-                    for (const auto& cd : m_accumulatedContactData) {
-                        if (cd.id == currentChatId && cd.type == type) {
-                            idOverride = cd.chatId;
-                            break;
-                        }
-                    }
-                }
+                // 虚拟类型（流式/桥接）需用 chatId 字符串作为发送 id 覆盖值
+                std::string idOverride = contactChatIdOverride(m_accumulatedContactData, currentChatId, type);
                 int sendmsgseq = ToxAPI::sendMessage(currentChatId, type, tev->translatedText, idOverride);
                 (void)sendmsgseq;
             } else {
@@ -2196,18 +2031,7 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
     }
 
     // 虚拟类型使用 chatId 字符串（如 gomuks room ID）而非 numeric contactId
-    std::string idOverride;
-    if (type == kGomuksRoomType || type == kMtxliteRoomType
-        || type == kUnktoxConferenceType
-        || type == kUnktoxFriendType || type == kUnktoxGroupType
-        || type == kMisskeyType || type == kImapMailType) {
-        for (const auto& cd : m_accumulatedContactData) {
-            if (cd.id == currentChatId && cd.type == type) {
-                idOverride = cd.chatId;
-                break;
-            }
-        }
-    }
+    std::string idOverride = contactChatIdOverride(m_accumulatedContactData, currentChatId, type);
 
     if (type == kBookmarkType) {
         handleBookmarkMessage(message);
@@ -2409,12 +2233,7 @@ void MainWindow::handleEvents(const EventList& events) {
 
                     if (it == peerInfoMap.end()) {
                         qWarning("conference_message: peer record load, key=%s", key.c_str());
-                        PeerKey pk = parsePeerKey(key);
-                        if (pk.valid) {
-                            auto row = Storage::instance().channelDb()->get_chan_peer(
-                                pk.chanid.c_str(), pk.peerNum);
-                            it = loadRowToMap(peerInfoMap, key, std::move(row));
-                        }
+                        it = lookupPeerByKey(peerInfoMap, key);
                         // 不创建空条目
                     } else {
                         // 第二层：key 已存在，逐个检查缺失字段
@@ -2524,12 +2343,7 @@ void MainWindow::handleEvents(const EventList& events) {
 
                     if (it == peerInfoMap.end()) {
                         qWarning("group_message: peer record load, key=%s", key.c_str());
-                        PeerKey pk = parsePeerKey(key);
-                        if (pk.valid) {
-                            auto row = Storage::instance().channelDb()->get_chan_peer(
-                                pk.chanid.c_str(), pk.peerNum);
-                            it = loadRowToMap(peerInfoMap, key, std::move(row));
-                        }
+                        it = lookupPeerByKey(peerInfoMap, key);
                         // 不创建空条目
                     } else {
                         // 第二层：key 已存在，逐个检查缺失字段
@@ -2611,15 +2425,7 @@ void MainWindow::handleEvents(const EventList& events) {
                 if (confNumberItem && peerNumberItem && nameItem && cJSON_IsString(nameItem)) {
                     std::string key = "conference_" + std::to_string(confNumberItem->valueint)
                         + "_" + std::to_string(peerNumberItem->valueint);
-                    auto it = peerInfoMap.find(key);
-                    if (it == peerInfoMap.end()) {
-                        PeerKey pk = parsePeerKey(key);
-                        if (pk.valid) {
-                            auto row = Storage::instance().channelDb()->get_chan_peer(
-                                pk.chanid.c_str(), pk.peerNum);
-                            it = loadRowToMap(peerInfoMap, key, std::move(row));
-                        }
-                    }
+                    auto it = lookupPeerByKey(peerInfoMap, key);
                     if (it != peerInfoMap.end()) {
                         it->second.userName = std::string(cJSON_GetStringValue(nameItem));
                         it->second.peerNumber = peerNumberItem->valueint;
@@ -2636,15 +2442,7 @@ void MainWindow::handleEvents(const EventList& events) {
                 if (groupNumberItem && peerNumberItem && nameItem && cJSON_IsString(nameItem)) {
                     std::string key = "group_" + std::to_string(groupNumberItem->valueint)
                         + "_" + std::to_string(peerNumberItem->valueint);
-                    auto it = peerInfoMap.find(key);
-                    if (it == peerInfoMap.end()) {
-                        PeerKey pk = parsePeerKey(key);
-                        if (pk.valid) {
-                            auto row = Storage::instance().channelDb()->get_chan_peer(
-                                pk.chanid.c_str(), pk.peerNum);
-                            it = loadRowToMap(peerInfoMap, key, std::move(row));
-                        }
-                    }
+                    auto it = lookupPeerByKey(peerInfoMap, key);
                     if (it != peerInfoMap.end()) {
                         it->second.userName = std::string(cJSON_GetStringValue(nameItem));
                         it->second.peerNumber = peerNumberItem->valueint;
@@ -2772,17 +2570,9 @@ void MainWindow::handleEvents(const EventList& events) {
             // ── 更新 contacts ──
             if (!pr.contacts.empty()) {
                 for (const auto& cd : pr.contacts) {
-                    bool updated = false;
-                    for (auto& existing : m_accumulatedContactData) {
-                        if (existing.id == cd.id && existing.type == cd.type) {
-                            existing = cd;
-                            updated = true;
-                            break;
-                        }
-                    }
-                    if (!updated) {
-                        m_accumulatedContactData.push_back(cd);
-
+                    // 联系人 upsert：新增返回 true，已存在则原地覆盖返回 false
+                    bool added = upsertContact(m_accumulatedContactData, cd);
+                    if (added) {
                         Contact* c = new Contact();
                         c->id = cd.id;
                         c->name = qFromUtf8(cd.name);
@@ -2825,15 +2615,7 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
                         }
                         if (senderLabel.isEmpty()) {
                             std::string key = "unknown_" + hm.sender_pubkey;
-                            auto it = peerInfoMap.find(key);
-                            if (it == peerInfoMap.end()) {
-                                PeerKey pk = parsePeerKey(key);
-                                if (pk.valid) {
-                                    auto row = Storage::instance().channelDb()->get_chan_peer(
-                                        pk.chanid.c_str(), pk.peerNum);
-                                    it = loadRowToMap(peerInfoMap, key, std::move(row));
-                                }
-                            }
+                            auto it = lookupPeerByKey(peerInfoMap, key);
                             if (it != peerInfoMap.end()) {
                                 userName = qFromUtf8(it->second.userName);
                                 senderLabel = !it->second.nickname.empty()
@@ -3100,12 +2882,9 @@ void MainWindow::retranslateUi() {
         } else if (!protoStreamEmoji(currentChatType).isEmpty()) {
             QString label;
             std::string type = std::string(qToUtf8(currentChatType).data());
-            for (const auto& cd : m_accumulatedContactData) {
-                if (cd.id == currentChatId && cd.type == type) {
-                    label = qFromUtf8(cd.name);
-                    break;
-                }
-            }
+            // 从联系人缓存取订阅流显示名
+            const ContactData* scd = findContact(m_accumulatedContactData, currentChatId, type);
+            if (scd) { label = qFromUtf8(scd->name); }
             if (label.isEmpty()) { label = currentChatType; }
             headerText = protoStreamEmoji(currentChatType) + " " + label;
         }
@@ -3186,15 +2965,7 @@ void MainWindow::onViewInfoRequested(int id, const QString& type) {
     
     if (type == "friend") {
         std::string key = "friend_" + std::to_string(id);
-        auto it = peerInfoMap.find(key);
-        if (it == peerInfoMap.end()) {
-            PeerKey pk = parsePeerKey(key);
-            if (pk.valid) {
-                auto row = Storage::instance().channelDb()->get_chan_peer(
-                    pk.chanid.c_str(), pk.peerNum);
-                it = loadRowToMap(peerInfoMap, key, std::move(row));
-            }
-        }
+        auto it = lookupPeerByKey(peerInfoMap, key);
         if (it != peerInfoMap.end()) {
             if (it->second.statusText.empty())
                 ToxAPI::lazyLoadFriendDetail(id);
@@ -3260,13 +3031,11 @@ void MainWindow::onChatPeerInfoRequested(int peerNumber, const QString& senderNa
             + "_" + std::to_string(currentChatId)
             + "_" + std::to_string(peerNumber);
     }
-    auto it = peerInfoMap.find(key);
-    if (it == peerInfoMap.end() && !key.empty()) {
-        PeerKey pk = parsePeerKey(key);
-        if (pk.valid) {
-            auto row = Storage::instance().channelDb()->get_chan_peer(
-                pk.chanid.c_str(), pk.peerNum);
-            it = loadRowToMap(peerInfoMap, key, std::move(row));
+    auto it = key.empty() ? peerInfoMap.end() : lookupPeerByKey(peerInfoMap, key);
+    if (it == peerInfoMap.end() && !senderPubkey.isEmpty()) {
+        std::string ukey = "unknown_" + std::string(qToUtf8(senderPubkey).data());
+        if (ukey != key) {
+            it = lookupPeerByKey(peerInfoMap, ukey);
         }
     }
     if (it != peerInfoMap.end()) {
@@ -3831,15 +3600,7 @@ void MainWindow::renderHistoryMessages(const std::vector<HistoryMessage>& messag
         } else {
             if (currentChatType == "friend") {
                 std::string key = "friend_" + std::to_string(currentChatId);
-                auto it = peerInfoMap.find(key);
-                if (it == peerInfoMap.end()) {
-                    PeerKey pk = parsePeerKey(key);
-                    if (pk.valid) {
-                        auto row = Storage::instance().channelDb()->get_chan_peer(
-                            pk.chanid.c_str(), pk.peerNum);
-                        it = loadRowToMap(peerInfoMap, key, std::move(row));
-                    }
-                }
+                auto it = lookupPeerByKey(peerInfoMap, key);
                 if (it != peerInfoMap.end()) {
                     senderLabel = qFromUtf8(it->second.userName);
                     if (!it->second.nickname.empty()) {
@@ -3850,15 +3611,7 @@ void MainWindow::renderHistoryMessages(const std::vector<HistoryMessage>& messag
                 }
             } else if (currentChatType == "unknown") {
                 std::string key = "unknown_" + msg.sender_pubkey;
-                auto it = peerInfoMap.find(key);
-                if (it == peerInfoMap.end()) {
-                    PeerKey pk = parsePeerKey(key);
-                    if (pk.valid) {
-                        auto row = Storage::instance().channelDb()->get_chan_peer(
-                            pk.chanid.c_str(), pk.peerNum);
-                        it = loadRowToMap(peerInfoMap, key, std::move(row));
-                    }
-                }
+                auto it = lookupPeerByKey(peerInfoMap, key);
                 if (it != peerInfoMap.end()) {
                     senderLabel = qFromUtf8(it->second.userName);
                     if (!it->second.nickname.empty()) {
@@ -3872,15 +3625,7 @@ void MainWindow::renderHistoryMessages(const std::vector<HistoryMessage>& messag
                 std::string key = std::string(qToUtf8(currentChatType).data())
                     + "_" + std::to_string(currentChatId)
                     + "_" + std::to_string(msg.sender_number);
-                auto it = peerInfoMap.find(key);
-                if (it == peerInfoMap.end()) {
-                    PeerKey pk = parsePeerKey(key);
-                    if (pk.valid) {
-                        auto row = Storage::instance().channelDb()->get_chan_peer(
-                            pk.chanid.c_str(), pk.peerNum);
-                        it = loadRowToMap(peerInfoMap, key, std::move(row));
-                    }
-                }
+                auto it = lookupPeerByKey(peerInfoMap, key);
                 if (it != peerInfoMap.end()) {
                     senderLabel = qFromUtf8(it->second.userName);
                     if (!it->second.nickname.empty()) {
@@ -4029,17 +3774,8 @@ void MainWindow::onResendMessage(int msgIndex) {
     QString msgText = el.messageText.isEmpty() ? el.caption : el.messageText;
 #ifdef USE_UNIFIED_SEND_API
     std::string type = std::string(qToUtf8(currentChatType).data());
-    std::string idOverride;
-    if (type == kGomuksRoomType || type == kMtxliteRoomType
-        || type == kUnktoxConferenceType
-        || type == kUnktoxFriendType || type == kUnktoxGroupType
-        || type == kMisskeyType || type == kImapMailType) {
-        for (const auto& cd : m_accumulatedContactData) {
-            if (cd.id == currentChatId && cd.type == type) {
-                idOverride = cd.chatId; break;
-            }
-        }
-    }
+    // 虚拟类型（流式/桥接）需用 chatId 字符串作为发送 id 覆盖值
+    std::string idOverride = contactChatIdOverride(m_accumulatedContactData, currentChatId, type);
     if (type == kBookmarkType) {
         // 与首发(乐观更新块)一致：这类不经 ToxAPI 发送，直接置 SendSent；
         // 先置状态再调用，避免 handler 追加元素致 vector 扩容后 el 悬空。
@@ -4113,18 +3849,7 @@ void MainWindow::onRequestRedactMessage(int msgIndex) {
     std::string type = std::string(qToUtf8(currentChatType).data());
     std::string msgId = std::string(qToUtf8(el.messageId).data());
     // 虚拟类型使用 chatId 字符串（如 gomuks room ID）而非 numeric contactId
-    std::string idOverride;
-    if (type == kGomuksRoomType || type == kMtxliteRoomType
-        || type == kUnktoxConferenceType
-        || type == kUnktoxFriendType || type == kUnktoxGroupType
-        || type == kMisskeyType || type == kImapMailType) {
-        for (const auto& cd : m_accumulatedContactData) {
-            if (cd.id == currentChatId && cd.type == type) {
-                idOverride = cd.chatId;
-                break;
-            }
-        }
-    }
+    std::string idOverride = contactChatIdOverride(m_accumulatedContactData, currentChatId, type);
     chatWidget->loadingBar()->showLoading(kLoadRedactMsg, _("redacting_message"));
     ToxAPI::redactMessage(currentChatId, type, msgId, idOverride);
 }
@@ -4374,18 +4099,8 @@ void MainWindow::onFileSendRequested(const QString& filePath, const QString& cap
     if (currentChatId == -1 || currentChatType.isEmpty()) { return; }
 
     std::string fileType = std::string(qToUtf8(currentChatType).data());
-    std::string fileIdOverride;
-    if (fileType == kGomuksRoomType || fileType == kMtxliteRoomType
-        || fileType == kUnktoxConferenceType
-        || fileType == kUnktoxFriendType || fileType == kUnktoxGroupType
-        || fileType == kMisskeyType || fileType == kImapMailType) {
-        for (const auto& cd : m_accumulatedContactData) {
-            if (cd.id == currentChatId && cd.type == fileType) {
-                fileIdOverride = cd.chatId;
-                break;
-            }
-        }
-    }
+    // 虚拟类型（流式/桥接）需用 chatId 字符串作为文件发送 id 覆盖值
+    std::string fileIdOverride = contactChatIdOverride(m_accumulatedContactData, currentChatId, fileType);
 
     QFileInfo fi(filePath);
     if (!fi.exists() || !fi.isFile()) { return; }
