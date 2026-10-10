@@ -3038,6 +3038,14 @@ void MainWindow::onChatPeerInfoRequested(int peerNumber, const QString& senderNa
             it = lookupPeerByKey(peerInfoMap, ukey);
         }
     }
+    // DB 重载的旧消息未持久化 sender_pubkey（但已存头像列 avatar_url），
+    // 订阅类会话 sender_name 即 mxid(==pubkey)，用其拼 unknown_ 键复用内存 peerInfoMap。
+    if (it == peerInfoMap.end() && senderPubkey.isEmpty() && !senderName.isEmpty()) {
+        std::string nkey = "unknown_" + std::string(qToUtf8(senderName).data());
+        if (nkey != key) {
+            it = lookupPeerByKey(peerInfoMap, nkey);
+        }
+    }
     if (it != peerInfoMap.end()) {
         QString title = it->second.nickname.empty()
             ? qFromUtf8(it->second.userName) : qFromUtf8(it->second.nickname);

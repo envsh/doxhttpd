@@ -17,6 +17,7 @@ ChatElement msgRowToElement(const MessageRow& row) {
     el.senderName   = qFromUtf8(row.sender_name);
     el.senderNickname = qFromUtf8(row.sender_nick);
     el.peerNumber   = row.peer_number;
+    el.senderPubkey = qFromUtf8(row.sender_pubkey);
     el.avatarUrl    = qFromUtf8(row.avatar_url);
     el.time         = qFromUtf8(row.time_text);
     el.ipAddress    = qFromUtf8(row.ip_address);
@@ -52,6 +53,7 @@ static MessageRow elementToRow(int id, const std::string& type,
     row.sender_name = std::string(qToUtf8(el.senderName).data());
     row.sender_nick = std::string(qToUtf8(el.senderNickname).data());
     row.peer_number = el.peerNumber;
+    row.sender_pubkey = std::string(qToUtf8(el.senderPubkey).data());
     row.avatar_url  = std::string(qToUtf8(el.avatarUrl).data());
     row.time_text   = std::string(qToUtf8(el.time).data());
     row.ip_address  = std::string(qToUtf8(el.ipAddress).data());
