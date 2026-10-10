@@ -3,6 +3,7 @@
 #include <qcombobox.h>
 #include <qmessagebox.h>
 #include <qfont.h>
+#include "DialogPopupAnimator.h"
 #ifdef QT3_BUILD
 #include <qlistbox.h>
 #else
@@ -31,6 +32,7 @@ QString qPasswordPrompt(QWidget* parent, const QString& title,
     QObject::connect(cancelBtn, SIGNAL(clicked()), &dlg, SLOT(reject()));
     btns->addWidget(cancelBtn);
     lay->addLayout(btns);
+    DialogPopupAnimator::install(&dlg);
     if (dlg.exec() == QDialog::Accepted) {
         *ok = true;
         return edit->text();
@@ -187,6 +189,7 @@ void WebCredDialog::onEdit() {
     WebCredEditDialog dlg(this,
                           field.isEmpty() ? std::string() : std::string(qToUtf8(field).data()),
                           st, sessionPass);
+    DialogPopupAnimator::install(&dlg);
     if (dlg.exec() != QDialog::Accepted) {
         return;
     }

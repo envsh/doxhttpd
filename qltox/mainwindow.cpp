@@ -77,6 +77,7 @@
 #include <qtimer.h>
 #include <qlabel.h>
 #include "ConfigDialog.h"
+#include "DialogPopupAnimator.h"
 #include <qpushbutton.h>
 #include <qlineedit.h>
 #ifdef QT3_BUILD
@@ -3013,6 +3014,7 @@ void MainWindow::onViewInfoRequested(int id, const QString& type) {
         dialog.setPeerCount(memberCount);
     }
     
+    DialogPopupAnimator::install(&dialog);
     dialog.exec();
 }
 
@@ -3059,6 +3061,7 @@ void MainWindow::onChatPeerInfoRequested(int peerNumber, const QString& senderNa
                        senderName.isEmpty() ? _("no_name") : senderName,
                        currentChatType.isEmpty() ? QString("friend") : currentChatType);
     }
+    DialogPopupAnimator::install(&dialog);
     dialog.exec();
 }
 
@@ -3136,6 +3139,7 @@ void MainWindow::onReplyLinkActivated(const QString& peerId, const QString& name
         dialog.setTitle(fallback);
         dialog.setInfo(0, fallback, infoType);
     }
+    DialogPopupAnimator::install(&dialog);
     dialog.exec();
 }
 
@@ -3156,6 +3160,7 @@ void MainWindow::onViewMembersRequested(int id, const QString& type) {
     MemberListDialog dialog(this);
     dialog.setDialogTitle(title);
     dialog.setMembers(members);
+    DialogPopupAnimator::install(&dialog);
     dialog.exec();
 }
 
@@ -3223,6 +3228,7 @@ void MainWindow::onRenameNickRequested(int groupId, const QString& groupName) {
     QObject::connect(confirmBtn, SIGNAL(clicked()), &dialog, SLOT(accept()));
     QObject::connect(cancelBtn, SIGNAL(clicked()), &dialog, SLOT(reject()));
 
+    DialogPopupAnimator::install(&dialog);
     if (dialog.exec() == QDialog::Accepted) {
         std::string name;
         if (selfRadio->isChecked()) {
@@ -3414,6 +3420,7 @@ void MainWindow::onInviteToConferenceRequested(int friendId) {
     
     layout->addLayout(btnLayout);
     
+    DialogPopupAnimator::install(&dialog);
     if (dialog.exec() == QDialog::Accepted) {
         int confId = -1;
 #ifdef QT3_BUILD
@@ -3489,6 +3496,7 @@ void MainWindow::onInviteToGroupRequested(int friendId) {
     
     layout->addLayout(btnLayout);
     
+    DialogPopupAnimator::install(&dialog);
     if (dialog.exec() == QDialog::Accepted) {
         int groupId = -1;
 #ifdef QT3_BUILD
@@ -3562,6 +3570,7 @@ void MainWindow::onSwitchAccount() {
     ToxAPI::stopPollEvent();
 
     LoginDialog dialog(this);
+    DialogPopupAnimator::install(&dialog);
     if (dialog.exec() != QDialog::Accepted) {
         ToxAPI::startPollEvent();
         chatWidget->loadingBar()->showLoading(kLoadAll, _("loading_data"));
@@ -4313,6 +4322,7 @@ void MainWindow::onSourceClicked(int msgIndex) {
 #else
     QObject::connect(dlg, SIGNAL(finished(int)), dlg, SLOT(deleteLater()));
 #endif
+    DialogPopupAnimator::install(dlg);
     dlg->show();
 }
 
@@ -4472,6 +4482,7 @@ void MainWindow::openSettings() {
 
     connect(dlg, SIGNAL(settingsSaved(SettingsChangedMap)), this, SLOT(onSettingsSaved(SettingsChangedMap)));
     dlg->loadSettings();
+    DialogPopupAnimator::install(dlg);
     dlg->show();
 }
 
@@ -4512,11 +4523,13 @@ void MainWindow::openStickerManager() {
 
 void MainWindow::openStatistics() {
     StatisticsDialog* dlg = new StatisticsDialog(this);
+    DialogPopupAnimator::install(dlg);
     dlg->show();
 }
 
 void MainWindow::openWebCreds() {
     WebCredDialog dlg(this);
+    DialogPopupAnimator::install(&dlg);
     dlg.exec();
 }
 
@@ -4585,6 +4598,7 @@ void MainWindow::onEtappCloseAll() {
 
 void MainWindow::openPluginManager() {
     PluginManagerDialog* dlg = new PluginManagerDialog(this);
+    DialogPopupAnimator::install(dlg);
     dlg->show();
 }
 
