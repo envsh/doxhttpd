@@ -113,6 +113,7 @@
     },
     "no_name": "Name not set",
     "no_status": "No status message",
+    "unknown": "Unknown",
     "never_online": "Never online",
     "tox_id_copied": "Tox ID copied to clipboard",
     "please_wait": "Please wait for loading",

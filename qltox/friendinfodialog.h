@@ -18,6 +18,7 @@ public:
                  bool isConnected = false,
                  const QString& publicKey = QString());
     void setInfo(const FriendInfo& info);
+    void setInfo(const FriendInfo& info, const QString& type);
     void setTitle(const QString& title);
     void setLastSeen(const QString& text);
     void setPeerCount(int count);

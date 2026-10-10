@@ -2,6 +2,7 @@
 #include "translator.h"
 #include "compat34.h"
 #include "avatar_manager.h"
+#include "combinesearchwindow.h"
 
 FriendInfoDialog::FriendInfoDialog(QWidget* parent) : QDialog(parent) {
     qSetWindowTitle(this, _("modals.friend_info_title"));
@@ -168,9 +169,7 @@ void FriendInfoDialog::setInfo(int id, const QString& name, const QString& type,
                                  const QString& publicKey) {
     idLabel->setText(QString::number(id));
     nameLabel->setText(name.isEmpty() ? _("no_name") : name);
-    typeLabel->setText(type == "friend" ? _("friend") : 
-                      type == "conference" ? _("conference_item") :
-                      type == "group" ? _("group") : type);
+    typeLabel->setText(contactTypeLabel(type));
     statusLabel->setText(status.isEmpty() ? _("no_status") : status);
     if (userStatus == "1") {
         userStatusLabel->setText(_("statuses.away"));
@@ -195,7 +194,11 @@ void FriendInfoDialog::setInfo(int id, const QString& name, const QString& type,
 }
 
 void FriendInfoDialog::setInfo(const FriendInfo& info) {
-    setInfo(info.id, qFromUtf8(info.name), "friend",
+    setInfo(info, "friend");
+}
+
+void FriendInfoDialog::setInfo(const FriendInfo& info, const QString& type) {
+    setInfo(info.id, qFromUtf8(info.name), type,
             qFromUtf8(info.statusText),
             qFromUtf8(info.userStatus),
             qFromUtf8(info.statusStr),
@@ -226,6 +229,11 @@ void FriendInfoDialog::setAvatar(int id, const QString& name, const QString& mxc
     if (!av.isNull()) {
         avatarLabel->setPixmap(av);
     }
+    // 诊断：tooltip 显示实际传入的头像 URL，验证传递是否正确
+    QString tip = qFromUtf8("id: ") + QString::number(id)
+        + qFromUtf8("\nname: ") + name
+        + qFromUtf8("\nurl: ") + (mxcUrl.isEmpty() ? qFromUtf8("(empty)") : mxcUrl);
+    qSetToolTip(avatarLabel, tip);
 }
 
 void FriendInfoDialog::setTitle(const QString& title) {

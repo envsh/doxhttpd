@@ -33,6 +33,42 @@ static const int VIRTUAL_SEARCH_REDDIT_ID = -102;
 static const int VIRTUAL_SEARCH_BOOKMARK_ID = -103;
 static const int kTestRows = 5;
 
+QString contactTypeLabel(const QString& type) {
+    if (type == "friend")            { return _("friend"); }
+    if (type == "conference")        { return _("conference_item"); }
+    if (type == "group")             { return _("tabs.groups"); }
+    if (type == kUnknownType)        { return _("unknown"); }
+    if (type == kSyseventType)       { return qFromUtf8("系统事件"); }
+    if (type == kTopicType)          { return qFromUtf8("主题"); }
+    if (type == kFilesyncType)       { return qFromUtf8("文件同步"); }
+    if (type == kClipboardType)      { return qFromUtf8("剪贴板"); }
+    if (type == kGomuksRoomType || type == kMtxliteRoomType) { return qFromUtf8("Matrix"); }
+    if (type == kImapMailType)       { return qFromUtf8("邮件"); }
+    if (type == kBookmarkType)       { return qFromUtf8(kBookmarkName); }
+    if (type == kAichatType)         { return qFromUtf8(kAichatName); }
+    if (type == kPastebinType)       { return qFromUtf8(kPastebinName); }
+    if (type == kTranslateType)      { return qFromUtf8(kTranslateName); }
+    if (type == kMobPushType)        { return qFromUtf8(kMobPushName); }
+    if (type == kSnapType)           { return qFromUtf8(kSnapName); }
+    if (type == kUnktoxFriendType)   { return qFromUtf8("未知协议·好友"); }
+    if (type == kUnktoxConferenceType) { return qFromUtf8("未知协议·会议"); }
+    if (type == kUnktoxGroupType)    { return qFromUtf8("未知协议·群组"); }
+    if (type == kToutiaoHotnewsType) { return qFromUtf8("头条热闻"); }
+    if (type == kZhihuNotifyType)    { return qFromUtf8("知乎通知"); }
+    if (type == kZhihuHotnewsType)   { return qFromUtf8("知乎热闻"); }
+    if (type == kBiliNotifyType)     { return qFromUtf8("哔喱通知"); }
+    if (type == kWeiboHotnewsType)   { return qFromUtf8("微博热闻"); }
+    if (type == kXiaohongshuRecommendType) { return qFromUtf8("小红书推荐流"); }
+    if (type == kXiaohongshuNotifyType)    { return qFromUtf8("小红书通知"); }
+    if (type == kXiaohongshuHotnewsType)   { return qFromUtf8("小红书热闻"); }
+    if (type == kXiaohongshuNoteType)      { return qFromUtf8("小红书笔记"); }
+    if (type == kCoolapkTimelineType)      { return qFromUtf8("酷安时间线"); }
+    if (type == kMisskeyType)              { return qFromUtf8("Misskey"); }
+    if (type == kHongguoHotlistType)       { return qFromUtf8("红果热榜"); }
+    if (type == kSysinfoBoardType)         { return qFromUtf8("系统信息公告板"); }
+    return type;
+}
+
 namespace {
 
 ScrollArea* makeScrollArea(QWidget* page, QWidget*& inner) {
@@ -63,17 +99,6 @@ QLabel* sectionTitle(const QString& text, QWidget* host) {
     l->setStyleSheet("color:#404040");
 #endif
     return l;
-}
-
-QString typeLabel(const std::string& type) {
-    if (type == "friend") { return _("friend"); }
-    if (type == "conference") { return _("conference_item"); }
-    if (type == "group") { return _("tabs.groups"); }
-    if (type == kUnknownType) { return qFromUtf8("未知"); }
-    if (type == kSyseventType) { return qFromUtf8("系统事件"); }
-    if (type == kTopicType) { return qFromUtf8("主题"); }
-    if (type == kBookmarkType) { return qFromUtf8("书签"); }
-    return qFromUtf8(type.c_str());
 }
 
 QString trimStr(const QString& s) {
@@ -547,7 +572,7 @@ void CombineSearch::customEvent(CustomEventBase* event) {
         for (size_t i = 0; i < e->contacts.size(); ++i) {
             RowInfo r;
             r.title = qFromUtf8(e->contacts[i].first.c_str());
-            r.detail = typeLabel(e->contacts[i].second);
+            r.detail = contactTypeLabel(qFromUtf8(e->contacts[i].second));
             m_contactRows.push_back(r);
         }
         m_messageRows.clear();

@@ -1915,6 +1915,8 @@ static QString protoStreamEmoji(const QString& type) {
     if (type == kCoolapkTimelineType)      return qFromUtf8("📱");
     if (type == kMisskeyType)              return qFromUtf8("🐱");
     if (type == kSysinfoBoardType)         return qFromUtf8("📊");
+    if (type == kXiaohongshuNoteType)       return qFromUtf8("🖼");
+    if (type == kHongguoHotlistType)        return qFromUtf8("🎬");
     return QString();
 }
 
@@ -1993,64 +1995,8 @@ void MainWindow::onContactSelected(int id, const QString& type, const QString& n
     contactListWidget->resetUnread(id, type);
     
     QString headerText;
-    QString emoji;
-    if (type == "friend") {
-        emoji = EMOJI_FRIEND;
-        headerText = emoji + " " + name;
-    } else if (type == "group") {
-        emoji = EMOJI_GROUP;
-        headerText = emoji + " " + name;
-    } else if (type == "conference") {
-        emoji = EMOJI_CONFERENCE;
-        headerText = emoji + " " + name;
-    } else if (type == kUnknownType) {
-        emoji = EMOJI_UNKNOWN;
-        headerText = emoji + " " + name;
-    } else if (type == kSyseventType) {
-        emoji = EMOJI_SYSEVENT;
-        headerText = emoji + " " + name;
-    } else if (type == kTopicType) {
-        emoji = EMOJI_TOPIC;
-        headerText = emoji + " " + name;
-    } else if (type == kBookmarkType) {
-        emoji = EMOJI_BOOKMARK;
-        headerText = emoji + " " + name;
-    } else if (type == kAichatType) {
-        emoji = EMOJI_AICHAT;
-        headerText = emoji + " " + name;
-    } else if (type == kPastebinType) {
-        emoji = EMOJI_PASTEBIN;
-        headerText = emoji + " " + name;
-    } else if (type == kTranslateType) {
-        emoji = EMOJI_TRANSLATE;
-        headerText = emoji + " " + name;
-    } else if (type == kMobPushType) {
-        emoji = EMOJI_MOBPUSH;
-        headerText = emoji + " " + name;
-    } else if (type == kSnapType) {
-        emoji = EMOJI_SNAP;
-        headerText = emoji + " " + name;
-    } else if (type == kGomuksRoomType) {
-        emoji = EMOJI_MATRIX;
-        headerText = emoji + " " + name;
-    } else if (type == kMtxliteRoomType) {
-        emoji = EMOJI_MTXLITE;
-        headerText = emoji + " " + name;
-    } else if (type == kUnktoxFriendType) {
-        emoji = EMOJI_FRIEND;
-        headerText = emoji + " " + name;
-    } else if (type == kUnktoxConferenceType) {
-        emoji = EMOJI_CONFERENCE;
-        headerText = emoji + " " + name;
-    } else if (type == kUnktoxGroupType) {
-        emoji = EMOJI_GROUP;
-        headerText = emoji + " " + name;
-    } else if (type == kImapMailType) {
-        emoji = "E";
-        headerText = emoji + " " + name;
-    } else if (!protoStreamEmoji(type).isEmpty()) {
-        headerText = protoStreamEmoji(type) + " " + name;
-    }
+    QString emoji = qFromUtf8(typeToEmojiUtf8(type));
+    headerText = emoji + " " + name;
     
     chatWidget->setHeaderText(headerText);
     if (prevUnread > 0)
@@ -2899,6 +2845,7 @@ msg.time = hm.created_at.empty() ? getCurrentTime()
                     msg.senderName = userName;
                     msg.senderNickname = senderLabel;
                     msg.peerNumber = (int)hm.sender_number;
+                    msg.senderPubkey = qFromUtf8(hm.sender_pubkey);
                     msg.avatarUrl = avatarMxc;
                     msg.messageId = qFromUtf8(hm.eventId);
                     msg.redacted = hm.redacted;
@@ -3327,7 +3274,8 @@ void MainWindow::onChatPeerInfoRequested(int peerNumber, const QString& senderNa
             ? qFromUtf8(it->second.userName) : qFromUtf8(it->second.nickname);
         if (title.isEmpty()) { title = senderName; }
         dialog.setTitle(title);
-        dialog.setInfo(friendInfoFromPeer(it->second, peerNumber));
+        QString infoType = currentChatType.isEmpty() ? QString("unknown") : currentChatType;
+        dialog.setInfo(friendInfoFromPeer(it->second, peerNumber), infoType);
     } else {
         dialog.setTitle(senderName.isEmpty() ? _("no_name") : senderName);
         dialog.setInfo(peerNumber,
@@ -3396,6 +3344,7 @@ void MainWindow::attachReplyLinks(ChatElement& el) {
 
 void MainWindow::onReplyLinkActivated(const QString& peerId, const QString& name) {
     FriendInfoDialog dialog(this);
+    QString infoType = currentChatType.isEmpty() ? QString("unknown") : currentChatType;
     std::string key = "unknown_" + std::string(qToUtf8(peerId).data());
     auto it = peerInfoMap.find(key);
     if (it != peerInfoMap.end()) {
@@ -3404,11 +3353,11 @@ void MainWindow::onReplyLinkActivated(const QString& peerId, const QString& name
         if (title.isEmpty()) { title = name; }
         if (title.isEmpty()) { title = _("no_name"); }
         dialog.setTitle(title);
-        dialog.setInfo(friendInfoFromPeer(it->second, it->second.peerNumber));
+        dialog.setInfo(friendInfoFromPeer(it->second, it->second.peerNumber), infoType);
     } else {
         QString fallback = name.isEmpty() ? _("no_name") : name;
         dialog.setTitle(fallback);
-        dialog.setInfo(0, fallback, "unknown");
+        dialog.setInfo(0, fallback, infoType);
     }
     dialog.exec();
 }

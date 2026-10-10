@@ -18,21 +18,6 @@
 #include <memory>
 #include <map>
 
-extern const char* EMOJI_FRIEND;
-extern const char* EMOJI_GROUP;
-extern const char* EMOJI_CONFERENCE;
-extern const char* EMOJI_SYSEVENT;
-extern const char* EMOJI_UNKNOWN;
-extern const char* EMOJI_TOPIC;
-extern const char* EMOJI_MATRIX;
-extern const char* EMOJI_MTXLITE;
-extern const char* EMOJI_BOOKMARK;
-extern const char* EMOJI_AICHAT;
-extern const char* EMOJI_PASTEBIN;
-extern const char* EMOJI_TRANSLATE;
-extern const char* EMOJI_MOBPUSH;
-extern const char* EMOJI_SNAP;
-
 struct Contact {
     int id;
     QString name;

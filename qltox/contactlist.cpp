@@ -21,20 +21,6 @@
 #endif
 
 
-const char* EMOJI_FRIEND =   "👤";
-const char* EMOJI_GROUP = "👥";
-const char* EMOJI_CONFERENCE = "🎙";
-const char* EMOJI_SYSEVENT = "⚙";
-const char* EMOJI_UNKNOWN = "❓";
-const char* EMOJI_TOPIC = "📌";
-const char* EMOJI_MATRIX = "🧮";
-const char* EMOJI_MTXLITE = "♏";
-const char* EMOJI_BOOKMARK  = "🔖";
-const char* EMOJI_AICHAT    = "🤖";
-const char* EMOJI_PASTEBIN  = "📦";
-const char* EMOJI_TRANSLATE = "🔤";
-const char* EMOJI_MOBPUSH  = "🔔";
-const char* EMOJI_SNAP     = "🎞️";
 const char* STATUS_ONLINE = "●";
 const char* STATUS_OFFLINE = "○";
 

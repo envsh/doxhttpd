@@ -13,6 +13,10 @@ class QLabel;
 class LimeScrollBar;
 class PlaceholderLineEdit;
 
+// 联系人类型 → 显示名（friend/conference/group/未知/unk/虚拟/订阅流全覆盖），
+// 供 FriendInfoDialog 类型行与搜索窗类型标签共用，未知回退原始类型。
+QString contactTypeLabel(const QString& type);
+
 class CombineSearch : public QDialog {
     Q_OBJECT
 public:

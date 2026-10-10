@@ -105,6 +105,8 @@ constexpr TypeEmojiDef kTypeEmojiDefs[] = {
     { kCoolapkTimelineType,       0x1F4F1, "📱" },
     { kMisskeyType,               0x1F431, "🐱" },
     { kSysinfoBoardType,          0x1F4CA, "📊" },
+    { kXiaohongshuNoteType,       0x1F5BC, "🖼" },
+    { kHongguoHotlistType,        0x1F3AC, "🎬" },
 };
 
 inline uint32_t typeToEmojiCp(const QString& type) {
