@@ -1190,7 +1190,11 @@ void MainWindow::customEvent(CustomEventBase* event) {
         if (evt->success) {
             elp->sendState = ChatElement::SendSent;   // 仅收尾成发送完成态，不加译文内容
             ChatElement ack;
-            ack.messageText = qFromUtf8(evt->translatedText.data(), (int)evt->translatedText.size());
+            QString ackText = qFromUtf8(evt->translatedText.data(), (int)evt->translatedText.size());
+            if (!evt->engineUsed.empty()) {
+                ackText += " -- " + qFromUtf8(evt->engineUsed.c_str());
+            }
+            ack.messageText = ackText;
             ack.category = "self";
             ack.senderName = "Me";
             ack.peerNumber = -1;
