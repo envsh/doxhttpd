@@ -118,6 +118,10 @@ bool SqliteStatement::stepRow() {
     return false;
 }
 
+int SqliteStatement::changes() {
+    return m_stmt ? sqlite3_changes(sqlite3_db_handle(m_stmt)) : 0;
+}
+
 int SqliteStatement::columnInt(int col) {
     return m_stmt ? sqlite3_column_int(m_stmt, col) : 0;
 }

@@ -99,12 +99,22 @@ public:
         return stmt.step();
     }
 
-    bool delete_channel(const char* chanid) override {
+    int delete_channel(const char* chanid) override {
         auto _ = m_conn->get();
+        int prevFk = 0;
+        {
+            auto q = _->prepare("PRAGMA foreign_keys");
+            if (q.isPrepared() && q.stepRow()) { prevFk = q.columnInt(0); }
+        }
+        _->exec("PRAGMA foreign_keys=OFF");
+        int n = -1;
         auto stmt = _->prepare("DELETE FROM channels WHERE chanid=?1");
-        if (!stmt.isPrepared()) { return false; }
-        if (!stmt.bind(1, chanid)) { return false; }
-        return stmt.step();
+        if (stmt.isPrepared() && stmt.bind(1, chanid) && stmt.step()) {
+            n = stmt.changes();
+        }
+        if (prevFk) { _->exec("PRAGMA foreign_keys=ON"); }
+        qWarning("[SQL] local del channel '%s' -> %d row(s)", chanid, n);
+        return n;
     }
 
     std::vector<ChannelRow> load_pinned() override {
@@ -506,11 +516,11 @@ public:
         });
     }
 
-    void delete_channel(std::string chanid, std::function<void(bool)> done) override {
+    void delete_channel(std::string chanid, std::function<void(int)> done) override {
         auto sync = m_sync;
         post([sync, chanid, done]() {
-            bool ok = sync->get().delete_channel(chanid.c_str());
-            if (done) { done(ok); }
+            int n = sync->get().delete_channel(chanid.c_str());
+            if (done) { done(n); }
         });
     }
 

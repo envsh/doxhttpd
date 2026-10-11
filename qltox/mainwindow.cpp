@@ -3406,7 +3406,9 @@ void MainWindow::onDeleteLocalRequested(int id, const QString& type) {
     std::string chanid = std::string(qToUtf8(type).data()) + "_" + std::to_string(id);
     auto* cdbAsync = Storage::instance().channelDbAsync();
     if (cdbAsync) {
-        cdbAsync->delete_channel(chanid, nullptr);
+        cdbAsync->delete_channel(chanid, [chanid](int n) {
+            qWarning("[local-del] DELETE channels chanid=%s rows=%d", chanid.c_str(), n);
+        });
     }
 
     // 内存：联系人列表 + 累积数据 + peer 缓存

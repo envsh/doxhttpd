@@ -63,6 +63,7 @@ public:
 
     bool step();
     bool stepRow();
+    int  changes();
 
     int         columnInt(int col);
     int64_t     columnInt64(int col);
