@@ -14,6 +14,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -43,6 +45,8 @@ jobs:
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -77,6 +81,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
       - name: Install build dependencies
         run: |
           sudo apt update
@@ -118,6 +124,8 @@ jobs:
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
       - name: Install Qt5
         run: |
           brew install qt@5 freetype openal-soft pkg-config
@@ -260,6 +268,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -342,6 +352,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -448,6 +460,8 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
