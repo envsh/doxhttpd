@@ -177,7 +177,8 @@
         "view_members": "查看成员",
         "rename_nick": "修改昵称",
         "set_topic": "设置话题",
-        "set_title": "设置标题"
+        "set_title": "设置标题",
+        "delete_local": "本地删除"
     },
     "set_topic": {
         "title": "设置群组话题",
@@ -229,6 +230,7 @@
     "file_gone_resend": "原文件已移动、删除或超出大小限制，本次重发只发送文字内容。",
     "confirm_delete_friend": "确定删除好友 {0} 吗？",
     "confirm_leave_conference": "确定离开会议 {0} 吗？",
+    "confirm_delete_local": "确定从本地删除 {0} 吗？",
     "invite_to_conference": "邀请进会议",
     "invite_to_group": "邀请进群组",
     "select_conference": "选择会议",

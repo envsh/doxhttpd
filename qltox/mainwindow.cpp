@@ -445,6 +445,8 @@ MainWindow::MainWindow(QWidget* parent)
             this, SLOT(onViewInfoRequested(int, const QString&)));
     connect(contactListWidget, SIGNAL(deleteOrLeaveRequested(int, const QString&)),
             this, SLOT(onDeleteOrLeaveRequested(int, const QString&)));
+    connect(contactListWidget, SIGNAL(deleteLocalRequested(int, const QString&)),
+            this, SLOT(onDeleteLocalRequested(int, const QString&)));
     connect(contactListWidget, SIGNAL(viewMembersRequested(int, const QString&)),
             this, SLOT(onViewMembersRequested(int, const QString&)));
     connect(contactListWidget, SIGNAL(renameNickRequested(int, const QString&)),
@@ -3371,6 +3373,73 @@ void MainWindow::onDeleteOrLeaveRequested(int id, const QString& type) {
             chatWidget->loadingBar()->showLoading(kLoadAll, _("loading_data"));
             ToxAPI::loadAllData();
         }
+    }
+}
+
+void MainWindow::onDeleteLocalRequested(int id, const QString& type) {
+    // 显示名：优先取累积联系人名，回退 id
+    QString name = QString::number(id);
+    for (size_t i = 0; i < m_accumulatedContactData.size(); ++i) {
+        if (m_accumulatedContactData[i].id == id &&
+            qFromUtf8(m_accumulatedContactData[i].type) == type) {
+            if (!m_accumulatedContactData[i].name.empty()) {
+                name = qFromUtf8(m_accumulatedContactData[i].name);
+            }
+            break;
+        }
+    }
+
+#ifdef QT3_BUILD
+    int result = QMessageBox::question(this, _("confirm"),
+                                       _("confirm_delete_local").arg(name),
+                                       QMessageBox::Yes, QMessageBox::No);
+    if (result != QMessageBox::Yes) { return; }
+#else
+    if (QMessageBox::question(this, _("confirm"),
+                              _("confirm_delete_local").arg(name),
+                              QMessageBox::Yes | QMessageBox::No) != QMessageBox::Yes) {
+        return;
+    }
+#endif
+
+    // 仅删本地 SQLite 的 channel 行（不动 messages/peers，不发网络请求）
+    std::string chanid = std::string(qToUtf8(type).data()) + "_" + std::to_string(id);
+    auto* cdbAsync = Storage::instance().channelDbAsync();
+    if (cdbAsync) {
+        cdbAsync->delete_channel(chanid, nullptr);
+    }
+
+    // 内存：联系人列表 + 累积数据 + peer 缓存
+    contactListWidget->removeContact(id, type);
+    for (size_t i = 0; i < m_accumulatedContactData.size(); ) {
+        if (m_accumulatedContactData[i].id == id &&
+            qFromUtf8(m_accumulatedContactData[i].type) == type) {
+            m_accumulatedContactData.erase(m_accumulatedContactData.begin() + i);
+        } else {
+            ++i;
+        }
+    }
+    for (auto it = peerInfoMap.begin(); it != peerInfoMap.end(); ) {
+        const std::string& k = it->first;
+        bool match = (k == chanid) ||
+                     (k.size() > chanid.size() &&
+                      k.compare(0, chanid.size(), chanid) == 0 &&
+                      k[chanid.size()] == '_');
+        if (match) {
+            peerInfoMap.erase(it++);
+        } else {
+            ++it;
+        }
+    }
+
+    // 如果是当前聊天对象，重置视图状态
+    if (id == currentChatId && type == currentChatType) {
+        currentChatId = -1;
+        currentChatType = "";
+        chatWidget->setAttrForChat(QString(), -1);
+        chatWidget->resetPendingContext();
+        chatWidget->setHeaderText(_("select_chat_object"));
+        chatWidget->setBuffer(nullptr);
     }
 }
 

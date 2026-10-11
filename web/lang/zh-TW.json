@@ -157,7 +157,8 @@
         "rename_nick": "修改暱稱",
         "view_members": "查看成員",
         "set_topic": "設定話題",
-        "set_title": "設定標題"
+        "set_title": "設定標題",
+        "delete_local": "本地刪除"
     },
     "set_topic": {
         "title": "設定群組話題",
@@ -179,6 +180,7 @@
     "file_gone_resend": "原檔案已移動、刪除或超出大小限制，本次重發只發送文字內容。",
     "confirm_delete_friend": "確定刪除好友 {0} 嗎？",
     "confirm_leave_conference": "確定離開會議 {0} 嗎？",
+    "confirm_delete_local": "確定從本地刪除 {0} 嗎？",
     "invite_to_conference": "邀請進會議",
     "invite_to_group": "邀請進群組",
     "select_conference": "選擇會議",

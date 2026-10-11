@@ -65,6 +65,7 @@ protected slots:
     void onChatPeerInfoRequested(int peerNumber, const QString& senderName, const QString& senderPubkey);
     void onReplyLinkActivated(const QString& peerId, const QString& name);
     void onDeleteOrLeaveRequested(int id, const QString& type);
+    void onDeleteLocalRequested(int id, const QString& type);
     void onInviteToConferenceRequested(int friendId);
     void onInviteToGroupRequested(int friendId);
     void onGroupInviteReceived(int friendNumber, const QString& chatId);

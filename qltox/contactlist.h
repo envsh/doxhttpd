@@ -166,6 +166,7 @@ signals:
     void contactSelected(int id, const QString& type, const QString& name);
     void viewInfoRequested(int id, const QString& type);
     void deleteOrLeaveRequested(int id, const QString& type);
+    void deleteLocalRequested(int id, const QString& type);
     void inviteToConferenceRequested(int friendId);
     void inviteToGroupRequested(int friendId);
     void viewMembersRequested(int id, const QString& type);

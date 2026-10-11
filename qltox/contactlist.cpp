@@ -1196,24 +1196,28 @@ void ContactListWidget::showContextMenuAt(int id, const QString& type, const QSt
         menu.insertItem(_("context_menu.invite_to_group"), 2);
         menu.insertSeparator();
         menu.insertItem(_("context_menu.delete_friend"), 3);
+        menu.insertItem(_("context_menu.delete_local"), 5);
         int choice = menu.exec(globalPos);
         if (choice == 0) { emit viewInfoRequested(id, type); }
         else if (choice == 4) { togglePin(id, type); }
         else if (choice == 1) emit inviteToConferenceRequested(id);
         else if (choice == 2) emit inviteToGroupRequested(id);
         else if (choice == 3) emit deleteOrLeaveRequested(id, type);
+        else if (choice == 5) emit deleteLocalRequested(id, type);
 #else
         menu.addSeparator();
         QAction* inviteConfAction = menu.addAction(_("context_menu.invite_to_conference"));
         QAction* inviteGroupAction = menu.addAction(_("context_menu.invite_to_group"));
         menu.addSeparator();
         QAction* deleteAction = menu.addAction(_("context_menu.delete_friend"));
+        QAction* localDeleteAction = menu.addAction(_("context_menu.delete_local"));
         QAction* selected = menu.exec(globalPos);
         if (selected == viewInfoAction) { emit viewInfoRequested(id, type); }
         else if (selected == pinAction) { togglePin(id, type); }
         else if (selected == inviteConfAction) emit inviteToConferenceRequested(id);
         else if (selected == inviteGroupAction) emit inviteToGroupRequested(id);
         else if (selected == deleteAction) emit deleteOrLeaveRequested(id, type);
+        else if (selected == localDeleteAction) emit deleteLocalRequested(id, type);
 #endif
     } else if (type == "conference") {
 #ifdef QT3_BUILD
@@ -1223,12 +1227,14 @@ void ContactListWidget::showContextMenuAt(int id, const QString& type, const QSt
         menu.insertItem(_("context_menu.set_title"), 2);
         menu.insertSeparator();
         menu.insertItem(_("context_menu.leave_conference"), 3);
+        menu.insertItem(_("context_menu.delete_local"), 5);
         int choice = menu.exec(globalPos);
         if (choice == 0) { emit viewInfoRequested(id, type); }
         else if (choice == 4) { togglePin(id, type); }
         else if (choice == 1) emit viewMembersRequested(id, type);
         else if (choice == 2) emit setConferenceTitleRequested(id);
         else if (choice == 3) emit deleteOrLeaveRequested(id, type);
+        else if (choice == 5) emit deleteLocalRequested(id, type);
 #else
         QAction* viewMembersAction = menu.addAction(_("context_menu.view_members"));
         QAction* pinAction2 = menu.addAction(rd && rd->pinnedIndex != 0 ? _("context_menu.unpin") : _("context_menu.pin"));
@@ -1237,12 +1243,14 @@ void ContactListWidget::showContextMenuAt(int id, const QString& type, const QSt
         QAction* setTitleAction = menu.addAction(_("context_menu.set_title"));
         menu.addSeparator();
         QAction* leaveAction = menu.addAction(_("context_menu.leave_conference"));
+        QAction* localDeleteAction = menu.addAction(_("context_menu.delete_local"));
         QAction* selected = menu.exec(globalPos);
         if (selected == viewInfoAction) { emit viewInfoRequested(id, type); }
         else if (selected == pinAction2) { togglePin(id, type); }
         else if (selected == viewMembersAction) emit viewMembersRequested(id, type);
         else if (selected == setTitleAction) emit setConferenceTitleRequested(id);
         else if (selected == leaveAction) emit deleteOrLeaveRequested(id, type);
+        else if (selected == localDeleteAction) emit deleteLocalRequested(id, type);
 #endif
     } else if (type == "group") {
 #ifdef QT3_BUILD
@@ -1253,6 +1261,7 @@ void ContactListWidget::showContextMenuAt(int id, const QString& type, const QSt
         menu.insertItem(_("context_menu.set_topic"), 3);
         menu.insertSeparator();
         menu.insertItem(_("context_menu.leave_group"), 4);
+        menu.insertItem(_("context_menu.delete_local"), 6);
         int choice = menu.exec(globalPos);
         if (choice == 0) { emit viewInfoRequested(id, type); }
         else if (choice == 5) { togglePin(id, type); }
@@ -1260,12 +1269,14 @@ void ContactListWidget::showContextMenuAt(int id, const QString& type, const QSt
         else if (choice == 2) emit renameNickRequested(id, name);
         else if (choice == 3) emit setGroupTopicRequested(id);
         else if (choice == 4) emit deleteOrLeaveRequested(id, type);
+        else if (choice == 6) emit deleteLocalRequested(id, type);
 #else
         QAction* viewMembersAction = menu.addAction(_("context_menu.view_members"));
         QAction* renameAction = menu.addAction(_("context_menu.rename_nick"));
         QAction* setTopicAction = menu.addAction(_("context_menu.set_topic"));
         menu.addSeparator();
         QAction* leaveAction = menu.addAction(_("context_menu.leave_group"));
+        QAction* localDeleteAction = menu.addAction(_("context_menu.delete_local"));
         QAction* selected = menu.exec(globalPos);
         if (selected == viewInfoAction) { emit viewInfoRequested(id, type); }
         else if (selected == pinAction) { togglePin(id, type); }
@@ -1273,18 +1284,25 @@ void ContactListWidget::showContextMenuAt(int id, const QString& type, const QSt
         else if (selected == renameAction) emit renameNickRequested(id, name);
         else if (selected == setTopicAction) emit setGroupTopicRequested(id);
         else if (selected == leaveAction) emit deleteOrLeaveRequested(id, type);
+        else if (selected == localDeleteAction) emit deleteLocalRequested(id, type);
 #endif
     } else {
 #ifdef QT3_BUILD
         menu.insertItem(rd && rd->pinnedIndex != 0 ? _("context_menu.unpin") : _("context_menu.pin"), 4);
         if (rd) menu.setItemChecked(4, rd->pinnedIndex != 0);
+        menu.insertSeparator();
+        menu.insertItem(_("context_menu.delete_local"), 5);
         int choice = menu.exec(globalPos);
         if (choice == 0) { emit viewInfoRequested(id, type); }
         else if (choice == 4) { togglePin(id, type); }
+        else if (choice == 5) emit deleteLocalRequested(id, type);
 #else
+        menu.addSeparator();
+        QAction* localDeleteAction = menu.addAction(_("context_menu.delete_local"));
         QAction* selected = menu.exec(globalPos);
         if (selected == viewInfoAction) { emit viewInfoRequested(id, type); }
         else if (selected == pinAction) { togglePin(id, type); }
+        else if (selected == localDeleteAction) emit deleteLocalRequested(id, type);
 #endif
     }
 }

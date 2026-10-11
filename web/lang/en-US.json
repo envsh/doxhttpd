@@ -166,7 +166,8 @@
         "rename_nick": "Rename Nick",
         "view_members": "View Members",
         "set_topic": "Set Topic",
-        "set_title": "Set Title"
+        "set_title": "Set Title",
+        "delete_local": "Delete locally"
     },
     "set_topic": {
         "title": "Set Group Topic",
@@ -188,6 +189,7 @@
     "file_gone_resend": "The original file has been moved, deleted, or exceeds the size limit; this retry will send text only.",
     "confirm_delete_friend": "Delete friend {0}?",
     "confirm_leave_conference": "Leave conference {0}?",
+    "confirm_delete_local": "Delete {0} locally?",
     "invite_to_conference": "Invite to Conference",
     "invite_to_group": "Invite to Group",
     "select_conference": "Select Conference",
