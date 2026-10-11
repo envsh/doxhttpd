@@ -227,7 +227,7 @@
         "select_all": "全選",
         "reply": "回覆",
         "edit_message": "編輯訊息",
-        "delete_message": "刪除訊息",
+        "delete_local": "本地刪除",
         "redact_message": "撤回訊息",
         "msg_redacted": "訊息已撤回",
         "search_selected": "搜尋選中"

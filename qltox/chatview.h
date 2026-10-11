@@ -233,7 +233,7 @@ signals:
     void autoTranslateRequested(int msgIndex, const QString& text, const QString& toLang);
     void replyRequested(int msgIndex);
     void editRequested(int msgIndex);
-    void deleteRequested(int msgIndex);
+    void deleteLocalRequested(int msgIndex);
     void redactRequested(int msgIndex);
     void favoriteClicked(int msgIndex);
     void forwardClicked(int msgIndex);

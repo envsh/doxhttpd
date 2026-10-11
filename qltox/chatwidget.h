@@ -136,7 +136,7 @@ private slots:
     void onMentionClicked(const QString& senderName, const QString& nickName);
     void onReplyRequested(int msgIndex);
     void onEditRequested(int msgIndex);
-    void onDeleteRequested(int msgIndex);
+    void onDeleteLocalRequested(int msgIndex);
     void onRedactRequested(int msgIndex);
     void onForwardRequested(int msgIndex);
     void onScreenshotClicked();

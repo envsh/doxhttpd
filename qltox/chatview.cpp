@@ -3731,12 +3731,12 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         viewInfoId = menu.insertItem(qFromUtf8("查看好友信息"));
     }
     bool hasMsgActions = (msgIndex >= 0 && msgIndex < (int)m_history->size());
-    int replyMsgId = 0, editMsgId = 0, deleteMsgId = 0, redactMsgId = 0;
+    int replyMsgId = 0, editMsgId = 0, deleteLocalMsgId = 0, redactMsgId = 0;
     if (hasMsgActions) {
         replyMsgId = menu.insertItem(_("context.reply"));
         editMsgId = menu.insertItem(_("context.edit_message"));
         menu.insertSeparator();
-        deleteMsgId = menu.insertItem(_("context.delete_message"));
+        deleteLocalMsgId = menu.insertItem(_("context.delete_local"));
         if (canRedact) {
             redactMsgId = menu.insertItem(_("context.redact_message"));
         }
@@ -3777,13 +3777,13 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
     }
     QAction* replyMsgAction = nullptr;
     QAction* editMsgAction = nullptr;
-    QAction* deleteMsgAction = nullptr;
+    QAction* deleteLocalMsgAction = nullptr;
     QAction* redactMsgAction = nullptr;
     if (msgIndex >= 0 && msgIndex < (int)m_history->size()) {
         replyMsgAction = menu.addAction(_("context.reply"));
         editMsgAction = menu.addAction(_("context.edit_message"));
         menu.addSeparator();
-        deleteMsgAction = menu.addAction(_("context.delete_message"));
+        deleteLocalMsgAction = menu.addAction(_("context.delete_local"));
         if (canRedact) {
             redactMsgAction = menu.addAction(_("context.redact_message"));
         }
@@ -3842,8 +3842,8 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         emit replyRequested(idx);
     } else if (hasMsgActions && choice == editMsgId) {
         emit editRequested(idx);
-    } else if (hasMsgActions && choice == deleteMsgId) {
-        emit deleteRequested(idx);
+    } else if (hasMsgActions && choice == deleteLocalMsgId) {
+        emit deleteLocalRequested(idx);
     } else if (canRedact && choice == redactMsgId) {
         emit redactRequested(idx);
     }
@@ -3896,8 +3896,8 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         emit replyRequested(idx);
     } else if (editMsgAction && chosen == editMsgAction) {
         emit editRequested(idx);
-    } else if (deleteMsgAction && chosen == deleteMsgAction) {
-        emit deleteRequested(idx);
+    } else if (deleteLocalMsgAction && chosen == deleteLocalMsgAction) {
+        emit deleteLocalRequested(idx);
     } else if (redactMsgAction && chosen == redactMsgAction) {
         emit redactRequested(idx);
     }

@@ -157,7 +157,7 @@
     "context": {
         "reply": "回复",
         "edit_message": "编辑消息",
-        "delete_message": "删除消息",
+        "delete_local": "本地删除",
         "redact_message": "撤回消息",
         "msg_redacted": "消息已撤回",
         "search_selected": "搜索选中"

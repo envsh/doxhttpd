@@ -352,7 +352,7 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
             this, SLOT(onAutoTranslateRequested(int, const QString&, const QString&)));
     connect(messageArea, SIGNAL(replyRequested(int)), this, SLOT(onReplyRequested(int)));
     connect(messageArea, SIGNAL(editRequested(int)), this, SLOT(onEditRequested(int)));
-    connect(messageArea, SIGNAL(deleteRequested(int)), this, SLOT(onDeleteRequested(int)));
+    connect(messageArea, SIGNAL(deleteLocalRequested(int)), this, SLOT(onDeleteLocalRequested(int)));
     connect(messageArea, SIGNAL(redactRequested(int)), this, SLOT(onRedactRequested(int)));
     connect(messageArea, SIGNAL(favoriteClicked(int)), this, SIGNAL(favoriteClicked(int)));
     connect(messageArea, SIGNAL(forwardClicked(int)), this, SLOT(onForwardRequested(int)));
@@ -1280,8 +1280,8 @@ void ChatWidget::onEditRequested(int msgIndex) {
     // TODO: 编辑消息（暂未实现）
 }
 
-void ChatWidget::onDeleteRequested(int msgIndex) {
-    // TODO: 删除消息（暂未实现）
+void ChatWidget::onDeleteLocalRequested(int msgIndex) {
+    // TODO: 本地删除消息（暂未实现）
 }
 
 void ChatWidget::onRedactRequested(int msgIndex) {

@@ -215,7 +215,7 @@
         "select_all": "Select All",
         "reply": "Reply",
         "edit_message": "Edit message",
-        "delete_message": "Delete message",
+        "delete_local": "Delete locally",
         "redact_message": "Redact message",
         "msg_redacted": "Message redacted",
         "search_selected": "Search Selection"
