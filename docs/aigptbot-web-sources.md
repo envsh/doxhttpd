@@ -248,6 +248,11 @@ completion 另加 `X-Ds-Pow-Response` + `X-Hif-Leim`。
 
 - 操作符：`{"p":路径,"v":值}`（默认 SET）、`"o":"APPEND"`（追加）、`"o":"BATCH","v":[…]`
   （递归，子项 `p` 前置父路径）；路径 `response/fragments/-1/content` = 最后片段内容；
+- **粘性语义（关键，对齐前端 DeltaParser）**：`p`/`o` **跨事件持久化**，帧缺省时继承上一帧的
+  `path`+`op`；故正文增量常表现为**裸 `{"v":"…"}` 帧**（无 `p`），会落到上一条
+  `response/fragments/-1/content` + `APPEND`；解析须持久化 `curPath`/`curOp`，否则丢字。
+- `response/fragments` 的 `o=="APPEND"` 表示**追加新片段**（非重置），仅 `SET` 才清空整表。
+- 兼容路径：`response/content` / `response/thinking_content`（`o` 缺省或 APPEND→追加，SET→覆盖）。
 - 初始快照 `{"v":{response…}}`；`fragments[].type=="THINK"` 的内容丢弃（brief/不启用思考）；
 - **结束信号**：`response/status` = `FINISHED`（成功）/ `INCOMPLETE`（中止，按失败处理）；
   BATCH 内 `quasi_status` 同理；`event: hint` + `type:"error"` → 取 `message` 报错。

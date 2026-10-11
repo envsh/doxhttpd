@@ -655,6 +655,19 @@ struct DsAgg {
     std::string status;                   // response/status
     std::string quasi;                    // response/quasi_status（BATCH 内）
     std::string errMsg;
+    std::string curPath;                  // 粘性 p：跨事件持久化（对齐前端 DeltaParser）
+    std::string curOp;                    // 粘性 o：缺省继承上一帧（空视作 SET）
+    int nData = 0;                        // SSE data: 段数
+    int nJson = 0;                        // 成功解析的 JSON 段数
+    int nOps = 0;                         // 实际应用的 patch 数
+};
+
+// SSE 解析统计（供日志）
+struct DsSseStat {
+    int dataFrames = 0;
+    int jsonFrames = 0;
+    int ops = 0;
+    size_t bytes = 0;
 };
 
 int dsResolveIdx(DsAgg& a, const std::string& key) {
@@ -685,6 +698,16 @@ void dsSeedFragments(DsAgg& a, cJSON* resp) {
         if (!t.empty()) { a.fragType[i] = t; }
         if (i > a.maxIdx) { a.maxIdx = i; }
     }
+}
+
+// 追加到活跃片段（maxIdx）；尚无片段则建 idx 0。裸 {"v":"…"} 增量靠此落地。
+void dsAppendActive(DsAgg& a, const std::string& text) {
+    if (text.empty()) { return; }
+    if (a.maxIdx < 0) {
+        a.maxIdx = 0;
+        a.frag[a.maxIdx] = "";
+    }
+    a.frag[a.maxIdx] += text;
 }
 
 // 应用一个操作符（op ∈ SET/APPEND，v 已 trim 的原始 JSON 文本）
@@ -749,21 +772,30 @@ void dsApplyOp(DsAgg& a, const std::string& path, const std::string& op,
     // response/fragments...
     if (toks.size() >= 2 && toks[0] == "response" && toks[1] == "fragments") {
         if (toks.size() == 2) {
-            // SET 整个 fragments 数组
+            // APPEND 追加新片段；SET 重置整个 fragments 数组
             cJSON* vjson = cJSON_Parse(vraw.c_str());
             if (vjson && cJSON_IsArray(vjson)) {
-                a.frag.clear();
-                a.fragType.clear();
-                a.maxIdx = -1;
+                if (op != "APPEND") {
+                    a.frag.clear();
+                    a.fragType.clear();
+                    a.maxIdx = -1;
+                }
                 const int n = cJSON_GetArraySize(vjson);
                 for (int i = 0; i < n; ++i) {
                     cJSON* f = cJSON_GetArrayItem(vjson, i);
                     if (!f || !cJSON_IsObject(f)) { continue; }
-                    a.frag[i] = jStr(f, "content");
+                    const int idx = (op == "APPEND") ? (++a.maxIdx) : i;
+                    a.frag[idx] = jStr(f, "content");
                     const std::string t = jStr(f, "type");
-                    if (!t.empty()) { a.fragType[i] = t; }
+                    if (!t.empty()) { a.fragType[idx] = t; }
                     if (i > a.maxIdx) { a.maxIdx = i; }
                 }
+            } else if (vjson && cJSON_IsObject(vjson) && op == "APPEND") {
+                // 单个片段对象 {id,type,content,…}
+                const int idx = ++a.maxIdx;
+                a.frag[idx] = jStr(vjson, "content");
+                const std::string t = jStr(vjson, "type");
+                if (!t.empty()) { a.fragType[idx] = t; }
             }
             if (vjson) { cJSON_Delete(vjson); }
             return;
@@ -789,6 +821,17 @@ void dsApplyOp(DsAgg& a, const std::string& path, const std::string& op,
         }
         return;
     }
+    // response/content 与 response/thinking_content（旧模型 / 兼容路径）
+    if (toks.size() == 2 && toks[0] == "response" && toks[1] == "content") {
+        if (op == "SET" && a.maxIdx >= 0) { a.frag[a.maxIdx] = vstr; }
+        else { dsAppendActive(a, vstr); }
+        return;
+    }
+    if (toks.size() == 2 && toks[0] == "response" && toks[1] == "thinking_content") {
+        if (op == "SET" && a.maxIdx >= 0) { a.frag[a.maxIdx] = vstr; }
+        else { dsAppendActive(a, vstr); }
+        return;
+    }
     // response/status、response/quasi_status
     if (toks.size() == 2 && toks[0] == "response" && toks[1] == "status") {
         a.status = vstr;
@@ -801,7 +844,8 @@ void dsApplyOp(DsAgg& a, const std::string& path, const std::string& op,
 }
 
 // 解析 deepseek SSE 全量响应体（EventPoller 已缓冲整包），聚合出正文
-bool parseDeepseekSse(const std::string& body, std::string& out, std::string& err) {
+bool parseDeepseekSse(const std::string& body, std::string& out, std::string& err,
+                      DsSseStat* stat = nullptr) {
     out.clear();
     err.clear();
     DsAgg a;
@@ -826,9 +870,11 @@ bool parseDeepseekSse(const std::string& body, std::string& out, std::string& er
         if (line.compare(0, 5, "data:") != 0) { continue; }
         const std::string data = trimStr(line.substr(5));
         if (data.empty()) { continue; }
+        ++a.nData;
 
         cJSON* j = cJSON_Parse(data.c_str());
         if (!j) { continue; }
+        ++a.nJson;
         if (cJSON_IsObject(j)) {
             // 错误事件：event=hint 且 type=error，或顶层 error 对象
             const std::string jtype = jStr(j, "type");
@@ -840,26 +886,46 @@ bool parseDeepseekSse(const std::string& body, std::string& out, std::string& er
                 if (m.empty()) { m = "服务端错误"; }
                 a.errMsg = m;
             }
+            // 粘性 p/o（对齐前端 DeltaParser）：帧缺省时继承上一帧
             cJSON* pnode = cJSON_GetObjectItem(j, "p");
             if (pnode && cJSON_IsString(pnode) && pnode->valuestring) {
-                std::string op = jStr(j, "o");
-                if (op.empty()) { op = "SET"; }
-                char* vjson = cJSON_PrintUnformatted(cJSON_GetObjectItem(j, "v"));
-                if (vjson) {
-                    dsApplyOp(a, pnode->valuestring, op, vjson);
-                    free(vjson);
-                }
-            } else {
-                cJSON* vnode = cJSON_GetObjectItem(j, "v");
-                if (vnode && cJSON_IsObject(vnode)) {
-                    // 初始快照 {"v":{"response":{...}}}
-                    dsSeedFragments(a, cJSON_GetObjectItem(vnode, "response"));
+                a.curPath = pnode->valuestring;
+            }
+            cJSON* onode = cJSON_GetObjectItem(j, "o");
+            if (onode && cJSON_IsString(onode) && onode->valuestring) {
+                a.curOp = onode->valuestring;
+            }
+            cJSON* vnode = cJSON_GetObjectItem(j, "v");
+            if (vnode) {
+                if (a.curPath.empty()) {
+                    // 首帧快照 {"v":{"response":{...}}}；否则退回裸增量
+                    cJSON* resp = cJSON_GetObjectItem(vnode, "response");
+                    if (resp) {
+                        dsSeedFragments(a, resp);
+                    } else if (cJSON_IsString(vnode) && vnode->valuestring) {
+                        dsAppendActive(a, vnode->valuestring);
+                    }
+                } else {
+                    // 裸 {"v":"深圳"} 靠粘性 curPath 落到 -1/content + APPEND
+                    const std::string op = a.curOp.empty() ? "SET" : a.curOp;
+                    char* vjson = cJSON_PrintUnformatted(vnode);
+                    if (vjson) {
+                        dsApplyOp(a, a.curPath, op, vjson);
+                        ++a.nOps;
+                        free(vjson);
+                    }
                 }
             }
         }
         cJSON_Delete(j);
     }
 
+    if (stat) {
+        stat->dataFrames = a.nData;
+        stat->jsonFrames = a.nJson;
+        stat->ops = a.nOps;
+        stat->bytes = body.size();
+    }
     if (!a.errMsg.empty()) { err = a.errMsg; return false; }
     if (a.status == "INCOMPLETE" || a.quasi == "INCOMPLETE") {
         err = "生成被中断（INCOMPLETE）";
@@ -1003,14 +1069,26 @@ void dsOnDone(const HttpResponse& resp, Session* s, const AigptbotProvider& p) {
                     + (resp.curlErrStr.empty() ? "" : " " + resp.curlErrStr));
             return;
         }
+        DsSseStat st;
         std::string out, err;
-        if (!parseDeepseekSse(resp.body, out, err)) {
+        const TimePoint pt0 = timeNow();
+        if (!parseDeepseekSse(resp.body, out, err, &st)) {
+            qWarning("aigptbot: deepseek SSE 解析失败 segs=%d json=%d ops=%d bytes=%d elapsed=%lldms err=%s",
+                     st.dataFrames, st.jsonFrames, st.ops, (int)resp.body.size(),
+                     (long long)resp.elapsedMs, err.c_str());
             if (!resp.curlErrStr.empty()) {
                 err += "（" + resp.curlErrStr + "）";
             }
             webFail(s, p.name, err);
             return;
         }
+        const long long parseMs = elapsedMs(pt0);
+        qWarning("aigptbot: deepseek SSE segs=%d json=%d ops=%d bytes=%d outlen=%d parse=%lldms elapsed=%lldms",
+                 st.dataFrames, st.jsonFrames, st.ops, (int)resp.body.size(),
+                 (int)out.size(), (long long)parseMs, (long long)resp.elapsedMs);
+        // TODO(临时·验证后删除): 打印 SSE 原文前 4000 字
+        qWarning("aigptbot: deepseek SSE raw[0..4000]=[%s]",
+                 resp.body.substr(0, 4000).c_str());
         webSucceed(s, p.name, out);
         return;
     }
@@ -1049,7 +1127,7 @@ void sendDeepseek(Session* s, const AigptbotProvider& p) {
             + "\",\"parent_message_id\":null,\"model_type\":\"default\","
               "\"prompt\":\"" + jsonEscape(prompt)
             + "\",\"ref_file_ids\":[],\"thinking_enabled\":false,"
-              "\"search_enabled\":false,\"source\":\"input\",\"action\":null,"
+              "\"search_enabled\":false,\"action\":null,"
               "\"preempt\":false}";
         sendWebHttp(s, "https://chat.deepseek.com/api/v0/chat/completion",
                     "POST", body, h, 180, 60);
