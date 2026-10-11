@@ -33,6 +33,7 @@
 #include <QWheelEvent>       // QWheelEvent (qWheelDeltaY/qWheelIsHorizontal)
 #include <QToolTip>          // QToolTip::showText (showTempTooltip)
 #include <QTimer>            // QTimer::singleShot (showTempTooltip)
+#include <qtextoption.h>     // QTextOption::WrapMode (qTextEditWrapNoHScroll)
 #if QT_VERSION < 0x060000
 #include <QDesktopWidget>    // QApplication::desktop (qPrimaryScreenGeometry 等)
 #else
@@ -172,6 +173,35 @@ void qClearTextEdit(QTextEdit* edit) {
     edit->clear();
 #else
     edit->clear();
+#endif
+}
+
+// 跨版本纯文本读写（Qt3: text/setText；Qt4: toPlainText/setPlainText）
+QString qTextEditText(const QTextEdit* edit) {
+#ifdef QT3_BUILD
+    return edit->text();
+#else
+    return edit->toPlainText();
+#endif
+}
+
+void qTextEditSetText(QTextEdit* edit, const QString& text) {
+#ifdef QT3_BUILD
+    edit->setText(text);
+#else
+    edit->setPlainText(text);
+#endif
+}
+
+// 按宽度折行并关闭横向滚动条（多行文本输入框用）
+void qTextEditWrapNoHScroll(QTextEdit* edit) {
+#ifdef QT3_BUILD
+    edit->setWordWrap(QTextEdit::WidgetWidth);
+    edit->setWrapPolicy(QTextEdit::Anywhere);   // Qt3 无 “词边界优先” 枚举，取 Anywhere 保证长串不断行
+    edit->setHScrollBarMode(QScrollView::AlwaysOff);
+#else
+    edit->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    edit->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
 #endif
 }
 

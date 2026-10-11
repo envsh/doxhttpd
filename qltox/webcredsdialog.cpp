@@ -93,6 +93,14 @@ WebCredDialog::WebCredDialog(QWidget* parent)
     mainLayout->addWidget(lw);
 #endif
 
+#ifdef QT3_BUILD
+    QObject::connect(lb, SIGNAL(doubleClicked(QListBoxItem*)),
+                     this, SLOT(onItemDoubleClicked()));
+#else
+    QObject::connect(lw, SIGNAL(itemDoubleClicked(QListWidgetItem*)),
+                     this, SLOT(onItemDoubleClicked()));
+#endif
+
     QBoxLayout* btnLayout = qNewBoxLayout(nullptr, QBoxLayout::LeftToRight, 0, 0);
     QPushButton* editBtn = new QPushButton(qFromUtf8("配置/修改"), this);
     QObject::connect(editBtn, SIGNAL(clicked()), this, SLOT(onEdit()));
@@ -178,6 +186,13 @@ void WebCredDialog::refresh() {
     revealBtn->setText(revealed ? qFromUtf8("遮蔽值") : qFromUtf8("显示明文"));
 }
 
+void WebCredDialog::onItemDoubleClicked() {
+    if (currentRow() < 0) {
+        return;
+    }
+    onEdit();
+}
+
 void WebCredDialog::onEdit() {
     const int row = currentRow();
     QString field;
@@ -186,9 +201,30 @@ void WebCredDialog::onEdit() {
         field = qFromUtf8(entries[row].name.c_str());
         st = entries[row].status;
     }
+    // 一律明文回显已设值：优先按字段解密（口令加密需会话口令），取不到再回落列表缓存值
+    QString prefill;
+    if (!field.isEmpty()) {
+        if (st == kWebCredPassEnc && sessionPass.isEmpty()) {
+            bool ok = false;
+            const QString pw = qPasswordPrompt(
+                this, qFromUtf8("输入口令"), qFromUtf8("口令加密字段需要口令"), &ok);
+            if (ok && !pw.isEmpty()) {
+                sessionPass = pw;
+            }
+        }
+        QByteArray nameUtf8 = qToUtf8(field);
+        QByteArray passUtf8 = qToUtf8(sessionPass);
+        const WebCredResult r = webCredGet(std::string(nameUtf8.data()), std::string(),
+                                           std::string(passUtf8.data()));
+        if (r.ok && r.status != kWebCredConstant) {
+            prefill = qFromUtf8(r.value.c_str());
+        } else if (row >= 0 && row < (int)entries.size()) {
+            prefill = qFromUtf8(entries[row].value.c_str());
+        }
+    }
     WebCredEditDialog dlg(this,
                           field.isEmpty() ? std::string() : std::string(qToUtf8(field).data()),
-                          st, sessionPass);
+                          st, sessionPass, prefill);
     DialogPopupAnimator::install(&dlg);
     if (dlg.exec() != QDialog::Accepted) {
         return;
@@ -275,11 +311,12 @@ void WebCredDialog::onRefresh() {
 // ── WebCredEditDialog ──────────────────────────────────────────
 
 WebCredEditDialog::WebCredEditDialog(QWidget* parent, const std::string& field,
-                                     WebCredStatus status, const QString& sessionPass)
+                                     WebCredStatus status, const QString& sessionPass,
+                                     const QString& currentValue)
     : QDialog(parent), nameCombo(nullptr), modeCombo(nullptr), valueEdit(nullptr),
       passLabel(nullptr), passEdit(nullptr), m_sessionPass(sessionPass) {
     qSetWindowTitle(this, qFromUtf8("配置 Web 凭据"));
-    resize(400, 180);
+    resize(400, 230);
 
     QBoxLayout* mainLayout = qNewBoxLayout(this, QBoxLayout::TopToBottom, 10, 10);
 
@@ -347,9 +384,11 @@ WebCredEditDialog::WebCredEditDialog(QWidget* parent, const std::string& field,
     mainLayout->addLayout(modeRow);
 
     QBoxLayout* valueRow = qNewBoxLayout(nullptr, QBoxLayout::LeftToRight, 0, 0);
-    valueRow->addWidget(new QLabel(qFromUtf8("值:"), this));
-    valueEdit = new QLineEdit(this);
-    valueEdit->setEchoMode(modeIdx == 0 ? QLineEdit::Normal : QLineEdit::Password);
+    valueRow->addWidget(new QLabel(qFromUtf8("值:"), this), 0, Qt::AlignTop);
+    valueEdit = new QTextEdit(this);
+    qTextEditWrapNoHScroll(valueEdit);
+    valueEdit->setFixedHeight(valueEdit->fontMetrics().lineSpacing() * 3 + 16);
+    qTextEditSetText(valueEdit, currentValue);
     valueRow->addWidget(valueEdit, 1);
     mainLayout->addLayout(valueRow);
 
@@ -406,7 +445,7 @@ QString WebCredEditDialog::getFieldName() const {
 }
 
 QString WebCredEditDialog::getValue() const {
-    return valueEdit->text();
+    return qTextEditText(valueEdit);
 }
 
 QString WebCredEditDialog::getPassphrase() const {
@@ -422,11 +461,10 @@ void WebCredEditDialog::onModeChanged() {
         passLabel->hide();
         passEdit->hide();
     }
-    valueEdit->setEchoMode(mode == kWebCredPlainMode ? QLineEdit::Normal : QLineEdit::Password);
 }
 
 void WebCredEditDialog::onOk() {
-    if (qTrim(valueEdit->text()).isEmpty()) {
+    if (qTrim(qTextEditText(valueEdit)).isEmpty()) {
         QMessageBox::warning(this, qFromUtf8("Web 凭据"), qFromUtf8("值不能为空。"));
         return;
     }

@@ -10,6 +10,7 @@
 class QComboBox;
 class QLabel;
 class QLineEdit;
+class QTextEdit;
 
 // 凭据配置管理对话框（入口：工具 → Web 凭据）。
 // 列表 + 操作按钮，等于 webcreds CLI 的 show/set/rm 图形化版本。
@@ -20,6 +21,7 @@ public:
 
 private slots:
     void onEdit();
+    void onItemDoubleClicked();
     void onRemove();
     void onToggleReveal();
     void onRefresh();
@@ -41,7 +43,8 @@ class WebCredEditDialog : public QDialog {
     Q_OBJECT
 public:
     explicit WebCredEditDialog(QWidget* parent, const std::string& field,
-                               WebCredStatus status, const QString& sessionPass);
+                               WebCredStatus status, const QString& sessionPass,
+                               const QString& currentValue = QString());
 
     WebCredMode getMode() const;
     QString getFieldName() const;
@@ -55,7 +58,7 @@ private slots:
 private:
     QComboBox* nameCombo;   // 已知字段（下拉显示友好名，真实名见 m_comboFields）
     QComboBox* modeCombo;   // 明文 / 令牌加密 / 口令加密
-    QLineEdit* valueEdit;
+    QTextEdit* valueEdit;
     QLabel* passLabel;
     QLineEdit* passEdit;
     QString m_sessionPass;

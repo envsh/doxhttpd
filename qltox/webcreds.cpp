@@ -689,6 +689,18 @@ WebCredResult webCredGet(const std::string& field, const std::string& fallback) 
     return resolveField(g_root, field, fallback, std::string());
 }
 
+WebCredResult webCredGet(const std::string& field, const std::string& fallback,
+                         const std::string& passOverride) {
+    std::lock_guard<std::mutex> lock(g_lock);
+    ensureLoaded();
+    WebCredResult r;
+    if (g_broken) {
+        r.status = kWebCredBroken;
+        return r;
+    }
+    return resolveField(g_root, field, fallback, passOverride);
+}
+
 WebCredStatus webCredStatus(const std::string& field) {
     return webCredGet(field, std::string()).status;
 }

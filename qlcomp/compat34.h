@@ -70,6 +70,9 @@ void qSetCheckable(QPushButton* btn, bool checkable);
 void qSetToolTip(QWidget* w, const QString& tip);
 void qInsertHtml(QTextEdit* edit, const QString& html);
 void qClearTextEdit(QTextEdit* edit);
+QString qTextEditText(const QTextEdit* edit);
+void qTextEditSetText(QTextEdit* edit, const QString& text);
+void qTextEditWrapNoHScroll(QTextEdit* edit);
 QBoxLayout* qNewBoxLayout(QWidget* parent, QBoxLayout::Direction dir, int border = 0, int autoresize = -1);
 
 // ========== StackedWidget 兼容 ==========

@@ -62,6 +62,9 @@ void webCredsReload();
 
 // 运行时查询（惰性加载，进程内缓存）
 WebCredResult webCredGet(const std::string& field, const std::string& fallback);
+// 指定口令来源（UI 会话口令回显用；passOverride 空 = 用环境来源）
+WebCredResult webCredGet(const std::string& field, const std::string& fallback,
+                         const std::string& passOverride);
 WebCredStatus webCredStatus(const std::string& field);
 
 // 状态中文名（UI/日志统一用）
