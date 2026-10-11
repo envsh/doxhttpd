@@ -4,6 +4,7 @@
 #include "compat34.h"
 #include "restapi.h"
 #include "placeholderlineedit.h"
+#include "combinesearchwindow.h"
 #include "emojiutil.h"
 #include "LimeStyle.h"
 #include <qmessagebox.h>
@@ -622,6 +623,9 @@ ContactListWidget::ContactListWidget(QWidget* parent)
     searchInput = new PlaceholderLineEdit(_("placeholders.search_contact"), this);
     connect(searchInput, SIGNAL(textChanged(const QString&)), this, SLOT(onSearchTextChanged(const QString&)));
     searchRow->addWidget(searchInput, 1);
+    typeFilterBtn = new QPushButton(_("modals.labels.type"), this);
+    connect(typeFilterBtn, SIGNAL(clicked()), this, SLOT(onTypeFilterMenuClicked()));
+    searchRow->addWidget(typeFilterBtn);
     sortBtn = new QPushButton(_("sort.button"), this);
     connect(sortBtn, SIGNAL(clicked()), this, SLOT(onSortMenuClicked()));
     searchRow->addWidget(sortBtn);
@@ -1017,7 +1021,7 @@ void ContactListWidget::refreshView() {
     }
 #endif
     int visible = 0;
-    if (m_searchText.isEmpty()) {
+    if (m_searchText.isEmpty() && m_filterType.isEmpty()) {
         visible = m_list.size();
     } else {
         for (int i = 0; i < m_list.size(); ++i) {
@@ -1038,6 +1042,60 @@ void ContactListWidget::resolveSelection() {
 
 void ContactListWidget::onSearchTextChanged(const QString& text) {
     m_searchText = text;
+    refreshView();
+}
+
+void ContactListWidget::onTypeFilterMenuClicked() {
+    std::vector<QString> types;
+    for (int i = 0; i < m_list.size(); ++i) {
+        const QString& t = m_list.at(i)->type;
+        bool found = false;
+        for (uint j = 0; j < types.size(); ++j) {
+            if (types[j] == t) { found = true; break; }
+        }
+        if (!found) { types.push_back(t); }
+    }
+    std::sort(types.begin(), types.end(), [](const QString& a, const QString& b) {
+        return contactTypeLabel(a) < contactTypeLabel(b);
+    });
+
+#ifdef QT3_BUILD
+    QPopupMenu menu(this);
+#else
+    QMenu menu(this);
+#endif
+    menu.setMinimumWidth(150);
+
+#ifdef QT3_BUILD
+    int allId = menu.insertItem(_("tabs.all"), 0);
+    menu.setItemChecked(allId, m_filterType.isEmpty());
+    for (uint i = 0; i < types.size(); ++i) {
+        QString label = qFromUtf8(typeToEmojiUtf8(types[i])) + " " + contactTypeLabel(types[i]);
+        int id = menu.insertItem(label, (int)i + 1);
+        menu.setItemChecked(id, types[i] == m_filterType);
+    }
+    menu.setCheckable(true);
+    int choice = menu.exec(typeFilterBtn->mapToGlobal(QPoint(0, typeFilterBtn->height())));
+    if (choice < 0) { return; }
+    if (choice == 0) { m_filterType = QString(); }
+    else if (choice - 1 < (int)types.size()) { m_filterType = types[choice - 1]; }
+    else { return; }
+#else
+    QAction* allAct = menu.addAction(_("tabs.all"));
+    allAct->setCheckable(true);
+    allAct->setChecked(m_filterType.isEmpty());
+    allAct->setData(QString());
+    for (uint i = 0; i < types.size(); ++i) {
+        QString label = qFromUtf8(typeToEmojiUtf8(types[i])) + " " + contactTypeLabel(types[i]);
+        QAction* act = menu.addAction(label);
+        act->setCheckable(true);
+        act->setChecked(types[i] == m_filterType);
+        act->setData(types[i]);
+    }
+    QAction* selected = menu.exec(typeFilterBtn->mapToGlobal(QPoint(0, typeFilterBtn->height())));
+    if (!selected) { return; }
+    m_filterType = selected->data().toString();
+#endif
     refreshView();
 }
 
@@ -1161,6 +1219,7 @@ void ContactListWidget::retranslateUi() {
     if (addBtn) addBtn->setText(_("buttons.add"));
     if (confBtn) confBtn->setText(_("buttons.create_conference"));
     if (groupBtn) groupBtn->setText(_("buttons.create_group"));
+    if (typeFilterBtn) typeFilterBtn->setText(_("modals.labels.type"));
     refreshView();
 }
 

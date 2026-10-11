@@ -154,7 +154,8 @@ public:
 
     int itemHeight() const { return m_itemHeight; }
     bool matchesFilter(const RowData& rd) const {
-        if (m_searchText.isEmpty()) return true;
+        if (!m_filterType.isEmpty() && rd.type != m_filterType) { return false; }
+        if (m_searchText.isEmpty()) { return true; }
         return rd.nameUpper.contains(qToUpper(m_searchText));
     }
     void handleContactSelected(int id, const QString& type, const QString& name) {
@@ -178,6 +179,7 @@ signals:
 
 private slots:
     void onSearchTextChanged(const QString& text);
+    void onTypeFilterMenuClicked();
     void onSortMenuClicked();
     void onJoinGroupClicked();
     void onAddFriendClicked();
@@ -214,10 +216,12 @@ private:
     std::map<std::pair<int, std::string>, int> m_pinnedIndices;
 
     PlaceholderLineEdit* searchInput;
+    QPushButton* typeFilterBtn;
     QLabel* countLabel;
     QPushButton* sortBtn;
     QPushButton* plusBtn;
     QString m_searchText;
+    QString m_filterType;
     int m_itemHeight = 60;
     std::vector<QString> m_sortCriteria;
 };
