@@ -225,6 +225,8 @@ sso=<值1>; sso-rw=<值2>
 ```
 
 - `model_type` 取值：抓包见 `"default"`，文档注 `expert`（默认）→ **TODO 实测**。
+- `thinking_enabled`（深度思考）/ `search_enabled`（联网搜索）由属性条开关 `thinking`/`search`
+  驱动（`AigptbotRequest.thinking/search`，`qltox/messageattribbar.cpp` 的 `kAichatType`），默认 false。
 
 **请求头**（所有业务请求）：
 `User-Agent: <webUA>`（默认 `DeepSeek/2.5.0 Android/35`，被全局 `kWebCredUA` 覆盖前；桌面 Chrome UA 被 AWS WAF 202 challenge 拦）、

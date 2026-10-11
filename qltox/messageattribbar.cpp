@@ -933,6 +933,18 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
             briefDef.defValue = QString::fromLatin1("1");
             defs << briefDef;
         }
+        {
+            MessageAttrDef thinkDef = checkDef("thinking", qFromUtf8("深度思考"),
+                                               qFromUtf8("联网深度思考开关（thinking_enabled）；仅 deepseek-web 等支持的服务商生效，默认开"));
+            thinkDef.defValue = QString::fromLatin1("1");
+            defs << thinkDef;
+        }
+        {
+            MessageAttrDef searchDef = checkDef("search", qFromUtf8("联网搜索"),
+                                                qFromUtf8("联网检索开关（search_enabled）；仅 deepseek-web 等支持联网的服务商生效，默认开"));
+            searchDef.defValue = QString::fromLatin1("1");
+            defs << searchDef;
+        }
     } else if (type == kPastebinType) {
         QStringList psvc;  psvc << "any" << "all"
                                 << "pastebin.com" << "dpaste.com" << "0x0.st"

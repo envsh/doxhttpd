@@ -1959,6 +1959,8 @@ void MainWindow::handleAigptChatMessage(int64_t localId, const QString& text) {
     req.provider = std::string(qToUtf8(mapValue(ctx, "provider")).data());
     req.model    = std::string(qToUtf8(mapValue(ctx, "model")).data());
     req.brief    = (mapValue(ctx, "brief") == "1");
+    req.thinking = (mapValue(ctx, "thinking") == "1");
+    req.search   = (mapValue(ctx, "search") == "1");
     req.localId  = localId;
     req.chatId   = currentChatId;
     req.chatType = typeStr;

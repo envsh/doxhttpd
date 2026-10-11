@@ -1126,9 +1126,11 @@ void sendDeepseek(Session* s, const AigptbotProvider& p) {
         std::string body = "{\"chat_session_id\":\"" + jsonEscape(s->wv["session"])
             + "\",\"parent_message_id\":null,\"model_type\":\"default\","
               "\"prompt\":\"" + jsonEscape(prompt)
-            + "\",\"ref_file_ids\":[],\"thinking_enabled\":false,"
-              "\"search_enabled\":false,\"action\":null,"
-              "\"preempt\":false}";
+            + "\",\"ref_file_ids\":[],\"thinking_enabled\":"
+            + (s->req.thinking ? "true" : "false")
+            + ",\"search_enabled\":"
+            + (s->req.search ? "true" : "false")
+            + ",\"action\":null,\"preempt\":false}";
         sendWebHttp(s, "https://chat.deepseek.com/api/v0/chat/completion",
                     "POST", body, h, 180, 60);
         break;
