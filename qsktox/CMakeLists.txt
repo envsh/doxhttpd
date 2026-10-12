@@ -72,6 +72,7 @@ qt_add_executable(qsktox
     src/mytaphandler.cpp
     src/myscrollarea.h
     src/myscrollarea.cpp
+
     ${qlappcom_dir}/message_db.cpp
     ${qlappcom_dir}/storage.cpp
     ${qlappcom_dir}/channel_db.cpp
@@ -79,8 +80,17 @@ qt_add_executable(qsktox
     ${qlappcom_dir}/sticker_db.cpp
     ${qlappcom_dir}/cache_db.cpp
     ${qlappcom_dir}/cache_fs.cpp
-    ${qlappcom_dir}/eventpoller.cpp
-    ${qlappcom_dir}/unknownparser.cpp
+    #${qlappcom_dir}/eventpoller.cpp
+    #${qlappcom_dir}/unknownparser.cpp
+    ${qlappcom_dir}/media_shmem_cache.cpp
+    ${qlappcom_dir}/netproxy.cpp
+    ${qlappcom_dir}/webcreds.cpp
+    #${qlappcom_dir}/fanyibot.cpp
+    #${qlappcom_dir}/websearchbot.cpp
+    #${qlappcom_dir}/aigptbot.cpp
+    #${qlappcom_dir}/aigpt_sessions.cpp
+    #${qlappcom_dir}/pasteuploader.cpp
+
     ${qlcomp_dir}/tagutil.cpp
     ${qlcomp_dir}/compatcore34.cpp
     ${qlcomp_dir}/limelog.cpp
@@ -88,6 +98,9 @@ qt_add_executable(qsktox
     ${qlcomp_dir}/generic_slot.cpp
     ${qlcomp_dir}/qthooks.cpp
     ${qlcomp_dir}/md5.c
+    ${qlcomp_dir}/aes.c
+    ${qlcomp_dir}/obsd_sha2.c
+    ${qlcomp_dir}/dspow_solve.c
     ${qlcomp_dir}/cJSON.c
     ${qlcomp_dir}/qcrc64.cpp
 )
