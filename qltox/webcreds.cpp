@@ -830,14 +830,15 @@ bool webCredsWipe(std::string& err) {
 
 const char* const* webCredsKnownFields(size_t& count) {
     static const char* const kKnown[] = {
-        "deepseek", "gemini", "grok", "chatgpt", "meta",
         "deepseek_cookie", "deepseek_device_id",
-        // 非 web（OpenAI 兼容）API key 管理字段：仅存储/UI（noweb_meta 已接入 meta provider）
-        "noweb_pollinations", "noweb_zhipu", "noweb_siliconflow", "noweb_nvidia",
-        "noweb_openrouter", "noweb_llm7", "noweb_cloudflare", "noweb_dashscope",
-        "noweb_ovh", "noweb_volcengine", "noweb_modelscope", "noweb_modelscope_intl",
-        "noweb_groq", "noweb_huggingface", "noweb_gemini", "noweb_zai",
-        "noweb_groq_viacf", "noweb_gemini_viacf", "noweb_aihorde", "noweb_meta",
+        // API key 字段：<slug>_api（OpenAI 兼容 provider 的 Authorization）
+        "pollinations_api", "zhipu_api", "siliconflow_api", "nvidia_api",
+        "openrouter_api", "llm7_api", "cloudflare_api", "dashscope_api",
+        "ovh_api", "volcengine_api", "modelscope_api", "modelscope_intl_api",
+        "groq_api", "huggingface_api", "gemini_api", "zai_api",
+        "groq_viacf_api", "gemini_viacf_api", "aihorde_api", "meta_api",
+        // web 登录字段：<slug>_web
+        "deepseek_web", "gemini_web", "groq_web", "chatgpt_web", "meta_web",
     };
     count = sizeof(kKnown) / sizeof(kKnown[0]);
     return kKnown;

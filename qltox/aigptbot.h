@@ -31,7 +31,7 @@ enum AigptbotProviderId {
     kAigptbotGroqViaCf,
     kAigptbotGeminiViaCf,
     kAigptbotAiHorde,
-    kAigptbotMetaApi,             // meta 官方 Model API（OpenAI 兼容，key=noweb_meta）
+    kAigptbotMetaApi,             // meta 官方 Model API（OpenAI 兼容，key=meta_api）
     // web 版直连（凭据读加密侧车 webcreds，见 docs/aigptbot-web-sources.md §3.0）
     kAigptbotDeepseekWeb,
     kAigptbotGeminiWeb,

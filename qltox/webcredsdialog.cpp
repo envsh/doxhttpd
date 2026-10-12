@@ -44,29 +44,34 @@ QString qPasswordPrompt(QWidget* parent, const QString& title,
 
 // ── WebCredDialog ──────────────────────────────────────────────
 
-// 字段显示名：noweb_* API key 映射为品牌/中文名，其余（web 字段/自定义名）原样
+// 字段显示名：<slug>_api/<slug>_web 映射为品牌名，其余（自定义名）原样
 QString webCredFieldDisplay(const std::string& name) {
-    if (name == "noweb_pollinations")    { return qFromUtf8("Pollinations"); }
-    if (name == "noweb_zhipu")           { return qFromUtf8("智谱"); }
-    if (name == "noweb_siliconflow")     { return qFromUtf8("硅基流动"); }
-    if (name == "noweb_nvidia")          { return qFromUtf8("NVIDIA NIM"); }
-    if (name == "noweb_openrouter")      { return qFromUtf8("OpenRouter"); }
-    if (name == "noweb_llm7")            { return qFromUtf8("LLM7"); }
-    if (name == "noweb_cloudflare")      { return qFromUtf8("Cloudflare"); }
-    if (name == "noweb_dashscope")       { return qFromUtf8("百炼"); }
-    if (name == "noweb_ovh")             { return qFromUtf8("OVH"); }
-    if (name == "noweb_volcengine")      { return qFromUtf8("豆包"); }
-    if (name == "noweb_modelscope")      { return qFromUtf8("ModelScope(国内)"); }
-    if (name == "noweb_modelscope_intl") { return qFromUtf8("ModelScope(国际)"); }
-    if (name == "noweb_groq")            { return qFromUtf8("Groq"); }
-    if (name == "noweb_huggingface")     { return qFromUtf8("HuggingFace"); }
-    if (name == "noweb_gemini")          { return qFromUtf8("Gemini"); }
-    if (name == "noweb_zai")             { return qFromUtf8("Z.ai(国际)"); }
-    if (name == "noweb_groq_viacf")      { return qFromUtf8("groq-viacf"); }
-    if (name == "noweb_gemini_viacf")    { return qFromUtf8("gemini-viacf"); }
-    if (name == "noweb_aihorde")         { return qFromUtf8("aihorde"); }
-    if (name == "noweb_meta")            { return qFromUtf8("Meta Model API"); }
-    if (name == "meta")                  { return qFromUtf8("Meta AI"); }
+    if (name == "pollinations_api")    { return qFromUtf8("Pollinations"); }
+    if (name == "zhipu_api")           { return qFromUtf8("智谱"); }
+    if (name == "siliconflow_api")     { return qFromUtf8("硅基流动"); }
+    if (name == "nvidia_api")          { return qFromUtf8("NVIDIA NIM"); }
+    if (name == "openrouter_api")      { return qFromUtf8("OpenRouter"); }
+    if (name == "llm7_api")            { return qFromUtf8("LLM7"); }
+    if (name == "cloudflare_api")      { return qFromUtf8("Cloudflare"); }
+    if (name == "dashscope_api")       { return qFromUtf8("百炼"); }
+    if (name == "ovh_api")             { return qFromUtf8("OVH"); }
+    if (name == "volcengine_api")      { return qFromUtf8("豆包"); }
+    if (name == "modelscope_api")      { return qFromUtf8("ModelScope(国内)"); }
+    if (name == "modelscope_intl_api") { return qFromUtf8("ModelScope(国际)"); }
+    if (name == "groq_api")            { return qFromUtf8("Groq"); }
+    if (name == "huggingface_api")     { return qFromUtf8("HuggingFace"); }
+    if (name == "gemini_api")          { return qFromUtf8("Gemini"); }
+    if (name == "zai_api")             { return qFromUtf8("Z.ai(国际)"); }
+    if (name == "groq_viacf_api")      { return qFromUtf8("groq-viacf"); }
+    if (name == "gemini_viacf_api")    { return qFromUtf8("gemini-viacf"); }
+    if (name == "aihorde_api")         { return qFromUtf8("aihorde"); }
+    if (name == "meta_api")            { return qFromUtf8("Meta Model API"); }
+    // web 登录字段：显示为 aigpt provider 名
+    if (name == "deepseek_web")        { return qFromUtf8("deepseek-web"); }
+    if (name == "gemini_web")          { return qFromUtf8("gemini-web"); }
+    if (name == "groq_web")            { return qFromUtf8("grok-web"); }
+    if (name == "chatgpt_web")         { return qFromUtf8("chatgpt-web"); }
+    if (name == "meta_web")            { return qFromUtf8("Meta AI"); }
     return qFromUtf8(name.c_str());
 }
 

@@ -4411,7 +4411,7 @@ void MainWindow::onSourceClicked(int msgIndex) {
 
 void MainWindow::openSettings() {
     ConfigDialog* dlg = new ConfigDialog(qFromUtf8("设置"), this);
-    dlg->setSettingsFile(ConfigDialog::defaultSettingsFile());
+    dlg->setSettingsName(qFromUtf8("qltox"), qFromUtf8("ui"));
 
     CategoryPage* general = new CategoryPage(qFromUtf8("常规"), dlg);
     StringConfigItem* serverUrl = new StringConfigItem(
@@ -4476,8 +4476,11 @@ void MainWindow::openSettings() {
     network->addWidget(proxyEnabled->checkBox());
     StringConfigItem* proxyUrl = new StringConfigItem(
         "network/proxyUrl", "",
-        qFromUtf8("代理地址 (http://host:port 或 socks5://host:port)"), network);
+        qFromUtf8("代理地址"), network);
     network->addLabeledControl(proxyUrl->label(), proxyUrl->lineEdit());
+    qSetToolTip(proxyUrl->lineEdit(), qFromUtf8("http://host:port 或 socks5://host:port"));
+    connect(proxyEnabled->checkBox(), SIGNAL(toggled(bool)),
+            proxyUrl->lineEdit(), SLOT(setEnabled(bool)));
     network->addStretch();
     dlg->addCategory(qFromUtf8("网络"), network);
     dlg->registerConfigItem(timeout);
@@ -4574,14 +4577,17 @@ void MainWindow::openSettings() {
     dlg->registerConfigItem(sleepBlocker);
 
     connect(dlg, SIGNAL(settingsSaved(SettingsChangedMap)), this, SLOT(onSettingsSaved(SettingsChangedMap)));
+    dlg->setCurrentCategory(0);
     dlg->loadSettings();
+    proxyUrl->lineEdit()->setEnabled(proxyEnabled->checkBox()->isChecked());
     DialogPopupAnimator::install(dlg);
     dlg->show();
 }
 
 void MainWindow::applyProxySettings() {
-    const bool enabled = ConfigDialog::settingBool("network/proxyEnabled", false);
-    const QString url = ConfigDialog::settingString("network/proxyUrl", "");
+    QSettings34 s(qFromUtf8("qltox"), qFromUtf8("ui"));
+    const bool enabled = s.value("network/proxyEnabled", QVariant(false)).toBool();
+    const QString url = s.value("network/proxyUrl", QVariant(QString())).toString();
     const std::string urlStd(qToUtf8(url).data());
     netProxySet(enabled, urlStd);
     qWarning("proxy: enabled=%d url=%s", (int)enabled, urlStd.c_str());

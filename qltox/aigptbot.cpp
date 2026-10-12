@@ -149,11 +149,11 @@ const int kAigptProviderCount = int(sizeof(kAigptProviders) / sizeof(kAigptProvi
 // web provider 对应凭据结果（默认读 webcreds 侧车，源码常量为默认定底）
 WebCredResult webCredResult(const AigptbotProvider& p) {
     switch (p.webKind) {
-    case kAigptbotWebDeepseek: { return webCredGet("deepseek", kDeepseekWebCred); }
-    case kAigptbotWebGemini:   { return webCredGet("gemini", kGeminiWebCred); }
-    case kAigptbotWebGrok:     { return webCredGet("grok", kGrokWebCred); }
-    case kAigptbotWebChatgpt:  { return webCredGet("chatgpt", kChatgptWebCred); }
-    case kAigptbotWebMeta:     { return webCredGet("meta", kMetaWebCred); }
+    case kAigptbotWebDeepseek: { return webCredGet("deepseek_web", kDeepseekWebCred); }
+    case kAigptbotWebGemini:   { return webCredGet("gemini_web", kGeminiWebCred); }
+    case kAigptbotWebGrok:     { return webCredGet("groq_web", kGrokWebCred); }
+    case kAigptbotWebChatgpt:  { return webCredGet("chatgpt_web", kChatgptWebCred); }
+    case kAigptbotWebMeta:     { return webCredGet("meta_web", kMetaWebCred); }
     case kAigptbotWebNone:     { break; }
     }
     return WebCredResult();
@@ -172,10 +172,41 @@ const char* webCredTag(WebCredStatus s) {
     return "none";
 }
 
-// non-web provider 的 key 是否已配置（目前仅 meta 读侧车 noweb_meta）
+// non-web（OpenAI 兼容）provider 的 API key 侧车字段名：<slug>_api
+const char* nonWebCredField(const AigptbotProvider& p) {
+    switch (p.id) {
+    case kAigptbotPollinations:     { return "pollinations_api"; }
+    case kAigptbotPollinationsText: { return ""; } // 匿名（allowEmptyKey）
+    case kAigptbotZhipu:            { return "zhipu_api"; }
+    case kAigptbotSiliconFlow:      { return "siliconflow_api"; }
+    case kAigptbotNvidia:           { return "nvidia_api"; }
+    case kAigptbotOpenRouter:       { return "openrouter_api"; }
+    case kAigptbotBlockRun:         { return ""; } // 匿名（allowEmptyKey）
+    case kAigptbotLlm7:             { return "llm7_api"; }
+    case kAigptbotCloudflare:       { return "cloudflare_api"; }
+    case kAigptbotDashScope:        { return "dashscope_api"; }
+    case kAigptbotOvh:              { return ""; } // 匿名（allowEmptyKey）
+    case kAigptbotVolcengine:       { return "volcengine_api"; }
+    case kAigptbotModelScope:       { return "modelscope_api"; }
+    case kAigptbotModelScopeIntl:   { return "modelscope_intl_api"; }
+    case kAigptbotGroq:             { return "groq_api"; }
+    case kAigptbotHuggingFace:      { return "huggingface_api"; }
+    case kAigptbotGemini:           { return "gemini_api"; }
+    case kAigptbotOllama:           { return ""; } // 本地，无 key
+    case kAigptbotZai:              { return "zai_api"; }
+    case kAigptbotGroqViaCf:        { return "groq_viacf_api"; }
+    case kAigptbotGeminiViaCf:      { return "gemini_viacf_api"; }
+    case kAigptbotAiHorde:          { return "aihorde_api"; }
+    case kAigptbotMetaApi:          { return "meta_api"; }
+    default:                        { return ""; }
+    }
+}
+
+// non-web provider 的 key 是否已配置（读侧车 <slug>_api）
 bool nonWebKeyReady(const AigptbotProvider& p) {
-    if (p.id != kAigptbotMetaApi) { return false; }
-    const WebCredResult r = webCredGet("noweb_meta", "");
+    const char* f = nonWebCredField(p);
+    if (!f || !f[0]) { return false; }
+    const WebCredResult r = webCredGet(f, "");
     return r.ok && !r.value.empty();
 }
 
@@ -407,9 +438,10 @@ void sendHost(Session* s, const AigptbotProvider& p) {
         return;
     }
     const std::string model = s->req.model.empty() ? p.modelDefault : s->req.model;
-    qWarning("aigptbot: 候选[%d/%d] provider=%s host=%s model=%s brief=%d textlen=%d B",
+    qWarning("aigptbot: 候选[%d/%d] provider=%s host=%s model=%s brief=%d textlen=%d B keyready=%d",
              s->index, (int)s->cands.size(), p.name, p.baseUrl,
-             model.empty() ? "(未指定)" : model.c_str(), (int)s->req.brief, (int)s->req.text.size());
+             model.empty() ? "(未指定)" : model.c_str(), (int)s->req.brief, (int)s->req.text.size(),
+             p.webKind == kAigptbotWebNone ? (nonWebKeyReady(p) ? 1 : 0) : 0);
     // 构造 OpenAI 兼容请求体
     std::string body = "{";
     // model（UI 未指定时回落 provider 默认模型）
@@ -436,17 +468,15 @@ void sendHost(Session* s, const AigptbotProvider& p) {
     headers["User-Agent"] = "qltox/1.0";
     headers["Accept-Language"] = "zh-CN,zh;q=0.9,en;q=0.4";
     headers["Content-Type"] = "application/json";
-    // Authorization：仅非 allowEmptyKey
+    // Authorization：非 allowEmptyKey 且已配置 key → 读侧车 <slug>_api
     if (!p.allowEmptyKey) {
-        if (p.id == kAigptbotMetaApi) {
-            // meta：读侧车 noweb_meta（首个接入调用处的 non-web key）
-            const WebCredResult key = webCredGet("noweb_meta", "");
+        const char* kf = nonWebCredField(p);
+        if (kf && kf[0]) {
+            const WebCredResult key = webCredGet(kf, "");
             if (key.ok && !key.value.empty()) {
                 headers["Authorization"] = "Bearer " + key.value;
             }
         }
-        // 不读取配置文件，key 为空→不添加
-        // （直接指定场景将发出无 auth 请求，失败由 onDone 处理）
     }
     sendHttp(s, p.baseUrl, body, headers);
 }
@@ -627,7 +657,7 @@ std::map<std::string, std::string> dsHeaders(bool auth) {
     h["X-Client-Timezone-Offset"] = "28800";
     if (auth) {
         h["Content-Type"] = "application/json";
-        h["Authorization"] = std::string("Bearer ") + webCredGet("deepseek", kDeepseekWebCred).value;
+        h["Authorization"] = std::string("Bearer ") + webCredGet("deepseek_web", kDeepseekWebCred).value;
     }
     return h;
 }
@@ -1228,7 +1258,7 @@ void sendDeepseek(Session* s, const AigptbotProvider& p) {
 std::map<std::string, std::string> gemHeaders(bool form) {
     std::map<std::string, std::string> h;
     h["User-Agent"] = webUA(false);
-    h["Cookie"] = webCredGet("gemini", kGeminiWebCred).value;
+    h["Cookie"] = webCredGet("gemini_web", kGeminiWebCred).value;
     h["Accept"] = "*/*";
     webBrowserHeaders(h);
     if (form) {
@@ -1638,7 +1668,7 @@ std::map<std::string, std::string> grokHeaders(const std::string& urlPath) {
     std::map<std::string, std::string> h;
     h["User-Agent"] = webUA(false);
     h["Content-Type"] = "application/json";
-    h["Cookie"] = webCredGet("grok", kGrokWebCred).value;
+    h["Cookie"] = webCredGet("groq_web", kGrokWebCred).value;
     h["Accept"] = "*/*";
     h["Origin"] = "https://grok.com";
     h["Referer"] = "https://grok.com";
@@ -1788,7 +1818,7 @@ void sendGrok(Session* s, const AigptbotProvider& p) {
 
 std::map<std::string, std::string> cgptHeaders(Session* s) {
     std::map<std::string, std::string> h;
-    h["Authorization"] = std::string("Bearer ") + webCredGet("chatgpt", kChatgptWebCred).value;
+    h["Authorization"] = std::string("Bearer ") + webCredGet("chatgpt_web", kChatgptWebCred).value;
     h["Content-Type"] = "application/json";
     h["Accept"] = "*/*";
     h["User-Agent"] = webUA(false);
@@ -2098,7 +2128,7 @@ std::string metaOfflineThreadingId() {
 
 // 配置 cookie（meta 字段）与页面提取 cookie 合并
 std::string metaCookie(Session* s) {
-    std::string c = webCredGet("meta", kMetaWebCred).value;
+    std::string c = webCredGet("meta_web", kMetaWebCred).value;
     if (!s) { return c; }
     const char* keys[] = { "_js_datr", "datr", "abra_csrf" };
     for (int i = 0; i < 3; ++i) {
@@ -2173,7 +2203,7 @@ void sendMetaWeb(Session* s, const AigptbotProvider& p) {
         h["User-Agent"] = webUA(false);
         h["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
         webBrowserHeaders(h);
-        const std::string ck = webCredGet("meta", kMetaWebCred).value;
+        const std::string ck = webCredGet("meta_web", kMetaWebCred).value;
         if (!ck.empty()) { h["Cookie"] = ck; }
         sendWebHttp(s, "https://www.meta.ai/", "GET", "", h, 35, 30);
         return;
@@ -2434,7 +2464,7 @@ std::vector<const AigptbotProvider*> buildCandidates(const AigptbotRequest& req,
                     continue;
                 }
             } else if (p.needsKey) {
-                if (!nonWebKeyReady(p)) { continue; } // 跳过未配置（meta 读 noweb_meta）
+                if (!nonWebKeyReady(p)) { continue; } // 跳过未配置（读侧车 <slug>_api）
             }
             out.push_back(&p);
         }
@@ -2455,7 +2485,7 @@ std::vector<const AigptbotProvider*> buildCandidates(const AigptbotRequest& req,
                     continue;
                 }
             } else if (p.needsKey) {
-                if (!nonWebKeyReady(p)) { continue; } // 跳过未配置（meta 读 noweb_meta）
+                if (!nonWebKeyReady(p)) { continue; } // 跳过未配置（读侧车 <slug>_api）
             }
             out.push_back(&p);
         }
@@ -2499,8 +2529,9 @@ std::string aigptbotWebCredStatusName(const char* providerName) {
         if (p.webKind != kAigptbotWebNone) {
             return std::string(webCredStatusName(webCredResult(p).status));
         }
-        if (p.id == kAigptbotMetaApi) {
-            return std::string(webCredStatusName(webCredGet("noweb_meta", "").status));
+        const char* kf = nonWebCredField(p);
+        if (kf && kf[0]) {
+            return std::string(webCredStatusName(webCredGet(kf, "").status));
         }
         return std::string();
     }
