@@ -189,7 +189,7 @@ private slots:
     void onScrollChanged(int value);
 
 public:
-    void showContextMenuAt(int id, const QString& type, const QString& name, const QPoint& globalPos);
+    void showContextMenuAt(int id, QString type, QString name, const QPoint& globalPos);
 
 private:
     void refreshView();

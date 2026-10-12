@@ -1223,7 +1223,7 @@ void ContactListWidget::retranslateUi() {
     refreshView();
 }
 
-void ContactListWidget::showContextMenuAt(int id, const QString& type, const QString& name, const QPoint& globalPos) {
+void ContactListWidget::showContextMenuAt(int id, QString type, QString name, const QPoint& globalPos) {
     contextItemId = id;
     contextItemType = type;
     RowData* rd = m_list.get(id, type);
