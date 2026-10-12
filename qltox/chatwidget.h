@@ -94,6 +94,7 @@ public:
     // 仅属性栏可下发取值(白名单过滤)。失败重试兜底用：不含待发引用/提及
     // ——那属于用户正在编辑的新消息，混入旧消息重发是错的。
     QMap<QString,QString> attribContext() const;
+    void resetAttribKey(const QString& key);   // 复位属性栏单项(一次性动作项)
     // 首发用：待发引用/提及(m_pendingCtx) + 属性栏取值。
     QMap<QString,QString> currentSendContext() const;
     void setFavRowids(const std::vector<int64_t>& favRowids) { messageArea->setFavRowids(favRowids); }

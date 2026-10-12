@@ -169,7 +169,17 @@ sso=<值1>; sso-rw=<值2>
   config.json、不做独立设置页**。
 - `buildCandidates()` 中凭据不可用（`ok=false`：未配置/解不开/口令缺失均算）→ `any`/`all`
   跳过，并记 `cred=` 日志；点名单选按细分（未配置/口令缺失/解不开）报错。
-- 每条消息新会话（无状态，不缓存 session id）；内部可请求 SSE 但聚合后单次返回（`parseSseContent()` 聚合 delta），保持现有完成事件语义。
+- **会话复用**（跨消息保留 session，命中则跳过建会话）：缓存
+  `~/.config/qltox/aigpt_sessions.json`（key = provider 名 + 凭据 sha256 前 16 hex，
+  见 `aigpt_sessions.{h,cpp}`）。deepseek：复用 `chat_session_id` +
+  上一条 `response_message_id` 作 `parent_message_id`（PoW 每请求重算）；
+  gemini：复用 `conversation_id`/`response_id`（inner[2]）；grok：改走
+  `conversations/{id}/message`；chatgpt：`conversation_id`+`parent_message_id`（实验性）；
+  meta-web：复用 `externalConversationId`（实验性）。**重建触发**仅两种：
+  ①服务端 `input_exceeds_limit`（会话满，自动新建并重发一次）②用户属性栏「新对话」。
+  服务端会话过期/回收不自动重建（沿用现有报错路径）。内部仍聚合后单次返回。
+- `aigptbot.h` `AigptbotRequest.newChat`；属性栏 `messageattribbar.cpp` 的
+  `kAichatType` 新增一次性「新对话」勾选项（默认 off，发送后复位，不持久化）。
 - 协议细节：见下方 §6（deepseek / grok / gemini / chatgpt / meta 分节）。
 - 哈希库：`qlcomp/obsd_sha2.c/.h`（OpenBSD SHA-2，供 chatgpt PoW）与 `qlcomp/dspow_solve.c/.h`（DeepSeekHashV1，供 deepseek PoW），经 `qlcomp/qlite.pri` 编入所有构建。
 - 阶段划分：P0 架构（enum/`webKind` 字段/`sendWebHost()` 分派/哈希库）→ P1 deepseek-web → P2 gemini-web → P3 grok-web → P4 chatgpt-web（实验性，失败给明确报错）→ P5 meta（官方 API，接 `noweb_meta`）+ meta-web（实验性，旧 GraphQL）。

@@ -1220,6 +1220,10 @@ QMap<QString,QString> ChatWidget::attribContext() const {
     return out;
 }
 
+void ChatWidget::resetAttribKey(const QString& key) {
+    m_attrBar->resetKey(key);
+}
+
 QMap<QString,QString> ChatWidget::currentSendContext() const {
     QMap<QString,QString> out = m_pendingCtx;
     const QMap<QString,QString> attrVals = attribContext();

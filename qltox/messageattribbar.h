@@ -47,6 +47,7 @@ public:
     void setTypeLabel(const QString& text); // 行首固定类型标签(key 固定为 proto_type)
     void clear();
     void requestRelayout();   // kTags 增删后重排属性条,避免压到下一行
+    void resetKey(const QString& key);   // 复位单项到默认值(一次性动作项用)
 protected:
     void resizeEvent(QResizeEvent* e);
     void showEvent(QShowEvent* e);

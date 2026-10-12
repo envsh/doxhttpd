@@ -2,6 +2,7 @@
 #include "compatcore34.h"
 #include "eventpoller.h"
 #include "webcreds.h"
+#include "aigpt_sessions.h"
 #include "cJSON.h"
 #include "obsd_sha2.h"
 #include "dspow_solve.h"
@@ -189,7 +190,14 @@ struct Session {
     // （deepseek: hif/pow/session；gemini: at/reqid；grok: conversationId；chatgpt: prepare_token；meta: lsd/datr/token/conv）
     int step = 0;
     std::map<std::string, std::string> wv;
+    std::string sessKey;   // 会话缓存键（web provider 用）
 };
+
+// 会话缓存键：provider 名 + 凭据指纹（凭据变化则不复用旧会话）
+std::string webSessionKey(const AigptbotProvider& p) {
+    const WebCredResult cr = webCredResult(p);
+    return aigptSessionKey(p.name, cr.value);
+}
 
 QMutex g_mutex;
 std::vector<Session*> g_sessions;
@@ -660,6 +668,8 @@ struct DsAgg {
     int nData = 0;                        // SSE data: 段数
     int nJson = 0;                        // 成功解析的 JSON 段数
     int nOps = 0;                         // 实际应用的 patch 数
+    std::string respMsgId;                // event: ready → response_message_id
+    bool sessionFull = false;             // finish_reason=input_exceeds_limit（会话已满）
 };
 
 // SSE 解析统计（供日志）
@@ -668,6 +678,8 @@ struct DsSseStat {
     int jsonFrames = 0;
     int ops = 0;
     size_t bytes = 0;
+    std::string respMsgId;
+    bool sessionFull = false;
 };
 
 int dsResolveIdx(DsAgg& a, const std::string& key) {
@@ -883,8 +895,19 @@ bool parseDeepseekSse(const std::string& body, std::string& out, std::string& er
                 std::string m = jStr(j, "message");
                 if (m.empty()) { m = jStr(j, "msg"); }
                 if (m.empty() && jerr) { m = jStr(jerr, "message"); }
+                if (m.empty()) { m = jStr(j, "content"); }
                 if (m.empty()) { m = "服务端错误"; }
                 a.errMsg = m;
+                if (jStr(j, "finish_reason") == "input_exceeds_limit") { a.sessionFull = true; }
+            }
+            // event: ready → 下一条消息的 parent_message_id
+            if (evt == "ready") {
+                cJSON* rid = cJSON_GetObjectItem(j, "response_message_id");
+                if (rid && cJSON_IsNumber(rid)) {
+                    a.respMsgId = std::to_string((long long)rid->valuedouble);
+                } else if (rid && cJSON_IsString(rid) && rid->valuestring) {
+                    a.respMsgId = rid->valuestring;
+                }
             }
             // 粘性 p/o（对齐前端 DeltaParser）：帧缺省时继承上一帧
             cJSON* pnode = cJSON_GetObjectItem(j, "p");
@@ -925,6 +948,8 @@ bool parseDeepseekSse(const std::string& body, std::string& out, std::string& er
         stat->jsonFrames = a.nJson;
         stat->ops = a.nOps;
         stat->bytes = body.size();
+        stat->respMsgId = a.respMsgId;
+        stat->sessionFull = a.sessionFull;
     }
     if (!a.errMsg.empty()) { err = a.errMsg; return false; }
     if (a.status == "INCOMPLETE" || a.quasi == "INCOMPLETE") {
@@ -1029,7 +1054,24 @@ void dsOnDone(const HttpResponse& resp, Session* s, const AigptbotProvider& p) {
         s->wv["pow"] = base64Encode(powJson);
         qWarning("aigptbot: deepseek PoW 解出 answer=%llu attempts=%.0f",
                  (unsigned long long)r.nonce, r.attempts);
-        ++s->step;
+        // 会话复用：非强制新会话且命中缓存 → 跳过 create，直接 completion
+        s->sessKey = webSessionKey(p);
+        AigptSessionRecord crec;
+        if (!s->req.newChat && aigptSessionGet(s->sessKey, crec) && !crec.sessionId.empty()) {
+            s->wv["session"] = crec.sessionId;
+            s->wv["parent"]  = crec.parentId;
+            qWarning("aigptbot: deepseek 复用会话 id=%s parent=%s n=%lld",
+                     crec.sessionId.c_str(),
+                     crec.parentId.empty() ? "null" : crec.parentId.c_str(),
+                     (long long)crec.msgCount);
+            s->step = 3;
+        } else {
+            if (s->req.newChat) {
+                aigptSessionInvalidate(s->sessKey);
+                qWarning("aigptbot: deepseek 用户新对话 → 丢弃旧会话");
+            }
+            s->step = 2;
+        }
         sendDeepseek(s, p);
         return;
     }
@@ -1057,8 +1099,15 @@ void dsOnDone(const HttpResponse& resp, Session* s, const AigptbotProvider& p) {
             return;
         }
         s->wv["session"] = sessId;
+        s->wv["parent"]  = "";
         qWarning("aigptbot: deepseek 会话创建成功 id=%s", sessId.c_str());
-        ++s->step;
+        {
+            AigptSessionRecord nrec;
+            nrec.sessionId = sessId;
+            nrec.createdAt = (long long)time(nullptr);
+            aigptSessionPut(s->sessKey, nrec);
+        }
+        s->step = 3;
         sendDeepseek(s, p);
         return;
     }
@@ -1073,9 +1122,20 @@ void dsOnDone(const HttpResponse& resp, Session* s, const AigptbotProvider& p) {
         std::string out, err;
         const TimePoint pt0 = timeNow();
         if (!parseDeepseekSse(resp.body, out, err, &st)) {
-            qWarning("aigptbot: deepseek SSE 解析失败 segs=%d json=%d ops=%d bytes=%d elapsed=%lldms err=%s",
+            qWarning("aigptbot: deepseek SSE 解析失败 segs=%d json=%d ops=%d bytes=%d elapsed=%lldms err=%s sessionFull=%d",
                      st.dataFrames, st.jsonFrames, st.ops, (int)resp.body.size(),
-                     (long long)resp.elapsedMs, err.c_str());
+                     (long long)resp.elapsedMs, err.c_str(), (int)st.sessionFull);
+            // 会话已满（input_exceeds_limit）：丢弃旧会话，以新会话重发一次
+            if (st.sessionFull && s->wv["ds_retried"].empty()) {
+                aigptSessionInvalidate(s->sessKey);
+                s->wv["ds_retried"] = "1";
+                s->wv["session"] = "";
+                s->wv["parent"]  = "";
+                qWarning("aigptbot: deepseek 会话满 → 新建会话重发");
+                s->step = 2;
+                sendDeepseek(s, p);
+                return;
+            }
             if (!resp.curlErrStr.empty()) {
                 err += "（" + resp.curlErrStr + "）";
             }
@@ -1089,6 +1149,18 @@ void dsOnDone(const HttpResponse& resp, Session* s, const AigptbotProvider& p) {
         // TODO(临时·验证后删除): 打印 SSE 原文前 4000 字
         qWarning("aigptbot: deepseek SSE raw[0..4000]=[%s]",
                  resp.body.substr(0, 4000).c_str());
+        // 成功：记录 parent_message_id / 计数，供下一条复用
+        if (!s->sessKey.empty()) {
+            AigptSessionRecord urec;
+            aigptSessionGet(s->sessKey, urec);
+            urec.sessionId = s->wv["session"];
+            if (urec.createdAt == 0) { urec.createdAt = (long long)time(nullptr); }
+            if (!st.respMsgId.empty()) { urec.parentId = st.respMsgId; }
+            urec.msgCount += 1;
+            aigptSessionPut(s->sessKey, urec);
+            qWarning("aigptbot: deepseek 会话已更新 parent=%s n=%lld",
+                     urec.parentId.c_str(), (long long)urec.msgCount);
+        }
         webSucceed(s, p.name, out);
         return;
     }
@@ -1124,7 +1196,9 @@ void sendDeepseek(Session* s, const AigptbotProvider& p) {
             prompt = std::string("请尽量用最简洁的方式回答，简短直接，避免冗长。\n\n") + prompt;
         }
         std::string body = "{\"chat_session_id\":\"" + jsonEscape(s->wv["session"])
-            + "\",\"parent_message_id\":null,\"model_type\":\"default\","
+            + "\",\"parent_message_id\":"
+            + ((s->wv.count("parent") && !s->wv["parent"].empty()) ? s->wv["parent"] : std::string("null"))
+            + ",\"model_type\":\"default\","
               "\"prompt\":\"" + jsonEscape(prompt)
             + "\",\"ref_file_ids\":[],\"thinking_enabled\":"
             + (s->req.thinking ? "true" : "false")
@@ -1172,12 +1246,14 @@ std::string gemExtractStr(const std::string& text, const std::string& key) {
 
 // 构造 inner 81 元素稀疏数组（null 即缺省）
 std::string gemInnerJson(const std::string& prompt, const std::string& lang,
-                         const std::string& uuidUp) {
+                         const std::string& uuidUp,
+                         const std::string& convId, const std::string& respId) {
     std::string slot[81];
     for (int i = 0; i < 81; ++i) { slot[i] = ""; }
     slot[0] = "[\"" + jsonEscape(prompt) + "\",0,null,null,null,null,0]";
     slot[1] = "[\"" + jsonEscape(lang) + "\"]";
-    slot[2] = "[\"\",\"\",null,null,null,null,null,null,null,\"\"]";
+    slot[2] = "[\"" + jsonEscape(convId) + "\",\"" + jsonEscape(respId)
+            + "\",null,null,null,null,null,null,null,\"\"]";
     slot[6] = "[1]";
     slot[7] = "1";
     slot[10] = "1";
@@ -1265,7 +1341,8 @@ cJSON* jAt(cJSON* n, int idx) {
 }
 
 // 解析分帧响应（)]}' + <UTF-16 长度>\n<帧>），聚合正文
-bool parseGeminiResponse(const std::string& body, std::string& out, std::string& err) {
+bool parseGeminiResponse(const std::string& body, std::string& out, std::string& err,
+                         std::string* convOut = nullptr, std::string* respOut = nullptr) {
     out.clear();
     err.clear();
     size_t i = 0;
@@ -1339,6 +1416,14 @@ bool parseGeminiResponse(const std::string& body, std::string& out, std::string&
             }
             cJSON* inner = cJSON_Parse(innerStr->valuestring);
             if (!inner) { continue; }
+            // 会话元数据 inner[1] = [conversation_id, response_id, …]（TODO 索引实测）
+            if (convOut || respOut) {
+                cJSON* meta = jAt(inner, 1);
+                cJSON* cid = jAt(meta, 0);
+                cJSON* rid = jAt(meta, 1);
+                if (convOut && cid && cJSON_IsString(cid) && cid->valuestring) { *convOut = cid->valuestring; }
+                if (respOut && rid && cJSON_IsString(rid) && rid->valuestring) { *respOut = rid->valuestring; }
+            }
             cJSON* cands = jAt(inner, 4);
             const int nc = (cands && cJSON_IsArray(cands)) ? cJSON_GetArraySize(cands) : 0;
             for (int ci = 0; ci < nc; ++ci) {
@@ -1406,6 +1491,22 @@ void gemOnDone(const HttpResponse& resp, Session* s, const AigptbotProvider& p) 
         s->wv["lang"] = lang;
         qWarning("aigptbot: gemini at 获取成功（%d B） lang=%s",
                  (int)at.size(), lang.c_str());
+        // 会话复用：命中则带 conversation_id/response_id
+        s->sessKey = webSessionKey(p);
+        AigptSessionRecord crec;
+        if (!s->req.newChat && aigptSessionGet(s->sessKey, crec) && !crec.sessionId.empty()) {
+            s->wv["conv"] = crec.sessionId;
+            s->wv["rid"]  = crec.parentId;
+            qWarning("aigptbot: gemini 复用会话 conv=%s rid=%s",
+                     crec.sessionId.c_str(), crec.parentId.c_str());
+        } else {
+            if (s->req.newChat) {
+                aigptSessionInvalidate(s->sessKey);
+                qWarning("aigptbot: gemini 用户新对话 → 丢弃旧会话");
+            }
+            s->wv.erase("conv");
+            s->wv.erase("rid");
+        }
         ++s->step;
         sendGemini(s, p);
         return;
@@ -1417,10 +1518,22 @@ void gemOnDone(const HttpResponse& resp, Session* s, const AigptbotProvider& p) 
             return;
         }
         std::string out, err;
-        if (!parseGeminiResponse(resp.body, out, err)) {
+        std::string conv, rid;
+        if (!parseGeminiResponse(resp.body, out, err, &conv, &rid)) {
             if (!resp.curlErrStr.empty()) { err += "（" + resp.curlErrStr + "）"; }
             webFail(s, p.name, err);
             return;
+        }
+        if (!conv.empty() && !s->sessKey.empty()) {
+            AigptSessionRecord rec;
+            aigptSessionGet(s->sessKey, rec);
+            rec.sessionId = conv;
+            rec.parentId  = rid;
+            if (rec.createdAt == 0) { rec.createdAt = (long long)time(nullptr); }
+            rec.msgCount += 1;
+            aigptSessionPut(s->sessKey, rec);
+            qWarning("aigptbot: gemini 会话已更新 conv=%s rid=%s n=%lld",
+                     conv.c_str(), rid.c_str(), (long long)rec.msgCount);
         }
         webSucceed(s, p.name, out);
         return;
@@ -1448,7 +1561,9 @@ void sendGemini(Session* s, const AigptbotProvider& p) {
         }
         const std::string uuidUp = toUpperAscii(uuidV4());
         const std::string lang = s->wv.count("lang") ? s->wv["lang"] : std::string("en");
-        const std::string inner = gemInnerJson(prompt, lang, uuidUp);
+        const std::string conv = s->wv.count("conv") ? s->wv["conv"] : std::string();
+        const std::string rid  = s->wv.count("rid")  ? s->wv["rid"]  : std::string();
+        const std::string inner = gemInnerJson(prompt, lang, uuidUp, conv, rid);
         // 外层 f.req = [null, "<inner JSON 字符串>"]
         const std::string outer = "[null,\"" + jsonEscape(inner) + "\"]";
         std::string form = "at=" + urlEncode(s->wv["at"])
@@ -1539,7 +1654,8 @@ bool jBool(cJSON* obj, const char* name) {
 }
 
 // 解析 grok NDJSON 全量响应体，聚合正文（thinking token 丢弃）
-bool parseGrokNdjson(const std::string& body, std::string& out, std::string& err) {
+bool parseGrokNdjson(const std::string& body, std::string& out, std::string& err,
+                     std::string* convOut = nullptr) {
     out.clear();
     err.clear();
     int lines = 0;
@@ -1570,6 +1686,7 @@ bool parseGrokNdjson(const std::string& body, std::string& out, std::string& err
                     const std::string cid = jStr(conv, "conversationId");
                     if (!cid.empty()) {
                         qWarning("aigptbot: grok conversationId=%s", cid.c_str());
+                        if (convOut) { *convOut = cid; }
                     }
                 }
                 // payload = r.response（首帧）或 r 本身（扁平）
@@ -1617,10 +1734,21 @@ void grokOnDone(const HttpResponse& resp, Session* s, const AigptbotProvider& p)
         return;
     }
     std::string out, err;
-    if (!parseGrokNdjson(resp.body, out, err)) {
+    std::string conv;
+    if (!parseGrokNdjson(resp.body, out, err, &conv)) {
         if (!resp.curlErrStr.empty()) { err += "（" + resp.curlErrStr + "）"; }
         webFail(s, p.name, err);
         return;
+    }
+    if (!conv.empty() && !s->sessKey.empty()) {
+        AigptSessionRecord rec;
+        aigptSessionGet(s->sessKey, rec);
+        rec.sessionId = conv;
+        if (rec.createdAt == 0) { rec.createdAt = (long long)time(nullptr); }
+        rec.msgCount += 1;
+        aigptSessionPut(s->sessKey, rec);
+        qWarning("aigptbot: grok 会话已更新 id=%s n=%lld",
+                 conv.c_str(), (long long)rec.msgCount);
     }
     webSucceed(s, p.name, out);
 }
@@ -1630,11 +1758,23 @@ void sendGrok(Session* s, const AigptbotProvider& p) {
         webFail(s, p.name, "内部错误：未知 step=" + std::to_string(s->step));
         return;
     }
+    // 会话复用：命中则改走 /conversations/{id}/message（TODO 端点/字段实测）
+    s->sessKey = webSessionKey(p);
+    AigptSessionRecord crec;
+    std::string path = "/rest/app-chat/conversations/new";
+    if (!s->req.newChat && aigptSessionGet(s->sessKey, crec) && !crec.sessionId.empty()) {
+        path = "/rest/app-chat/conversations/" + crec.sessionId + "/message";
+        s->wv["conv"] = crec.sessionId;
+        qWarning("aigptbot: grok 复用会话 id=%s", crec.sessionId.c_str());
+    } else if (s->req.newChat) {
+        aigptSessionInvalidate(s->sessKey);
+        qWarning("aigptbot: grok 用户新对话 → 丢弃旧会话");
+    }
     std::string body = "{\"message\":\"" + jsonEscape(s->req.text) + "\"";
     if (s->req.brief) { body += ",\"forceConcise\":true"; }
     body += "}";
-    sendWebHttp(s, "https://grok.com/rest/app-chat/conversations/new",
-                "POST", body, grokHeaders("/rest/app-chat/conversations/new"), 180, 60);
+    sendWebHttp(s, "https://grok.com" + path,
+                "POST", body, grokHeaders(path), 180, 60);
 }
 // ── chatgpt-web（实验性，协议见 docs/aigptbot-web-sources.md §6.4）──
 // prepare → 本地 PoW → finalize（Turnstile/so 本地不可解，预期失败并明确报错）
@@ -1679,7 +1819,8 @@ bool cgptSolvePow(const std::string& seed, const std::string& difficultyHex,
 }
 
 // 解析 f/conversation 的 OpenAI 风格 SSE（data: {"v":{...}}，取最后非空累计正文）
-bool parseCgptSse(const std::string& body, std::string& out, std::string& err) {
+bool parseCgptSse(const std::string& body, std::string& out, std::string& err,
+                  std::string* convOut = nullptr, std::string* msgOut = nullptr) {
     out.clear();
     err.clear();
     std::string last;
@@ -1705,8 +1846,16 @@ bool parseCgptSse(const std::string& body, std::string& out, std::string& err) {
             } else {
                 cJSON* v = cJSON_GetObjectItem(j, "v");
                 if (v && cJSON_IsObject(v)) {
+                    if (convOut) {
+                        const std::string c = jStr(v, "conversation_id");
+                        if (!c.empty()) { *convOut = c; }
+                    }
                     cJSON* msg = cJSON_GetObjectItem(v, "message");
                     if (msg && cJSON_IsObject(msg)) {
+                        if (msgOut) {
+                            const std::string mid = jStr(msg, "id");
+                            if (!mid.empty()) { *msgOut = mid; }
+                        }
                         cJSON* content = cJSON_GetObjectItem(msg, "content");
                         if (content && cJSON_IsObject(content)) {
                             cJSON* parts = cJSON_GetObjectItem(content, "parts");
@@ -1740,6 +1889,11 @@ bool parseCgptSse(const std::string& body, std::string& out, std::string& err) {
 void cgptOnDone(const HttpResponse& resp, Session* s, const AigptbotProvider& p) {
     if (s->step == 0) {
         // prepare
+        s->sessKey = webSessionKey(p);
+        if (s->req.newChat) {
+            aigptSessionInvalidate(s->sessKey);
+            qWarning("aigptbot: chatgpt 用户新对话 → 丢弃旧会话");
+        }
         if (resp.httpCode == 401 || resp.httpCode == 403) {
             webFail(s, p.name, "prepare 被拒（HTTP " + std::to_string(resp.httpCode)
                     + "，accessToken 无效？）");
@@ -1839,10 +1993,22 @@ void cgptOnDone(const HttpResponse& resp, Session* s, const AigptbotProvider& p)
             return;
         }
         std::string out, err;
-        if (!parseCgptSse(resp.body, out, err)) {
+        std::string conv, mid;
+        if (!parseCgptSse(resp.body, out, err, &conv, &mid)) {
             if (!resp.curlErrStr.empty()) { err += "（" + resp.curlErrStr + "）"; }
             webFail(s, p.name, err);
             return;
+        }
+        if (!s->sessKey.empty()) {
+            AigptSessionRecord rec;
+            aigptSessionGet(s->sessKey, rec);
+            if (!conv.empty()) { rec.sessionId = conv; }
+            if (!mid.empty()) { rec.parentId = mid; }
+            if (rec.createdAt == 0) { rec.createdAt = (long long)time(nullptr); }
+            rec.msgCount += 1;
+            aigptSessionPut(s->sessKey, rec);
+            qWarning("aigptbot: chatgpt 会话已更新 conv=%s parent=%s n=%lld",
+                     rec.sessionId.c_str(), rec.parentId.c_str(), (long long)rec.msgCount);
         }
         webSucceed(s, p.name, out);
         return;
@@ -1877,12 +2043,19 @@ void sendChatgpt(Session* s, const AigptbotProvider& p) {
         if (s->req.brief) {
             prompt = std::string("请尽量用最简洁的方式回答，简短直接，避免冗长。\n\n") + prompt;
         }
+        std::string convField, parentVal("null");
+        AigptSessionRecord crec;
+        if (!s->req.newChat && aigptSessionGet(s->sessKey, crec) && !crec.sessionId.empty()) {
+            convField = "\"conversation_id\":\"" + jsonEscape(crec.sessionId) + "\",";
+            if (!crec.parentId.empty()) { parentVal = "\"" + jsonEscape(crec.parentId) + "\""; }
+        }
         std::string body = "{\"action\":\"next\",\"messages\":[{\"id\":\"" + uuidV4()
             + "\",\"author\":{\"role\":\"user\"},"
               "\"content\":{\"content_type\":\"text\",\"parts\":[\""
             + jsonEscape(prompt)
             + "\"]},\"content_type\":\"text\"}],\"model\":\"auto\","
-              "\"parent_message_id\":null,\"timezone\":\"Asia/Shanghai\","
+            + convField
+            + "\"parent_message_id\":" + parentVal + ",\"timezone\":\"Asia/Shanghai\","
               "\"variant\":null,\"suggested_replies\":false}";
         sendWebHttp(s, "https://chatgpt.com/backend-api/f/conversation",
                     "POST", body, h, 180, 60);
@@ -2073,7 +2246,19 @@ void metaOnDone(const HttpResponse& resp, Session* s, const AigptbotProvider& p)
         if (!datr.empty())   { s->wv["datr"] = datr; }
         if (!jsDatr.empty()) { s->wv["_js_datr"] = jsDatr; }
         if (!csrf.empty())   { s->wv["abra_csrf"] = csrf; }
-        s->wv["conv"] = uuidV4();
+        // 会话复用：命中则复用 externalConversationId
+        s->sessKey = webSessionKey(p);
+        AigptSessionRecord crec;
+        if (!s->req.newChat && aigptSessionGet(s->sessKey, crec) && !crec.sessionId.empty()) {
+            s->wv["conv"] = crec.sessionId;
+            qWarning("aigptbot: meta-web 复用会话 conv=%s", crec.sessionId.c_str());
+        } else {
+            if (s->req.newChat) {
+                aigptSessionInvalidate(s->sessKey);
+                qWarning("aigptbot: meta-web 用户新对话 → 丢弃旧会话");
+            }
+            s->wv["conv"] = uuidV4();
+        }
         ++s->step;
         sendMetaWeb(s, p);
         return;
@@ -2119,6 +2304,16 @@ void metaOnDone(const HttpResponse& resp, Session* s, const AigptbotProvider& p)
         if (!parseMetaNdjson(resp.body, out, err)) {
             webFail(s, p.name, err.empty() ? std::string("回复为空") : err);
             return;
+        }
+        if (!s->sessKey.empty() && !s->wv["conv"].empty()) {
+            AigptSessionRecord rec;
+            aigptSessionGet(s->sessKey, rec);
+            rec.sessionId = s->wv["conv"];
+            if (rec.createdAt == 0) { rec.createdAt = (long long)time(nullptr); }
+            rec.msgCount += 1;
+            aigptSessionPut(s->sessKey, rec);
+            qWarning("aigptbot: meta-web 会话已更新 conv=%s n=%lld",
+                     rec.sessionId.c_str(), (long long)rec.msgCount);
         }
         webSucceed(s, p.name, out);
         return;

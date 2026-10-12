@@ -73,6 +73,7 @@ struct AigptbotRequest {
     bool brief = false;    // 简洁回复：附加简洁指令并限制 max_tokens
     bool thinking = false; // 深度思考（thinking_enabled；仅 deepseek-web 等支持）
     bool search = false;   // 联网搜索（search_enabled；仅 deepseek-web 等支持）
+    bool newChat = false;  // 手动「新对话」：丢弃缓存会话，强制新建一次
     long long localId = 0; // 回传定位：宿主侧 ChatElement
     int chatId = 0;
     std::string chatType;

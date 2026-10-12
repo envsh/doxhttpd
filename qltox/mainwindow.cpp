@@ -1963,10 +1963,12 @@ void MainWindow::handleAigptChatMessage(int64_t localId, const QString& text) {
     req.brief    = (mapValue(ctx, "brief") == "1");
     req.thinking = (mapValue(ctx, "thinking") == "1");
     req.search   = (mapValue(ctx, "search") == "1");
+    req.newChat  = (mapValue(ctx, "new_chat") == "1");
     req.localId  = localId;
     req.chatId   = currentChatId;
     req.chatType = typeStr;
     aigptbotChatStart(req, this);
+    if (req.newChat) { chatWidget->resetAttribKey(qFromUtf8("new_chat")); }
 }
 
 

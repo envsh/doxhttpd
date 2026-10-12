@@ -662,6 +662,7 @@ QMap<QString,QString> MessageAttribBar::values() const {
         out.insert(qFromUtf8("proto_type"), m_typeLabel->text());
     }
     for (int i = 0; i < m_items.size(); ++i) {
+        if (m_defs[i].key == QString::fromLatin1("new_chat")) { continue; }  // 一次性动作项，不持久化
         QString v = itemValue(i);
         if (m_defs[i].kind == MessageAttrDef::kCheck) {
             out.insert(m_defs[i].key, v);
@@ -681,6 +682,12 @@ QMap<QString,QString> MessageAttribBar::transmittableValues() const {
         out.insert(m_defs[i].key, v);
     }
     return out;
+}
+
+void MessageAttribBar::resetKey(const QString& key) {
+    for (int i = 0; i < m_defs.size(); ++i) {
+        if (m_defs[i].key == key) { setItemValue(i, m_defs[i].defValue); return; }
+    }
 }
 
 void MessageAttribBar::clear() {
@@ -945,6 +952,8 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
             searchDef.defValue = QString::fromLatin1("1");
             defs << searchDef;
         }
+        defs << checkDef("new_chat", qFromUtf8("新对话"),
+                         qFromUtf8("勾选后本条消息丢弃旧会话、开启全新会话；发送后自动复位"));
     } else if (type == kPastebinType) {
         QStringList psvc;  psvc << "any" << "all"
                                 << "pastebin.com" << "dpaste.com" << "0x0.st"
