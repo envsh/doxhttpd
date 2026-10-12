@@ -222,6 +222,7 @@ private:
     QPushButton* plusBtn;
     QString m_searchText;
     QString m_filterType;
+    std::vector<int> m_visibleRows;
     int m_itemHeight = 60;
     std::vector<QString> m_sortCriteria;
 };

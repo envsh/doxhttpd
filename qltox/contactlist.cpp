@@ -423,14 +423,14 @@ void ContactListView::setScrollY(int y) {
 }
 
 int ContactListView::totalHeight() const {
-    return m_widget->itemHeight() * m_widget->m_list.size();
+    return m_widget->itemHeight() * (int)m_widget->m_visibleRows.size();
 }
 
 int ContactListView::yToRow(int y) const {
     int h = m_widget->itemHeight();
     if (h <= 0) return 0;
     int row = y / h;
-    if (row >= m_widget->m_list.size()) row = m_widget->m_list.size() - 1;
+    if (row >= (int)m_widget->m_visibleRows.size()) row = (int)m_widget->m_visibleRows.size() - 1;
     if (row < 0) row = 0;
     return row;
 }
@@ -455,19 +455,20 @@ void ContactListView::paintEvent(QPaintEvent*) {
             }
             int firstRow = m_scrollY / h;
             int lastRow = (m_scrollY + viewH - 1) / h;
-            int sz = m_widget->m_list.size();
+            int sz = (int)m_widget->m_visibleRows.size();
             if (lastRow >= sz) lastRow = sz - 1;
-            for (int i = firstRow; i <= lastRow; ++i) {
-                RowData* rd = m_widget->m_list.at(i);
-                if (!rd || !m_widget->matchesFilter(*rd)) continue;
-                int y = i * h - m_scrollY;
+            for (int pos = firstRow; pos <= lastRow; ++pos) {
+                int mi = m_widget->m_visibleRows[pos];
+                RowData* rd = m_widget->m_list.at(mi);
+                if (!rd) continue;
+                int y = pos * h - m_scrollY;
                 if (rd->cachedWidth != width()) {
                     truncateRowData(rd, width());
                 }
                 uint32_t cp_emoji = typeToEmojiCp(rd->type);
                 QPixmap av = getCircularAvatar(cp_emoji, kAvatarSz - 4);
                 paintContactRow(bp, 0, y, width(), h,
-                                i == m_selIdx, rd->type, rd->name, rd->status,
+                                mi == m_selIdx, rd->type, rd->name, rd->status,
                                 rd->isConnected, rd->unread, rd->lastMessage, rd->timeStr,
                                 rd->pinnedIndex, rd->truncatedName, rd->truncatedMsg, av);
             }
@@ -488,13 +489,14 @@ void ContactListView::paintEvent(QPaintEvent*) {
         }
         int firstRow = m_scrollY / h;
         int lastRow = (m_scrollY + viewH - 1) / h;
-        int sz = m_widget->m_list.size();
+        int sz = (int)m_widget->m_visibleRows.size();
         if (lastRow >= sz) lastRow = sz - 1;
-        for (int i = firstRow; i <= lastRow; ++i) {
-            RowData* rd = m_widget->m_list.at(i);
-            if (!rd || !m_widget->matchesFilter(*rd)) continue;
-            int y = i * h - m_scrollY;
-            if (i == m_selIdx) {
+        for (int pos = firstRow; pos <= lastRow; ++pos) {
+            int mi = m_widget->m_visibleRows[pos];
+            RowData* rd = m_widget->m_list.at(mi);
+            if (!rd) continue;
+            int y = pos * h - m_scrollY;
+            if (mi == m_selIdx) {
                 uint32_t cp_emoji = typeToEmojiCp(rd->type);
                 QPixmap av = getCircularAvatar(cp_emoji, kAvatarSz - 4);
                 paintContactRow(p, 0, y, width(), h,
@@ -502,13 +504,13 @@ void ContactListView::paintEvent(QPaintEvent*) {
                                 rd->isConnected, rd->unread, rd->lastMessage, rd->timeStr,
                                 rd->pinnedIndex, rd->truncatedName, rd->truncatedMsg, av);
             } else {
-                if (i >= (int)m_rowCache.size() || m_rowCache[i].width != width()
-                    || m_rowCache[i].rowId != rd->id
-                    || m_rowCache[i].rowType != rd->type) {
-                    renderRowToCache(i, width());
+                if (mi >= (int)m_rowCache.size() || m_rowCache[mi].width != width()
+                    || m_rowCache[mi].rowId != rd->id
+                    || m_rowCache[mi].rowType != rd->type) {
+                    renderRowToCache(mi, width());
                 }
-                if (!m_rowCache[i].pix.isNull()) {
-                    p.drawPixmap(0, y, m_rowCache[i].pix);
+                if (!m_rowCache[mi].pix.isNull()) {
+                    p.drawPixmap(0, y, m_rowCache[mi].pix);
                 }
             }
         }
@@ -519,10 +521,11 @@ void ContactListView::paintEvent(QPaintEvent*) {
 void ContactListView::mousePressEvent(QMouseEvent* e) {
     int h = m_widget->itemHeight();
     if (h <= 0) return;
-    int row = (e->pos().y() + m_scrollY) / h;
-    if (row < 0 || row >= m_widget->m_list.size()) return;
+    int pos = (e->pos().y() + m_scrollY) / h;
+    if (pos < 0 || pos >= (int)m_widget->m_visibleRows.size()) return;
+    int row = m_widget->m_visibleRows[pos];
     RowData* rd = m_widget->m_list.at(row);
-    if (!rd || !m_widget->matchesFilter(*rd)) return;
+    if (!rd) return;
     m_selIdx = row;
     m_selId = rd->id;
     m_selType = rd->type;
@@ -749,7 +752,7 @@ void ContactListWidget::setContacts(ContactList& contacts) {
     }
 
     // 恢复滚动位置（钳位到新范围）
-    int totalH = m_list.size() * m_itemHeight;
+    int totalH = (int)m_visibleRows.size() * m_itemHeight;
     int viewH = m_view->height();
     int maxScroll = (totalH > viewH) ? totalH - viewH : 0;
     if (savedScrollY > maxScroll) { savedScrollY = maxScroll; }
@@ -976,7 +979,7 @@ void ContactListWidget::endBatch() {
 }
 
 void ContactListWidget::setViewScrollY(int y) {
-    int totalH = m_list.size() * m_itemHeight;
+    int totalH = (int)m_visibleRows.size() * m_itemHeight;
     int viewH = m_view->height();
     int maxScroll = totalH > viewH ? totalH - viewH : 0;
     m_view->setScrollY(std::max(0, std::min(y, maxScroll)));
@@ -987,14 +990,23 @@ void ContactListWidget::setViewScrollY(int y) {
 }
 
 void ContactListWidget::updateScrollBar() {
-    int totalH = m_list.size() * m_itemHeight;
+    int totalH = (int)m_visibleRows.size() * m_itemHeight;
     int viewH = m_view->height();
     int maxScroll = totalH > viewH ? totalH - viewH : 0;
     m_scrollBar->setRange(0, maxScroll);
     m_scrollBar->setPageStep(viewH);
+#ifdef QT3_BUILD
+    m_scrollBar->setShown(maxScroll > 0);
+#else
+    m_scrollBar->setVisible(maxScroll > 0);
+#endif
 }
 
 void ContactListWidget::refreshView() {
+    m_visibleRows.clear();
+    for (int i = 0; i < m_list.size(); ++i) {
+        if (matchesFilter(*m_list.at(i))) { m_visibleRows.push_back(i); }
+    }
     resolveSelection();
     updateScrollBar();
     int w = m_view->width();
@@ -1006,29 +1018,21 @@ void ContactListWidget::refreshView() {
         }
     }
 #else
-    int totalH = m_list.size() * m_itemHeight;
+    int totalH = (int)m_visibleRows.size() * m_itemHeight;
     int viewH  = m_view->height();
     int scrollY = m_view->scrollY();
     int firstRow = (totalH > 0 && viewH > 0) ? scrollY / m_itemHeight : 0;
     int lastRow  = (totalH > 0 && viewH > 0)
-        ? std::min((scrollY + viewH - 1) / m_itemHeight, m_list.size() - 1)
+        ? std::min((scrollY + viewH - 1) / m_itemHeight, (int)m_visibleRows.size() - 1)
         : -1;
-    for (int i = firstRow; i <= lastRow; ++i) {
-        RowData* rd = m_list.at(i);
+    for (int pos = firstRow; pos <= lastRow; ++pos) {
+        RowData* rd = m_list.at(m_visibleRows[pos]);
         if (rd && rd->cachedWidth != w) {
             m_view->truncateRowData(rd, w);
         }
     }
 #endif
-    int visible = 0;
-    if (m_searchText.isEmpty() && m_filterType.isEmpty()) {
-        visible = m_list.size();
-    } else {
-        for (int i = 0; i < m_list.size(); ++i) {
-            if (matchesFilter(*m_list.at(i))) ++visible;
-        }
-    }
-    countLabel->setText(QString::number(visible));
+    countLabel->setText(QString::number((int)m_visibleRows.size()));
     m_view->update();
 }
 
@@ -1042,7 +1046,11 @@ void ContactListWidget::resolveSelection() {
 
 void ContactListWidget::onSearchTextChanged(const QString& text) {
     m_searchText = text;
+    m_view->setScrollY(0);
     refreshView();
+    m_scrollBar->blockSignals(true);
+    m_scrollBar->setValue(0);
+    m_scrollBar->blockSignals(false);
 }
 
 void ContactListWidget::onTypeFilterMenuClicked() {
@@ -1096,7 +1104,11 @@ void ContactListWidget::onTypeFilterMenuClicked() {
     if (!selected) { return; }
     m_filterType = selected->data().toString();
 #endif
+    m_view->setScrollY(0);
     refreshView();
+    m_scrollBar->blockSignals(true);
+    m_scrollBar->setValue(0);
+    m_scrollBar->blockSignals(false);
 }
 
 void ContactListWidget::onSortMenuClicked() {
