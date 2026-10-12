@@ -15,12 +15,10 @@
 #include <qregion.h>
 #include <qbitmap.h>
 #include <qevent.h>
-#include <qcursor.h>
 #else
 #include <QPainterPath>
 #include <QBitmap>
 #include <QWheelEvent>
-#include <QCursor>
 #endif
 
 
@@ -616,7 +614,7 @@ void ContactListView::invalidateAllCaches() {
 // ========== ContactListWidget ==========
 
 ContactListWidget::ContactListWidget(QWidget* parent)
-    : QWidget(parent), contextItemId(-1), contextItemType(""), m_scrollBar(nullptr), searchClearBtn(nullptr)
+    : QWidget(parent), contextItemId(-1), contextItemType(""), m_scrollBar(nullptr)
 {
     QBoxLayout* layout = qNewBoxLayout(this, QBoxLayout::TopToBottom, 4, 1);
     qSetMargins(layout, 4, 2, 4, 2);
@@ -628,13 +626,7 @@ ContactListWidget::ContactListWidget(QWidget* parent)
     searchInput = new PlaceholderLineEdit(_("placeholders.search_contact"), this);
     connect(searchInput, SIGNAL(textChanged(const QString&)), this, SLOT(onSearchTextChanged(const QString&)));
     searchRow->addWidget(searchInput, 1);
-    searchClearBtn = new QLabel(qFromUtf8("✕"), searchInput);
-    searchClearBtn->setFixedSize(16, 16);
-    searchClearBtn->setAlignment(Qt::AlignCenter);
-    searchClearBtn->setCursor(QCursor(Qt::PointingHandCursor));
-    searchClearBtn->hide();
-    searchClearBtn->installEventFilter(this);
-    searchInput->installEventFilter(this);
+    searchInput->setClearButtonEnabled(true);
     typeFilterBtn = new QPushButton(_("modals.labels.type"), this);
     connect(typeFilterBtn, SIGNAL(clicked()), this, SLOT(onTypeFilterMenuClicked()));
     searchRow->addWidget(typeFilterBtn);
@@ -1055,39 +1047,11 @@ void ContactListWidget::resolveSelection() {
 
 void ContactListWidget::onSearchTextChanged(const QString& text) {
     m_searchText = text;
-    if (searchClearBtn) {
-        searchClearBtn->move(searchInput->width() - searchClearBtn->width() - 2,
-                             (searchInput->height() - searchClearBtn->height()) / 2);
-#ifdef QT3_BUILD
-        searchClearBtn->setShown(!text.isEmpty());
-#else
-        searchClearBtn->setVisible(!text.isEmpty());
-#endif
-    }
     m_view->setScrollY(0);
     refreshView();
     m_scrollBar->blockSignals(true);
     m_scrollBar->setValue(0);
     m_scrollBar->blockSignals(false);
-}
-
-bool ContactListWidget::eventFilter(QObject* watched, QEvent* event) {
-    if (watched == searchInput) {
-        if (event->type() == QEvent::KeyPress) {
-            QKeyEvent* ke = static_cast<QKeyEvent*>(event);
-            if (ke->key() == Qt::Key_Escape && !m_searchText.isEmpty()) {
-                searchInput->clear();
-                return true;
-            }
-        } else if (event->type() == QEvent::Resize && searchClearBtn) {
-            searchClearBtn->move(searchInput->width() - searchClearBtn->width() - 2,
-                                 (searchInput->height() - searchClearBtn->height()) / 2);
-        }
-    } else if (watched == searchClearBtn && event->type() == QEvent::MouseButtonPress) {
-        searchInput->clear();
-        return true;
-    }
-    return QWidget::eventFilter(watched, event);
 }
 
 void ContactListWidget::onTypeFilterMenuClicked() {

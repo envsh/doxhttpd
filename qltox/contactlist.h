@@ -191,9 +191,6 @@ private slots:
 public:
     void showContextMenuAt(int id, QString type, QString name, const QPoint& globalPos);
 
-protected:
-    bool eventFilter(QObject* watched, QEvent* event);
-
 private:
     void refreshView();
     void resolveSelection();
@@ -219,7 +216,6 @@ private:
     std::map<std::pair<int, std::string>, int> m_pinnedIndices;
 
     PlaceholderLineEdit* searchInput;
-    QLabel* searchClearBtn;
     QPushButton* typeFilterBtn;
     QLabel* countLabel;
     QPushButton* sortBtn;

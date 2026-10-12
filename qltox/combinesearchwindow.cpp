@@ -42,7 +42,8 @@ QString contactTypeLabel(const QString& type) {
     if (type == kTopicType)          { return qFromUtf8("主题"); }
     if (type == kFilesyncType)       { return qFromUtf8("文件同步"); }
     if (type == kClipboardType)      { return qFromUtf8("剪贴板"); }
-    if (type == kGomuksRoomType || type == kMtxliteRoomType) { return qFromUtf8("Matrix"); }
+    if (type == kGomuksRoomType)  { return qFromUtf8("Gomuks"); }
+    if (type == kMtxliteRoomType) { return qFromUtf8("Matrix"); }
     if (type == kImapMailType)       { return qFromUtf8("邮件"); }
     if (type == kBookmarkType)       { return qFromUtf8(kBookmarkName); }
     if (type == kAichatType)         { return qFromUtf8(kAichatName); }
