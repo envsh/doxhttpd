@@ -1675,7 +1675,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 if (dbRowid > 0) {
                     qDebug("redact: 更新 DB rowid=%lld messageId=%s chatId=%d chatType=%s",
                            (long long)dbRowid, evt->messageId.c_str(), evt->chatId,
-                           qFromUtf8(evt->chatType).data());
+                           evt->chatType.c_str());
                     MessageUpdate upd;
                     upd.hasRedacted = true;
                     upd.redacted = 1;
@@ -1683,7 +1683,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 } else {
                     qWarning("redact: 无已回填 rowid，跳过 DB 更新 msgId=%s chatId=%d chatType=%s",
                              evt->messageId.c_str(), evt->chatId,
-                             qFromUtf8(evt->chatType).data());
+                             evt->chatType.c_str());
                 }
                 ToastWidget::show(chatWidget, _("redact_success").arg(formatElapsedMs(evt->elapsedMs)), 2500);
             } else {

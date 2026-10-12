@@ -15,62 +15,32 @@ GIT_DIRTY = $$system(git -C $$PWD status --porcelain 2>/dev/null)
 
 QMAKE_MACOSX_DEPLOYMENT_TARGET = 11.7
 
-SOURCES = main.cpp mainwindow.cpp ../qlappcom/storage.cpp restapi.cpp ../qlappcom/eventpoller.cpp ../qlappcom/pasteuploader.cpp \
+SOURCES = main.cpp mainwindow.cpp restapi.cpp \
              chatwidget.cpp chatview.cpp chatbuffer.cpp contactlist.cpp selfinfo.cpp \
-             ../qlappcom/recorder.cpp \
              ../qlcomp/cJSON.c editinfodialog.cpp conferenceinvitedialog.cpp groupinvitedialog.cpp \
              friendinfodialog.cpp memberlistdialog.cpp logindialog.cpp \
-             ../qlappcom/imageinputconfirm.cpp messageinput.cpp messageattribbar.cpp ../qlappcom/sound.c ../qlappcom/loadingbar.cpp \
-              ../qlappcom/unknownparser.cpp ../qlappcom/photoviewer.cpp ../qlappcom/avatar_manager.cpp \
-               ../qlappcom/media_shmem_cache.cpp \
-               ../qlappcom/channel_db.cpp ../qlappcom/message_db.cpp \
-                ../qlappcom/pending_db.cpp ../qlappcom/cache_db.cpp ../qlappcom/cache_fs.cpp \
-                ../qlappcom/translate_util.cpp \
+             messageinput.cpp messageattribbar.cpp \
                  config.cpp \
                  msgdb_helper.cpp \
 translation_cache.cpp \
-                  ../qlappcom/fanyibot.cpp \
-../qlappcom/aigptbot.cpp \
-../qlappcom/websearchbot.cpp \
-                   ../qlappcom/aigpt_sessions.cpp \
-                   ../qlappcom/netproxy.cpp \
-                   ../qlappcom/webcreds.cpp \
-                   ../qlappcom/webcredsdialog.cpp \
                    statisticsdialog.cpp \
                  combinesearchwindow.cpp \
                  searchlistview.cpp \
-                 ../qlappcom/sticker_db.cpp ../qlappcom/stickerpicker.cpp ../qlappcom/stickermanager.cpp \
-                 ../qlappcom/seen_unknown.cpp \
                  metavars_cache.cpp \
                  ../3rdparty/barrust_bloom/bloom.c \
                  ../etapps/plugin_loader.cpp ../etapps/plugin_manager_dialog.cpp
 
-HEADERS = mainwindow.h ../qlappcom/storage.h restapi.h ../qlappcom/eventpoller.h ../qlappcom/pasteuploader.h \
+HEADERS = mainwindow.h restapi.h \
              chatwidget.h chatview.h chatbuffer.h contactlist.h selfinfo.h \
-             ../qlappcom/recorder.h \
              editinfodialog.h conferenceinvitedialog.h groupinvitedialog.h \
              friendinfodialog.h memberlistdialog.h logindialog.h \
-              ../qlappcom/imageinputconfirm.h messageinput.h messageattribbar.h ../qlappcom/sound.h ../qlappcom/loadingbar.h \
-               ../qlappcom/unknownparser.h ../qlappcom/photoviewer.h ../qlappcom/avatar_manager.h \
-               ../qlappcom/media_shmem_cache.h \
-               ../qlappcom/channel_db.h ../qlappcom/message_db.h \
-                ../qlappcom/pending_db.h ../qlappcom/cache_db.h ../qlappcom/cache_fs.h \
-                ../qlappcom/translate_util.h \
+              messageinput.h messageattribbar.h \
                  config.h version.h \
                  msgdb_helper.h \
                  translation_cache.h \
-                 ../qlappcom/fanyibot.h \
-../qlappcom/aigptbot.h \
-../qlappcom/websearchbot.h \
-                   ../qlappcom/aigpt_sessions.h \
-                   ../qlappcom/netproxy.h \
-                   ../qlappcom/webcreds.h \
-                   ../qlappcom/webcredsdialog.h \
                   statisticsdialog.h \
                  combinesearchwindow.h \
                  searchlistview.h \
-                 ../qlappcom/sticker_db.h ../qlappcom/stickerpicker.h ../qlappcom/stickermanager.h \
-                 ../qlappcom/seen_unknown.h \
                  metavars_cache.h \
                  ../3rdparty/bloom/bloom_filter.hpp \
                  ../3rdparty/barrust_bloom/bloom.h \
@@ -80,6 +50,7 @@ HEADERS = mainwindow.h ../qlappcom/storage.h restapi.h ../qlappcom/eventpoller.h
 # Qt4 uic 拒绝 <vbox>/<hbox> 等 Qt3 标签，且 Qt4 环境无 Qt3Support 库。
 include(../qlcomp/qlite.pri)
 include(../mdeditor/mdeditor.pri)
+include(../qlappcom/qlappcom.pri)
 
 # 使 qltox/ 中的 #include "compat34.h" 能找到 qlcomp/
 INCLUDEPATH += ../qlcomp ../qlappcom/
