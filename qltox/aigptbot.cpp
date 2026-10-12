@@ -1,6 +1,7 @@
 #include "aigptbot.h"
 #include "compatcore34.h"
 #include "eventpoller.h"
+#include "netproxy.h"
 #include "webcreds.h"
 #include "aigpt_sessions.h"
 #include "cJSON.h"
@@ -86,62 +87,62 @@ void webBrowserHeaders(std::map<std::string, std::string>& h) {
 // 名称字段 name 原样拷贝自 imageaiutil.cpp（startOpenAiVision 第一个参数）
 const AigptbotProvider kAigptProviders[] = {
     { kAigptbotPollinations,  "pollinations",    true,  false,   // 现已要求 key，any/all 跳过
-      "https://gen.pollinations.ai/v1/chat/completions", "openai" },
+      "https://gen.pollinations.ai/v1/chat/completions", "openai", kAigptbotWebNone, true },
     { kAigptbotPollinationsText,"pollinations(匿名)", false, true,
-      "https://text.pollinations.ai/openai/chat/completions", "openai" },
+      "https://text.pollinations.ai/openai/chat/completions", "openai", kAigptbotWebNone, true },
     { kAigptbotZhipu,         "智谱",            true,  false,
-      "https://open.bigmodel.cn/api/paas/v4/chat/completions", "" },
+      "https://open.bigmodel.cn/api/paas/v4/chat/completions", "", kAigptbotWebNone, false },
     { kAigptbotSiliconFlow,   "硅基流动",        true,  false,
-      "https://api.siliconflow.cn/v1/chat/completions", "" },
+      "https://api.siliconflow.cn/v1/chat/completions", "", kAigptbotWebNone, false },
     { kAigptbotNvidia,        "NVIDIA NIM",      true,  false,
-      "https://integrate.api.nvidia.com/v1/chat/completions", "" },
+      "https://integrate.api.nvidia.com/v1/chat/completions", "", kAigptbotWebNone, true },
     { kAigptbotOpenRouter,    "OpenRouter",      true,  false,
-      "https://openrouter.ai/api/v1/chat/completions", "" },
+      "https://openrouter.ai/api/v1/chat/completions", "", kAigptbotWebNone, true },
     { kAigptbotBlockRun,      "BlockRun",        false, true,
-      "https://blockrun.ai/api/v1/chat/completions", "nvidia/mistral-nemotron" },
+      "https://blockrun.ai/api/v1/chat/completions", "nvidia/mistral-nemotron", kAigptbotWebNone, true },
     { kAigptbotLlm7,          "LLM7",            true,  false,
-      "https://api.llm7.io/v1/chat/completions", "" },
+      "https://api.llm7.io/v1/chat/completions", "", kAigptbotWebNone, true },
     { kAigptbotCloudflare,    "Cloudflare",      true,  false,
-      "https://api.cloudflare.com/client/v4/accounts/%1/ai/v1/chat/completions", "" },
+      "https://api.cloudflare.com/client/v4/accounts/%1/ai/v1/chat/completions", "", kAigptbotWebNone, true },
     { kAigptbotDashScope,     "百炼",            true,  false,
-      "https://dashscope.aliyun.com/compatible-mode/v1/chat/completions", "" },
+      "https://dashscope.aliyun.com/compatible-mode/v1/chat/completions", "", kAigptbotWebNone, false },
     { kAigptbotOvh,           "OVH",             true, true,
-      "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions", "Qwen3.6-27B" },
+      "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions", "Qwen3.6-27B", kAigptbotWebNone, true },
     { kAigptbotVolcengine,    "豆包",            true,  false,
-      "https://ark.cn-beijing.volces.com/api/v3/chat/completions", "" },
+      "https://ark.cn-beijing.volces.com/api/v3/chat/completions", "", kAigptbotWebNone, false },
     { kAigptbotModelScope,    "ModelScope(国内)", true, false,
-      "https://api-inference.modelscope.cn/v1/chat/completions", "" },
+      "https://api-inference.modelscope.cn/v1/chat/completions", "", kAigptbotWebNone, false },
     { kAigptbotModelScopeIntl,"ModelScope(国际)", true, false,
-      "https://api-inference.modelscope.ai/v1/chat/completions", "" },
+      "https://api-inference.modelscope.ai/v1/chat/completions", "", kAigptbotWebNone, true },
     { kAigptbotGroq,          "Groq",            true,  false,
-      "https://api.groq.com/openai/v1/chat/completions", "" },
+      "https://api.groq.com/openai/v1/chat/completions", "", kAigptbotWebNone, true },
     { kAigptbotHuggingFace,   "HuggingFace",     true,  false,
-      "https://router.huggingface.co/v1/chat/completions", "" },
+      "https://router.huggingface.co/v1/chat/completions", "", kAigptbotWebNone, true },
     { kAigptbotGemini,        "Gemini",          true,  false,
-      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "" },
+      "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "", kAigptbotWebNone, true },
     { kAigptbotOllama,        "Ollama 本地",     false, true,
-      "http://localhost:11434/v1/chat/completions", "qwen2.5" },
+      "http://localhost:11434/v1/chat/completions", "qwen2.5", kAigptbotWebNone, false },
     { kAigptbotZai,           "Z.ai(国际)",      true,  false,
-      "https://api.z.ai/api/paas/v4/chat/completions", "" },
+      "https://api.z.ai/api/paas/v4/chat/completions", "", kAigptbotWebNone, true },
     { kAigptbotGroqViaCf,     "groq-viacf",      true,  false,
-      "https://gateway.ai.cloudflare.com/v1/%1/%2/groq/chat/completions", "" },
+      "https://gateway.ai.cloudflare.com/v1/%1/%2/groq/chat/completions", "", kAigptbotWebNone, true },
     { kAigptbotGeminiViaCf,   "gemini-viacf",    true,  false,
-      "https://gateway.ai.cloudflare.com/v1/%1/%2/compat/chat/completions", "" },
+      "https://gateway.ai.cloudflare.com/v1/%1/%2/compat/chat/completions", "", kAigptbotWebNone, true },
     { kAigptbotAiHorde,       "aihorde",         true,  false,
-      "", "" }, // 不走 OpenAI 兼容
+      "", "", kAigptbotWebNone, true }, // 不走 OpenAI 兼容
     { kAigptbotMetaApi,       "meta",            true,  false,
-      "https://api.meta.ai/v1/chat/completions", "muse-spark-1.3" },
+      "https://api.meta.ai/v1/chat/completions", "muse-spark-1.3", kAigptbotWebNone, true },
     // ── web 版直连（不走 OpenAI 协议；webKind 分派 sendWebHost）──
     { kAigptbotDeepseekWeb,   "deepseek-web",    false, true,
-      "https://chat.deepseek.com", "", kAigptbotWebDeepseek },
+      "https://chat.deepseek.com", "", kAigptbotWebDeepseek, false },
     { kAigptbotGeminiWeb,     "gemini-web",      false, true,
-      "https://gemini.google.com", "", kAigptbotWebGemini },
+      "https://gemini.google.com", "", kAigptbotWebGemini, true },
     { kAigptbotGrokWeb,       "grok-web",        false, true,
-      "https://grok.com", "", kAigptbotWebGrok },
+      "https://grok.com", "", kAigptbotWebGrok, true },
     { kAigptbotChatgptWeb,    "chatgpt-web",     false, true,
-      "https://chatgpt.com", "", kAigptbotWebChatgpt },
+      "https://chatgpt.com", "", kAigptbotWebChatgpt, true },
     { kAigptbotMetaWeb,       "meta-web",        false, true,
-      "https://www.meta.ai", "", kAigptbotWebMeta },
+      "https://www.meta.ai", "", kAigptbotWebMeta, true },
 };
 const int kAigptProviderCount = int(sizeof(kAigptProviders) / sizeof(kAigptProviders[0]));
 
@@ -349,6 +350,9 @@ void sendHttp(Session* s, const std::string& url, const std::string& body,
               const std::map<std::string, std::string>& headers) {
     HttpRequest req(url, "POST", body, 51, headers);
     req.followRedirects = true;
+    if (!s->cands.empty() && s->index >= 0 && s->index < (int)s->cands.size()) {
+        req.proxy = netProxyFor(s->cands[s->index]->needsProxy);
+    }
     EventPoller::addRequest(req, onDone, s);
 }
 
@@ -590,6 +594,9 @@ void sendWebHttp(Session* s, const std::string& url, const std::string& method,
                  int timeoutSec, int stallSec) {
     HttpRequest req(url, method, body, timeoutSec, headers, stallSec);
     req.followRedirects = true;
+    if (!s->cands.empty() && s->index >= 0 && s->index < (int)s->cands.size()) {
+        req.proxy = netProxyFor(s->cands[s->index]->needsProxy);
+    }
     EventPoller::addRequest(req, onWebDone, s);
 }
 

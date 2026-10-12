@@ -21,6 +21,7 @@ struct FanyibotEngine {
     FanyibotEngineId id;
     const char* name;      // msedge / google / youdao / yandex / deepl / deepl-web
     bool unsupported;      // true=保留属性选项但选中即报错（deepl 需官方 auth key；deepl-web 免鉴权可用）
+    bool needsProxy;       // true=该引擎需经用户配置的代理访问（境外站点）
 };
 
 const std::vector<FanyibotEngine>& fanyibotEngines();

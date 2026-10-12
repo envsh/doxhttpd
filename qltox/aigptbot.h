@@ -59,6 +59,7 @@ struct AigptbotProvider {
     const char* baseUrl;        // 完整 chat/completions URL（CF Gateway 含模板化 %1/%2）
     const char* modelDefault;   // 文本默认模型名（可为空字符串）
     AigptbotWebKind webKind;    // 末位：非 None 时走 sendWebHost 分派（聚合初始化省略=0，存量表行不动）
+    bool needsProxy;            // 末位：true=该 provider 需经用户配置的代理访问（境外站点）
 };
 
 const std::vector<AigptbotProvider>& aigptbotProviders();

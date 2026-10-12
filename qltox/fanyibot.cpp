@@ -1,6 +1,7 @@
 #include "fanyibot.h"
 #include "compatcore34.h"
 #include "eventpoller.h"
+#include "netproxy.h"
 #include "cJSON.h"
 
 #include <qapplication.h>
@@ -26,13 +27,14 @@ extern "C" {
 namespace {
 
 // ── 引擎静态表（每次请求随机取序；google 暂禁，保留条目）──
+// needsProxy：境外引擎走代理（google/yandex/deepl 系）
 const FanyibotEngine kEngines[] = {
-    { kFanyibotMsedge, "msedge", false },
-    { kFanyibotGoogle, "google", true  },
-    { kFanyibotYoudao, "youdao", false },
-    { kFanyibotYandex, "yandex", false },
-    { kFanyibotDeepl,  "deepl",  true  },
-    { kFanyibotDeeplWeb, "deepl-web", false },
+    { kFanyibotMsedge, "msedge", false, false },
+    { kFanyibotGoogle, "google", true,  true  },
+    { kFanyibotYoudao, "youdao", false, false },
+    { kFanyibotYandex, "yandex", false, true  },
+    { kFanyibotDeepl,  "deepl",  true,  true  },
+    { kFanyibotDeeplWeb, "deepl-web", false, true },
 };
 const int kEngineCount = int(sizeof(kEngines) / sizeof(kEngines[0]));
 
@@ -735,6 +737,9 @@ void sendHttp(Session* s, const std::string& url, const std::string& method,
               bool follow = true) {
     HttpRequest req(url, method, body, 20, headers);
     req.followRedirects = follow;
+    if (!s->cands.empty() && s->index >= 0 && s->index < (int)s->cands.size()) {
+        req.proxy = netProxyFor(s->cands[s->index]->needsProxy);
+    }
     EventPoller::addRequest(req, onDone, s);
 }
 

@@ -32,6 +32,7 @@ translation_cache.cpp \
                   fanyibot.cpp \
 aigptbot.cpp \
                    aigpt_sessions.cpp \
+                   netproxy.cpp \
                    webcreds.cpp \
                    webcredsdialog.cpp \
                    statisticsdialog.cpp \
@@ -60,6 +61,7 @@ HEADERS = mainwindow.h storage.h restapi.h eventpoller.h pasteuploader.h \
                  fanyibot.h \
 aigptbot.h \
                    aigpt_sessions.h \
+                   netproxy.h \
                    webcreds.h \
                    webcredsdialog.h \
                   statisticsdialog.h \

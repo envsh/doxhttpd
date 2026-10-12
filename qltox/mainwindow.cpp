@@ -77,6 +77,7 @@
 #include <qtimer.h>
 #include <qlabel.h>
 #include "ConfigDialog.h"
+#include "netproxy.h"
 #include "DialogPopupAnimator.h"
 #include <qpushbutton.h>
 #include <qlineedit.h>
@@ -363,6 +364,9 @@ MainWindow::MainWindow(QWidget* parent)
     m_tray = nullptr;
     m_forceQuit = false;
     m_macShotProc = nullptr;
+
+    // 启动时应用已保存的代理设置（HTTP 层：仅标记 needsProxy 的 provider 走代理）
+    applyProxySettings();
     
     // 设置窗口
     qSetWindowTitle(this, _("app_title"));
@@ -4466,11 +4470,21 @@ void MainWindow::openSettings() {
         "http_request_parral", 1,
         qFromUtf8("HTTP请求并行数"), 1, 5, network);
     network->addLabeledControl(httpParallel->label(), httpParallel->spinBox());
+    BoolConfigItem* proxyEnabled = new BoolConfigItem(
+        "network/proxyEnabled", false,
+        qFromUtf8("启用代理"), network);
+    network->addWidget(proxyEnabled->checkBox());
+    StringConfigItem* proxyUrl = new StringConfigItem(
+        "network/proxyUrl", "",
+        qFromUtf8("代理地址 (http://host:port 或 socks5://host:port)"), network);
+    network->addLabeledControl(proxyUrl->label(), proxyUrl->lineEdit());
     network->addStretch();
     dlg->addCategory(qFromUtf8("网络"), network);
     dlg->registerConfigItem(timeout);
     dlg->registerConfigItem(retryInterval);
     dlg->registerConfigItem(httpParallel);
+    dlg->registerConfigItem(proxyEnabled);
+    dlg->registerConfigItem(proxyUrl);
 
     // --- 其他 ---
     CategoryPage* other = new CategoryPage(qFromUtf8("其他"), dlg);
@@ -4565,6 +4579,14 @@ void MainWindow::openSettings() {
     dlg->show();
 }
 
+void MainWindow::applyProxySettings() {
+    const bool enabled = ConfigDialog::settingBool("network/proxyEnabled", false);
+    const QString url = ConfigDialog::settingString("network/proxyUrl", "");
+    const std::string urlStd(qToUtf8(url).data());
+    netProxySet(enabled, urlStd);
+    qWarning("proxy: enabled=%d url=%s", (int)enabled, urlStd.c_str());
+}
+
 void MainWindow::onSettingsSaved(const SettingsChangedMap& changed) {
     if (changed.isEmpty()) { return; }
     qWarning("Settings changed (%d keys):", changed.size());
@@ -4589,6 +4611,9 @@ void MainWindow::onSettingsSaved(const SettingsChangedMap& changed) {
             delete m_sleepBlocker;
             m_sleepBlocker = nullptr;
         }
+    }
+    if (changed.contains("network/proxyEnabled") || changed.contains("network/proxyUrl")) {
+        applyProxySettings();
     }
 }
 

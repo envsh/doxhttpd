@@ -1,6 +1,7 @@
 #include "pasteuploader.h"
 #include "compatcore34.h"
 #include "eventpoller.h"
+#include "netproxy.h"
 #include "cJSON.h"
 
 #include <qapplication.h>
@@ -18,21 +19,22 @@
 namespace {
 
 // ── 服务静态表（顺序 = provider="all" 的固定尝试序）──
+// 末位 needsProxy：境外服务走代理（mhimg.cn 为国内，直连）
 const PasteHost kHosts[] = {
     { kPasteHostDpaste,      "dpaste.com",   true,  false, false, false,
-      kPasteExp1d | kPasteExp1w | kPasteExp1m | kPasteExp1y, false, false },
-    { kPasteHostCatbox,      "catbox",       true,  true,  true,  true,  kPasteExpNever, false, true },
+      kPasteExp1d | kPasteExp1w | kPasteExp1m | kPasteExp1y, false, false, true },
+    { kPasteHostCatbox,      "catbox",       true,  true,  true,  true,  kPasteExpNever, false, true, true },
     { kPasteHost0x0,         "0x0.st",       true,  true,  true,  true,
-      kPasteExp1h | kPasteExp1d | kPasteExp1w | kPasteExp1m | kPasteExp1y, false, true },
+      kPasteExp1h | kPasteExp1d | kPasteExp1w | kPasteExp1m | kPasteExp1y, false, true, true },
     { kPasteHostTransferSh,  "transfer.sh",  true,  true,  true,  true,
-      kPasteExp1d | kPasteExp1w | kPasteExp1m | kPasteExp1y, false, true },
-    { kPasteHostMhimg,       "mhimg.cn",     false, true,  false, false, kPasteExp1h, false, false },
-    { kPasteHostScdnIo,      "img.scdn.io",  false, true,  true,  false, kPasteExpNever, false, true },
-    { kPasteHostTmpfileLink, "tmpfile.link", true,  true,  true,  true,  kPasteExpNever, false, false },
-    { kPasteHostTempfileOrg, "tempfile.org", true,  true,  true,  true,  kPasteExpNever, false, false },
-    { kPasteHostStorageTo,   "storage.to",   true,  true,  true,  true,  kPasteExpNever, false, false },
-    { kPasteHostLitterbox,   "litterbox",    true,  true,  true,  true,  kPasteExp1h, false, false },
-    { kPasteHostPastebinCom, "pastebin.com", false, false, false, false, 0, true, false },
+      kPasteExp1d | kPasteExp1w | kPasteExp1m | kPasteExp1y, false, true, true },
+    { kPasteHostMhimg,       "mhimg.cn",     false, true,  false, false, kPasteExp1h, false, false, false },
+    { kPasteHostScdnIo,      "img.scdn.io",  false, true,  true,  false, kPasteExpNever, false, true, true },
+    { kPasteHostTmpfileLink, "tmpfile.link", true,  true,  true,  true,  kPasteExpNever, false, false, true },
+    { kPasteHostTempfileOrg, "tempfile.org", true,  true,  true,  true,  kPasteExpNever, false, false, true },
+    { kPasteHostStorageTo,   "storage.to",   true,  true,  true,  true,  kPasteExpNever, false, false, true },
+    { kPasteHostLitterbox,   "litterbox",    true,  true,  true,  true,  kPasteExp1h, false, false, true },
+    { kPasteHostPastebinCom, "pastebin.com", false, false, false, false, 0, true, false, true },
 };
 const int kHostCount = int(sizeof(kHosts) / sizeof(kHosts[0]));
 
@@ -338,6 +340,9 @@ void sendHttp(Session* s, const std::string& url, const std::string& method,
               const std::map<std::string, std::string>& headers) {
     HttpRequest req(url, method, body, 30, headers);
     req.followRedirects = true;
+    if (!s->cands.empty() && s->index >= 0 && s->index < (int)s->cands.size()) {
+        req.proxy = netProxyFor(s->cands[s->index]->needsProxy);
+    }
     EventPoller::addRequest(req, onDone, s);
 }
 

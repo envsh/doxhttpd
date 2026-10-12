@@ -178,6 +178,11 @@ CURL* EventPoller::buildHandle(const HttpRequest& req,
     curl_easy_setopt(easy, CURLOPT_FRESH_CONNECT, 1L);
     curl_easy_setopt(easy, CURLOPT_SSL_SESSIONID_CACHE, 0L);
 
+    // 代理：仅非空时设置（libcurl 按 scheme 自动识别 http/https/socks5）
+    if (!req.proxy.empty()) {
+        curl_easy_setopt(easy, CURLOPT_PROXY, req.proxy.c_str());
+    }
+
     if (req.lowSpeedLimit > 0 && req.lowSpeedTime > 0) {
         curl_easy_setopt(easy, CURLOPT_LOW_SPEED_LIMIT, req.lowSpeedLimit);
         curl_easy_setopt(easy, CURLOPT_LOW_SPEED_TIME, req.lowSpeedTime);

@@ -377,6 +377,9 @@ struct HttpRequest {
     int connectTimeoutSec = 0;   // 建连阶段超时（秒）；0=用系统默认；切网后重试快速失败
     int delayMs = 0;          // 延迟调度毫秒；>0 时 delayMs 后才真正发出（非阻塞，pump 照常运转）
     bool followRedirects = false;   // 是否跟随 3xx（默认关，保持既有请求行为不变）
+    // 代理 URL（http://host:port 或 socks5://host:port）；空=直连。
+    // 由调用方按 provider 的 needsProxy 标记 + 全局设置填充。
+    std::string proxy;
     std::map<std::string, std::string> extraHeaders;
     // 下载进度回调（poller 线程触发；100ms 节流在 xferinfoCb 内处理）
     void (*progress)(long long received, long long total,

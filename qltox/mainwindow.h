@@ -91,6 +91,7 @@ protected slots:
     void onMacShotDone();
     void renderHistoryMessages(const std::vector<HistoryMessage>& messages);
     void openSettings();
+    void applyProxySettings();      // 从设置读取代理并推送到 HTTP 层
     void openStickerManager();
     void openStatistics();
     void openWebCreds();
