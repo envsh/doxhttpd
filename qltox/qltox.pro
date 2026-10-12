@@ -15,62 +15,62 @@ GIT_DIRTY = $$system(git -C $$PWD status --porcelain 2>/dev/null)
 
 QMAKE_MACOSX_DEPLOYMENT_TARGET = 11.7
 
-SOURCES = main.cpp mainwindow.cpp ../qlappcom/storage.cpp restapi.cpp ../qlappcom/eventpoller.cpp pasteuploader.cpp \
+SOURCES = main.cpp mainwindow.cpp ../qlappcom/storage.cpp restapi.cpp ../qlappcom/eventpoller.cpp ../qlappcom/pasteuploader.cpp \
              chatwidget.cpp chatview.cpp chatbuffer.cpp contactlist.cpp selfinfo.cpp \
-             recorder.cpp \
+             ../qlappcom/recorder.cpp \
              ../qlcomp/cJSON.c editinfodialog.cpp conferenceinvitedialog.cpp groupinvitedialog.cpp \
              friendinfodialog.cpp memberlistdialog.cpp logindialog.cpp \
-             imageinputconfirm.cpp messageinput.cpp messageattribbar.cpp sound.c loadingbar.cpp \
-              ../qlappcom/unknownparser.cpp photoviewer.cpp avatar_manager.cpp \
-               media_shmem_cache.cpp \
+             ../qlappcom/imageinputconfirm.cpp messageinput.cpp messageattribbar.cpp ../qlappcom/sound.c ../qlappcom/loadingbar.cpp \
+              ../qlappcom/unknownparser.cpp ../qlappcom/photoviewer.cpp ../qlappcom/avatar_manager.cpp \
+               ../qlappcom/media_shmem_cache.cpp \
                ../qlappcom/channel_db.cpp ../qlappcom/message_db.cpp \
                 ../qlappcom/pending_db.cpp ../qlappcom/cache_db.cpp ../qlappcom/cache_fs.cpp \
-                translate_util.cpp \
+                ../qlappcom/translate_util.cpp \
                  config.cpp \
                  msgdb_helper.cpp \
 translation_cache.cpp \
-                  fanyibot.cpp \
-aigptbot.cpp \
-websearchbot.cpp \
-                   aigpt_sessions.cpp \
-                   netproxy.cpp \
-                   webcreds.cpp \
-                   webcredsdialog.cpp \
+                  ../qlappcom/fanyibot.cpp \
+../qlappcom/aigptbot.cpp \
+../qlappcom/websearchbot.cpp \
+                   ../qlappcom/aigpt_sessions.cpp \
+                   ../qlappcom/netproxy.cpp \
+                   ../qlappcom/webcreds.cpp \
+                   ../qlappcom/webcredsdialog.cpp \
                    statisticsdialog.cpp \
                  combinesearchwindow.cpp \
                  searchlistview.cpp \
-                 ../qlappcom/sticker_db.cpp stickerpicker.cpp stickermanager.cpp \
-                 seen_unknown.cpp \
+                 ../qlappcom/sticker_db.cpp ../qlappcom/stickerpicker.cpp ../qlappcom/stickermanager.cpp \
+                 ../qlappcom/seen_unknown.cpp \
                  metavars_cache.cpp \
                  ../3rdparty/barrust_bloom/bloom.c \
                  ../etapps/plugin_loader.cpp ../etapps/plugin_manager_dialog.cpp
 
-HEADERS = mainwindow.h ../qlappcom/storage.h restapi.h ../qlappcom/eventpoller.h pasteuploader.h \
+HEADERS = mainwindow.h ../qlappcom/storage.h restapi.h ../qlappcom/eventpoller.h ../qlappcom/pasteuploader.h \
              chatwidget.h chatview.h chatbuffer.h contactlist.h selfinfo.h \
-             recorder.h \
+             ../qlappcom/recorder.h \
              editinfodialog.h conferenceinvitedialog.h groupinvitedialog.h \
              friendinfodialog.h memberlistdialog.h logindialog.h \
-              imageinputconfirm.h messageinput.h messageattribbar.h sound.h loadingbar.h \
-               ../qlappcom/unknownparser.h photoviewer.h avatar_manager.h \
-               media_shmem_cache.h \
+              ../qlappcom/imageinputconfirm.h messageinput.h messageattribbar.h ../qlappcom/sound.h ../qlappcom/loadingbar.h \
+               ../qlappcom/unknownparser.h ../qlappcom/photoviewer.h ../qlappcom/avatar_manager.h \
+               ../qlappcom/media_shmem_cache.h \
                ../qlappcom/channel_db.h ../qlappcom/message_db.h \
                 ../qlappcom/pending_db.h ../qlappcom/cache_db.h ../qlappcom/cache_fs.h \
-                translate_util.h \
+                ../qlappcom/translate_util.h \
                  config.h version.h \
                  msgdb_helper.h \
                  translation_cache.h \
-                 fanyibot.h \
-aigptbot.h \
-websearchbot.h \
-                   aigpt_sessions.h \
-                   netproxy.h \
-                   webcreds.h \
-                   webcredsdialog.h \
+                 ../qlappcom/fanyibot.h \
+../qlappcom/aigptbot.h \
+../qlappcom/websearchbot.h \
+                   ../qlappcom/aigpt_sessions.h \
+                   ../qlappcom/netproxy.h \
+                   ../qlappcom/webcreds.h \
+                   ../qlappcom/webcredsdialog.h \
                   statisticsdialog.h \
                  combinesearchwindow.h \
                  searchlistview.h \
-                 ../qlappcom/sticker_db.h stickerpicker.h stickermanager.h \
-                 seen_unknown.h \
+                 ../qlappcom/sticker_db.h ../qlappcom/stickerpicker.h ../qlappcom/stickermanager.h \
+                 ../qlappcom/seen_unknown.h \
                  metavars_cache.h \
                  ../3rdparty/bloom/bloom_filter.hpp \
                  ../3rdparty/barrust_bloom/bloom.h \

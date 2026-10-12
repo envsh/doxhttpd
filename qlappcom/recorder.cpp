@@ -39,13 +39,13 @@ bool MediaRecorder::start(int kind, QString* outFile) {
     QString file;
     QStringList a;
     if (kind == kAudio) {
-        file = "/tmp/qltox_audio_" + QString::number((long)::time(0))
+        file = "/tmp/qlapp_audio_" + QString::number((long)::time(0))
              + "_" + QString::number((long)::getpid()) + ".aac";
         a << "-y" << "-f" << "alsa" << "-i" << "default" << "-c:a" << "aac" << file;
     } else if (kind == kScreen) {
         QString display = QString::fromLocal8Bit(::getenv("DISPLAY"));
         if (display.isEmpty()) { return false; }
-        file = "/tmp/qltox_screen_" + QString::number((long)::time(0))
+        file = "/tmp/qlapp_screen_" + QString::number((long)::time(0))
              + "_" + QString::number((long)::getpid()) + ".mp4";
         a << "-y" << "-f" << "x11grab" << "-i" << display
           << "-c:v" << "libx264" << "-preset" << "ultrafast" << "-pix_fmt" << "yuv420p"
