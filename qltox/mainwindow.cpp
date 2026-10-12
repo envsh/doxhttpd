@@ -1213,7 +1213,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 return t;
             };
             for (size_t i = 0; i < evt->items.size() && i < 3; ++i) {
-                if (i) { ackText += qFromUtf8("\n"); }
+                if (i) { ackText += qFromUtf8("\n\n"); }
                 ackText += QString::number((int)(i + 1)) + qFromUtf8(". ")
                         + oneLine(qFromUtf8(evt->items[i].title.c_str())) + qFromUtf8("\n")
                         + oneLine(qFromUtf8(evt->items[i].url.c_str()));
@@ -1222,7 +1222,7 @@ void MainWindow::customEvent(CustomEventBase* event) {
                 }
             }
             if (!evt->backendUsed.empty()) {
-                ackText += " -- " + qFromUtf8(evt->backendUsed.c_str());
+                ackText += qFromUtf8("\n\n-- ") + qFromUtf8(evt->backendUsed.c_str());
             }
             ack.messageText = ackText;
             ack.category = "self";
