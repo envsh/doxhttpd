@@ -22,6 +22,7 @@ if(ANDROID)
 endif()
 
 set(qlapp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qltox)
+set(qlappcom_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qlappcom)
 set(qlcomp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qlcomp)
 
 qt_add_executable(qsktox
@@ -71,22 +72,23 @@ qt_add_executable(qsktox
     src/mytaphandler.cpp
     src/myscrollarea.h
     src/myscrollarea.cpp
-    ${qlapp_dir}/cJSON.c
-    ${qlapp_dir}/message_db.cpp
-    ${qlapp_dir}/storage.cpp
-    ${qlapp_dir}/channel_db.cpp
-    ${qlapp_dir}/pending_db.cpp
-    ${qlapp_dir}/sticker_db.cpp
-    ${qlapp_dir}/cache_db.cpp
-    ${qlapp_dir}/cache_fs.cpp
-    ${qlapp_dir}/eventpoller.cpp
-    ${qlapp_dir}/unknownparser.cpp
+    ${qlappcom_dir}/message_db.cpp
+    ${qlappcom_dir}/storage.cpp
+    ${qlappcom_dir}/channel_db.cpp
+    ${qlappcom_dir}/pending_db.cpp
+    ${qlappcom_dir}/sticker_db.cpp
+    ${qlappcom_dir}/cache_db.cpp
+    ${qlappcom_dir}/cache_fs.cpp
+    ${qlappcom_dir}/eventpoller.cpp
+    ${qlappcom_dir}/unknownparser.cpp
+    ${qlcomp_dir}/tagutil.cpp
     ${qlcomp_dir}/compatcore34.cpp
     ${qlcomp_dir}/limelog.cpp
     ${qlcomp_dir}/assertf.cpp
     ${qlcomp_dir}/generic_slot.cpp
     ${qlcomp_dir}/qthooks.cpp
     ${qlcomp_dir}/md5.c
+    ${qlcomp_dir}/cJSON.c
     ${qlcomp_dir}/qcrc64.cpp
 )
 
@@ -95,6 +97,7 @@ target_include_directories(qsktox PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/include
     ${qlapp_dir}
+    ${qlappcom_dir}
     ${qlcomp_dir}
 )
 
