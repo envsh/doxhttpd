@@ -1,6 +1,7 @@
 #include "messageattribbar.h"
 #include "pureconsts.hpp"   // 类型常量 kImapMailType / kGomuksRoomType / ...
 #include "aigptbot.h"
+#include "websearchbot.h"
 #include "lambdaslot.h"
 #include <qframe.h>
 #include <qclipboard.h>
@@ -954,6 +955,24 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
         }
         defs << checkDef("new_chat", qFromUtf8("新对话"),
                          qFromUtf8("勾选后本条消息丢弃旧会话、开启全新会话；发送后自动复位"));
+    } else if (type == kWebsearchType) {
+        QStringList ws;  ws << "any" << "google" << "bing" << "duckduckgo" << "yandex" << "sogou";
+        defs << comboDef("backend", qFromUtf8("搜索后端"), ws, "any",
+                         qFromUtf8("网页搜索后端：any=随机取序逐个尝试，首个成功即止（默认） / google / bing / "
+                                   "duckduckgo / yandex / sogou=只用该后端。零认证，客户端直连匿名搜索页，"
+                                   "境外后端按全局代理设置访问，sogou 国内直连"));
+        QStringList lw;
+        QStringList ld;
+        const char* codes[] = { "zh", "ja", "ko", "en", "ru", "de", "fr", "ar" };
+        for (size_t i = 0; i < sizeof(codes) / sizeof(codes[0]); ++i) {
+            lw << qFromUtf8(codes[i]);
+            ld << qFromUtf8(websearchLangDisplay(codes[i]));
+        }
+        MessageAttrDef langDef = comboDef("lang", qFromUtf8("搜索语言"), lw, "zh",
+                                          qFromUtf8("搜索结果语言（zh=中文，默认）：zh / 日本語 / 한국어 / English / "
+                                                    "Русский / Deutsch / Français / العربية；sogou 固定中文不随语言改变"));
+        langDef.displayOptions = ld;
+        defs << langDef;
     } else if (type == kPastebinType) {
         QStringList psvc;  psvc << "any" << "all"
                                 << "pastebin.com" << "dpaste.com" << "0x0.st"

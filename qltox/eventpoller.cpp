@@ -334,6 +334,11 @@ void EventPoller::run() {
                 double totalTime = 0.0;
                 curl_easy_getinfo(msg->easy_handle, CURLINFO_TOTAL_TIME, &totalTime);
                 resp.elapsedMs = (int64_t)(totalTime * 1000);
+                char* effUrl = nullptr;
+                if (curl_easy_getinfo(msg->easy_handle, CURLINFO_EFFECTIVE_URL, &effUrl) == CURLE_OK
+                        && effUrl) {
+                    resp.finalUrl = effUrl;
+                }
 
                 if (curlResult != 0) {
                     ALOG_WARN("!!", ctx->urlStr, resp.curlErrStr);

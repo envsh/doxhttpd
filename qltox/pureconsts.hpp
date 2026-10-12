@@ -22,6 +22,8 @@ constexpr const char* const kBookmarkType       = "bookmark";
 constexpr const char* const kBookmarkName       = "Bookmark·收藏夹";
 constexpr const char* const kAichatType         = "aichat";
 constexpr const char* const kAichatName         = "AI·GPT Chat";
+constexpr const char* const kWebsearchType      = "websearch";
+constexpr const char* const kWebsearchName      = "Search·网页搜索";
 constexpr const char* const kPastebinType       = "pastebin";
 constexpr const char* const kPastebinName       = "Paste Bin·Txt";
 constexpr const char* const kTranslateType      = "translate";
@@ -90,6 +92,7 @@ constexpr TypeEmojiDef kTypeEmojiDefs[] = {
     { kImapMailType,              0x2709,  "✉" },
     { kBookmarkType,              0x1F516, "🔖" },
     { kAichatType,                0x1F916, "🤖" },
+    { kWebsearchType,             0x1F50D, "🔍" },
     { kPastebinType,              0x1F4E6, "📦" },
     { kTranslateType,             0x1F524, "🔤" },
     { kMobPushType,               0x1F4E2, "📢" },

@@ -125,6 +125,8 @@ private:
     void handleTranslateMessage(int64_t localId, const QString& text);
     // AI GPT Chat 客户端直连处理（不走后端，完全本项目实现）
     void handleAigptChatMessage(int64_t localId, const QString& text);
+    // 网页搜索客户端直连处理（不走后端，完全本项目实现）
+    void handleWebsearchChatMessage(int64_t localId, const QString& text);
     // 媒体本机播放：实体化缓存字节 → 探测/转码（worker） → 播放
     void scheduleMediaPlayback(int msgIndex, bool pendingPlay,
                                const std::vector<uint8_t>* preloaded = nullptr,

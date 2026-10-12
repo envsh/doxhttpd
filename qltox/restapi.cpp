@@ -364,6 +364,8 @@ static const QMap<QString, bool>& ctxAllowedKeys() {
         m.insert("thinking",   true);  // aichat 深度思考开关（仅客户端侧消费，不上送）
         m.insert("search",     true);  // aichat 联网搜索开关（仅客户端侧消费，不上送）
         m.insert("new_chat",   true);  // aichat 新对话（仅客户端侧消费，不上送）
+        m.insert("backend",    true);  // websearch 搜索后端（仅客户端侧消费，不上送）
+        m.insert("lang",       true);  // websearch 搜索语言（仅客户端侧消费，不上送）
         initialized = true;
     }
     return m;

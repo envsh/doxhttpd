@@ -23,6 +23,7 @@ const EventType34 MediaDownloadProgressType = toEventType34(QEvent::User + 107);
 const EventType34 PastebinResultType      = toEventType34(QEvent::User + 108);
 const EventType34 FanyibotDoneType        = toEventType34(QEvent::User + 109);
 const EventType34 AigptbotDoneType        = toEventType34(QEvent::User + 110);
+const EventType34 WebsearchDoneType       = toEventType34(QEvent::User + 111);
 
 // ── API 请求类型 ──
 enum ApiRequestType {
@@ -248,6 +249,26 @@ public:
     std::string errorMsg;        // 失败：含已试 provider 与最后错误
 };
 
+// 网页搜索单条结果（websearch 虚拟联系人）
+struct WebSearchItem {
+    std::string title;
+    std::string url;
+    std::string snippet;
+};
+
+// 网页搜索虚拟联系人的搜索结果（客户端直连各匿名搜索后端，不经后端）
+class WebsearchDoneEvent : public CustomEventBase {
+public:
+    WebsearchDoneEvent() : CustomEventBase(WebsearchDoneType) {}
+    int chatId = 0;
+    std::string chatType;
+    long long localId = 0;      // 宿主侧 ChatElement 定位（跨事件循环稳定）
+    bool success = false;
+    std::vector<WebSearchItem> items;  // 成功：至多 3 条结果（sogou 经 follow 解析）
+    std::string backendUsed;          // 成功：实际命中的后端名
+    std::string errorMsg;             // 失败：含已试后端与最后错误
+};
+
 class SelfInfoResultEvent : public ApiResultEvent {
 public:
     SelfInfoResultEvent() : ApiResultEvent(ApiGetSelf) {}
@@ -361,6 +382,7 @@ struct HttpResponse {
     std::string body;
     std::map<std::string, std::string> headers;
     int64_t elapsedMs = 0;   // 请求耗时，单位毫秒
+    std::string finalUrl;    // 跟随重定向后的最终 URL（空=无/未跟随）；落地页/壳链接解析用
 };
 
 struct HttpRequest {

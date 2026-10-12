@@ -25,6 +25,7 @@
 #include "pasteuploader.h"
 #include "fanyibot.h"
 #include "aigptbot.h"
+#include "websearchbot.h"
 #include "jsonview.h"
 #include "appsetup.h"
 #include "assertf.h"
@@ -106,6 +107,7 @@ static const int VIRTUAL_PASTEBIN_ID  = -105;
 static const int VIRTUAL_TRANSLATE_ID = -106;
 static const int VIRTUAL_MOBPUSH_ID  = -121;
 static const int VIRTUAL_SNAP_ID     = -122;
+static const int VIRTUAL_WEBSEARCH_ID = -123;
 
 // sticonShowStatusMessage 使用的托盘实例（MainWindow 创建/销毁时维护，不导出）
 static SystemTrayIcon* s_trayIcon = 0;
@@ -562,6 +564,7 @@ MainWindow::MainWindow(QWidget* parent)
         addSeed(VIRTUAL_TRANSLATE_ID, kTranslateName, kTranslateType);
         addSeed(VIRTUAL_MOBPUSH_ID, kMobPushName, kMobPushType);
         addSeed(VIRTUAL_SNAP_ID, kSnapName, kSnapType);
+        addSeed(VIRTUAL_WEBSEARCH_ID, kWebsearchName, kWebsearchType);
         contactListWidget->setContacts(list);
 
     // 虚拟联系人（pastebin/aigptbot/fanyibot）落库：
@@ -572,6 +575,7 @@ MainWindow::MainWindow(QWidget* parent)
             { VIRTUAL_AICHAT_ID,    kAichatName,    kAichatType    },
             { VIRTUAL_PASTEBIN_ID,  kPastebinName,  kPastebinType  },
             { VIRTUAL_TRANSLATE_ID, kTranslateName, kTranslateType },
+            { VIRTUAL_WEBSEARCH_ID, kWebsearchName, kWebsearchType },
         };
         auto* cdb = Storage::instance().channelDb();
         if (cdb) {
@@ -1175,6 +1179,88 @@ void MainWindow::customEvent(CustomEventBase* event) {
         return;
     }
 
+    // 网页搜索结果：成功时 3 条结果合并为一条消息（self）上屏并落库，失败标记原提问失败
+    if (event->type() == WebsearchDoneType) {
+        WebsearchDoneEvent* evt = static_cast<WebsearchDoneEvent*>(event);
+        chatWidget->loadingBar()->hideLoading(kLoadSendMsg);
+        const std::string typeStr = evt->chatType;
+        const QString typeQ = qFromUtf8(typeStr.c_str());
+        ChatHistory* h = m_chatbuf.ptr(evt->chatId, typeStr);
+        ChatElement* elp = nullptr;
+        if (h) {
+            for (size_t i = h->size(); i > 0; --i) {
+                if ((*h)[i - 1].localId == evt->localId) {
+                    elp = &(*h)[i - 1];
+                    break;
+                }
+            }
+        }
+        if (!elp) {
+            qWarning("websearch: 找不到 localId=%lld chatId=%d type=%s",
+                     (long long)evt->localId, evt->chatId, typeStr.c_str());
+            return;
+        }
+        if (evt->success) {
+            // 原提问置为 SendSent
+            elp->sendState = ChatElement::SendSent;
+            // 追加一条搜索结果消息（3 条结果合并，尾部标注命中后端）
+            ChatElement ack;
+            QString ackText;
+            auto oneLine = [](const QString& s) {
+                QString t = s;
+                t.replace(QChar('\n'), QChar(' '));
+                t.replace(QChar('\r'), QChar(' '));
+                return t;
+            };
+            for (size_t i = 0; i < evt->items.size() && i < 3; ++i) {
+                if (i) { ackText += qFromUtf8("\n"); }
+                ackText += QString::number((int)(i + 1)) + qFromUtf8(". ")
+                        + oneLine(qFromUtf8(evt->items[i].title.c_str())) + qFromUtf8("\n")
+                        + oneLine(qFromUtf8(evt->items[i].url.c_str()));
+                if (!evt->items[i].snippet.empty()) {
+                    ackText += qFromUtf8("\n") + oneLine(qFromUtf8(evt->items[i].snippet.c_str()));
+                }
+            }
+            if (!evt->backendUsed.empty()) {
+                ackText += " -- " + qFromUtf8(evt->backendUsed.c_str());
+            }
+            ack.messageText = ackText;
+            ack.category = "self";
+            ack.senderName = "Me";
+            ack.peerNumber = -1;
+            ack.time = getCurrentTime();
+            ack.sendState = ChatElement::SendSent;
+            m_chatbuf.append(evt->chatId, typeStr, ack);
+            db_writeMessage(evt->chatId, typeStr, ack);
+            QString ackTimeStr = contactListTimeStr(ack.time);
+            contactListWidget->updateContactLastMessage(evt->chatId, typeQ, ack.messageText, ackTimeStr);
+            db_writeLastMessage(evt->chatId, typeQ, ack.messageText, ackTimeStr);
+            ToastWidget::show(chatWidget, qFromUtf8("搜索完成 · ") + qFromUtf8(evt->backendUsed.c_str()), 2500);
+            stbarShowStatusMessage(qFromUtf8("搜索结果已送达"), SticonInfo, 2500);
+            sticonShowStatusMessage(qFromUtf8("搜索结果已送达"), SticonInfo, 2500);
+        } else {
+            elp->sendState = ChatElement::SendFailed;
+            elp->sendErrorMsg = qFromUtf8(evt->errorMsg.c_str());
+            const QString failText = qFromUtf8("搜索失败：") + elp->sendErrorMsg;
+            ToastWidget::show(chatWidget, failText, 6000);
+            stbarShowStatusMessage(failText, SticonCritical, 5000);
+            sticonShowStatusMessage(failText, SticonCritical, 5000);
+            m_lyrics->setPlayedColor(QColor(0xFF,0x44,0x44));
+            m_lyrics->setLrcText(qFromUtf8("[00:00.000]搜索失败"));
+            m_lyrics->setPosition(0);
+            m_hintActive = true;
+#ifdef QT3_BUILD
+            m_msgTimer->start(5000, true);
+#else
+            m_msgTimer->start(5000);
+#endif
+        }
+        // 强制重算高度（chatview 在 cachedWidth==contentWidth 时会早退）
+        elp->cachedWidth = -1;
+        chatWidget->updateElement(chatWidget->indexOfLocalId(evt->localId));
+        return;
+    }
+
     // 翻译结果：原消息收尾为发送完成态，另追加一条译文消息（同 pastebin 回执）
     if (event->type() == FanyibotDoneType) {
         FanyibotDoneEvent* evt = static_cast<FanyibotDoneEvent*>(event);
@@ -1420,6 +1506,18 @@ void MainWindow::customEvent(CustomEventBase* event) {
                     cl.append(c);
                     updateContactDb(std::string(kSnapType) + "_" + std::to_string(VIRTUAL_SNAP_ID),
                                     kSnapName, "online", -1, "", "", kSnapType);
+                }
+                {
+                    Contact* c = new Contact();
+                    c->id = VIRTUAL_WEBSEARCH_ID;
+                    c->name = qFromUtf8(kWebsearchName);
+                    c->type = kWebsearchType;
+                    c->status = "online";
+                    c->chat_id = "";
+                    c->is_connected = false;
+                    cl.append(c);
+                    updateContactDb(std::string(kWebsearchType) + "_" + std::to_string(VIRTUAL_WEBSEARCH_ID),
+                                    kWebsearchName, "online", -1, "", "", kWebsearchType);
                 }
                 contactListWidget->setContacts(cl);
             }
@@ -1975,6 +2073,33 @@ void MainWindow::handleAigptChatMessage(int64_t localId, const QString& text) {
     if (req.newChat) { chatWidget->resetAttribKey(qFromUtf8("new_chat")); }
 }
 
+void MainWindow::handleWebsearchChatMessage(int64_t localId, const QString& text) {
+    const std::string typeStr = std::string(qToUtf8(currentChatType).data());
+    ChatHistory& hist = m_chatbuf.getOrCreate(currentChatId, typeStr);
+    ChatElement* elp = nullptr;
+    for (size_t i = hist.size(); i > 0; --i) {
+        if (hist[i - 1].localId == localId) {
+            elp = &hist[i - 1];
+            break;
+        }
+    }
+    if (!elp) {
+        qWarning("websearch: localId=%lld 不在缓冲内", (long long)localId);
+        return;
+    }
+    // 与 handlePastebinMessage 同机制：首发内存态优先，缺失回落当前属性栏
+    const QMap<QString,QString> ctx = elp->sendCtx.isEmpty()
+            ? chatWidget->attribContext() : elp->sendCtx;
+    WebsearchRequest req;
+    req.text     = std::string(qToUtf8(text).data());
+    req.backend  = std::string(qToUtf8(mapValue(ctx, "backend")).data());
+    req.lang     = std::string(qToUtf8(mapValue(ctx, "lang")).data());
+    req.localId  = localId;
+    req.chatId   = currentChatId;
+    req.chatType = typeStr;
+    websearchStart(req, this);
+}
+
 
 // Qt3 QMap 无 value()，统一按版本取键值（缺键返回空串）
 void MainWindow::handlePastebinMessage(int64_t localId, const QString& text) {
@@ -2053,6 +2178,19 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
     } else if (type == kAichatType) {
         // 与 pastebin/translate 同机制：真正启动在乐观插入拿到 localId 之后（见块外 :2333），
         // 这里仅分流免走 ToxAPI 真实发送
+    } else if (type == kWebsearchType) {
+        // 客户端直搜：不调 ToxAPI::sendMessage（sendmsgseq 保持 0），
+        // 真正启动在乐观插入拿到 localId 之后（见块外调用）。
+        chatWidget->loadingBar()->showLoading(kLoadSendMsg, qFromUtf8("搜索中..."));
+        m_lyrics->setPlayedColor(QColor(0xBB,0xBB,0xBB));
+        m_lyrics->setLrcText(qFromUtf8("[00:00.000]搜索中..."));
+        m_lyrics->setPosition(0);   // setLrcText 只装载不定位，需显式定位首行才渲染
+        m_hintActive = true;
+#ifdef QT3_BUILD
+        m_msgTimer->start(5000, true);
+#else
+        m_msgTimer->start(5000);
+#endif
     } else if (type == kPastebinType) {
         // 客户端直传：不调 ToxAPI::sendMessage（sendmsgseq 保持 0），
         // 真正启动在乐观插入拿到 localId 之后（见块外调用）。
@@ -2120,6 +2258,7 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
     int64_t pasteLocalId = 0;       // 块外要用（append 时由 ChatHistory 分配）
     int64_t translateLocalId = 0;   // 同上：翻译启动需要 localId 定位元素
     int64_t aigptLocalId = 0;       // 同上：AI GPT Chat 启动需要 localId 定位元素
+    int64_t websearchLocalId = 0;   // 同上：网页搜索启动需要 localId 定位元素
     QString selfTimeStr = timenowhm();
     {
         std::string typeStr = std::string(qToUtf8(currentChatType).data());
@@ -2150,6 +2289,9 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
         if (type == kAichatType) {
             aigptLocalId = backEl.localId;   // 保持 SendSending，等待 AI 结果事件
         }
+        if (type == kWebsearchType) {
+            websearchLocalId = backEl.localId;   // 保持 SendSending，等待搜索结果事件
+        }
     }
     if (type == kPastebinType) {
         handlePastebinMessage(pasteLocalId, message);
@@ -2159,6 +2301,9 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
     }
     if (type == kAichatType) {
         handleAigptChatMessage(aigptLocalId, message);
+    }
+    if (type == kWebsearchType) {
+        handleWebsearchChatMessage(websearchLocalId, message);
     }
     contactListWidget->updateContactLastMessage(currentChatId, currentChatType, message, selfTimeStr);
     db_writeLastMessage(currentChatId, currentChatType, message, selfTimeStr);
@@ -2894,6 +3039,8 @@ void MainWindow::retranslateUi() {
             headerText = qFromUtf8(kMobPushName) + " " + QString::number(currentChatId);
         } else if (currentChatType == kSnapType) {
             headerText = qFromUtf8(kSnapName) + " " + QString::number(currentChatId);
+        } else if (currentChatType == kWebsearchType) {
+            headerText = qFromUtf8(kWebsearchName) + " " + QString::number(currentChatId);
         } else if (!protoStreamEmoji(currentChatType).isEmpty()) {
             QString label;
             std::string type = std::string(qToUtf8(currentChatType).data());
@@ -3893,6 +4040,10 @@ void MainWindow::onResendMessage(int msgIndex) {
         // 保持 SendSending（chatview 入口已置）；先拷出 localId，避免扩容后 el 悬空
         const int64_t lid = el.localId;
         handleTranslateMessage(lid, msgText);
+    } else if (type == kWebsearchType) {
+        // 保持 SendSending（chatview 入口已置）；先拷出 localId，避免扩容后 el 悬空
+        const int64_t lid = el.localId;
+        handleWebsearchChatMessage(lid, msgText);
     } else {
         // 扩展上下文：首发内存态优先(可见性/CW/引用与原消息一致，沿用原引用目标)；
         // 缺失(重载/重启后从 DB 恢复)则退化为当前属性栏取值，且不带待发引用/提及

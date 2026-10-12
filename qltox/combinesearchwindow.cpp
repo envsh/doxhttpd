@@ -47,6 +47,7 @@ QString contactTypeLabel(const QString& type) {
     if (type == kImapMailType)       { return qFromUtf8("邮件"); }
     if (type == kBookmarkType)       { return qFromUtf8(kBookmarkName); }
     if (type == kAichatType)         { return qFromUtf8(kAichatName); }
+    if (type == kWebsearchType)      { return qFromUtf8(kWebsearchName); }
     if (type == kPastebinType)       { return qFromUtf8(kPastebinName); }
     if (type == kTranslateType)      { return qFromUtf8(kTranslateName); }
     if (type == kMobPushType)        { return qFromUtf8(kMobPushName); }
