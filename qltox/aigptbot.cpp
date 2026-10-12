@@ -115,7 +115,7 @@ const AigptbotProvider kAigptProviders[] = {
     { kAigptbotModelScopeIntl,"ModelScope(国际)", true, false,
       "https://api-inference.modelscope.ai/v1/chat/completions", "", kAigptbotWebNone, true },
     { kAigptbotGroq,          "Groq",            true,  false,
-      "https://api.groq.com/openai/v1/chat/completions", "", kAigptbotWebNone, true },
+      "https://api.groq.com/openai/v1/chat/completions", "openai/gpt-oss-120b", kAigptbotWebNone, true },
     { kAigptbotHuggingFace,   "HuggingFace",     true,  false,
       "https://router.huggingface.co/v1/chat/completions", "", kAigptbotWebNone, true },
     { kAigptbotGemini,        "Gemini",          true,  false,
