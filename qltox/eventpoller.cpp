@@ -178,10 +178,10 @@ CURL* EventPoller::buildHandle(const HttpRequest& req,
     curl_easy_setopt(easy, CURLOPT_FRESH_CONNECT, 1L);
     curl_easy_setopt(easy, CURLOPT_SSL_SESSIONID_CACHE, 0L);
 
-    // 代理：仅非空时设置（libcurl 按 scheme 自动识别 http/https/socks5）
-    if (!req.proxy.empty()) {
-        curl_easy_setopt(easy, CURLOPT_PROXY, req.proxy.c_str());
-    }
+    // 代理：严格只认调用方设定（req.proxy）。
+    // 无条件设置（含空串）以关闭 libcurl 隐式环境变量代理回退；空串 = 直连。
+    // NO_PROXY/no_proxy 仍由 libcurl 原生生效（命中可绕过此处设定）。
+    curl_easy_setopt(easy, CURLOPT_PROXY, req.proxy.c_str());
 
     if (req.lowSpeedLimit > 0 && req.lowSpeedTime > 0) {
         curl_easy_setopt(easy, CURLOPT_LOW_SPEED_LIMIT, req.lowSpeedLimit);
