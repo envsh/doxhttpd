@@ -24,6 +24,7 @@ endif()
 set(qlapp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qltox)
 set(qlappcom_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qlappcom)
 set(qlcomp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qlcomp)
+set(ql3rdparty_dir ${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty)
 
 qt_add_executable(qsktox
     src/main.cpp
@@ -80,9 +81,12 @@ qt_add_executable(qsktox
     ${qlappcom_dir}/sticker_db.cpp
     ${qlappcom_dir}/cache_db.cpp
     ${qlappcom_dir}/cache_fs.cpp
+    ${qlappcom_dir}/seen_unknown.cpp
+    ${qlappcom_dir}/media_shmem_cache.cpp
+    #${qlappcom_dir}/recorder.cpp
+    #${qlappcom_dir}/sound.c
     #${qlappcom_dir}/eventpoller.cpp
     #${qlappcom_dir}/unknownparser.cpp
-    ${qlappcom_dir}/media_shmem_cache.cpp
     ${qlappcom_dir}/netproxy.cpp
     ${qlappcom_dir}/webcreds.cpp
     #${qlappcom_dir}/fanyibot.cpp
@@ -90,6 +94,8 @@ qt_add_executable(qsktox
     #${qlappcom_dir}/aigptbot.cpp
     #${qlappcom_dir}/aigpt_sessions.cpp
     #${qlappcom_dir}/pasteuploader.cpp
+
+   ${ql3rdparty_dir}/barrust_bloom/bloom.c
 
     ${qlcomp_dir}/tagutil.cpp
     ${qlcomp_dir}/compatcore34.cpp
@@ -109,6 +115,8 @@ qt_add_executable(qsktox
 target_include_directories(qsktox PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/include
+    ${ql3rdparty_dir}/bloom
+    ${ql3rdparty_dir}/barrust_bloom
     ${qlapp_dir}
     ${qlappcom_dir}
     ${qlcomp_dir}
