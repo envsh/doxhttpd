@@ -127,6 +127,7 @@ void MozpushSender::buildSend()
 {
     reloadSettings();
     if (m_uaid.isEmpty() || m_endpoint.isEmpty()) {
+        qDebug() << "[mozpush] 未设置 mozpushUaid/mozpushEndpoint, 跳过发送";
         return;
     }
 
@@ -137,23 +138,22 @@ void MozpushSender::buildSend()
     }
 
     QString pushType;
-    QString payEndpoint;
-    QString payUaid;
     if (dist == QLatin1String("io.heckel.ntfy")) {
-        // ntfy.sh: payload 只填 endpoint
         pushType = QStringLiteral("ntfysh");
-        payEndpoint = QSettings().value("pushDeviceEndpoint").toString().trimmed();
-        payUaid = QString();
     } else if (dist == QLatin1String("org.unifiedpush.distributor.sunup")
                || dist.isEmpty()) {
-        // sunup(=mozpush) / 桌面无分发器: endpoint + uaid 都填
         pushType = QStringLiteral("sunup");
-        payEndpoint = m_endpoint;
-        payUaid = m_uaid;
     } else {
         qDebug() << "[mozpush] backend" << dist << "not ntfysh/sunup, skip";
         return;
     }
+
+    // payload 的 endpoint 只取“设备侧注册到的推送 endpoint”(pushDeviceEndpoint)。
+    // 注意：mozpushUaid/mozpushEndpoint 是传输用途（派生密钥 / VAPID 签名 / POST 目标），
+    // 绝不允许出现在发送的数据（payload）中。
+    const QString payEndpoint =
+        QSettings().value("pushDeviceEndpoint").toString().trimmed();
+    const QString payUaid;   // sunup 下可能为空；空值即空值
 
     const QString deriveUaid = m_uaid;
     const QString endpoint = m_endpoint;
