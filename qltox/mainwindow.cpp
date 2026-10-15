@@ -4296,6 +4296,9 @@ void MainWindow::onOpenMediaPlayer(int msgIndex) {
         QString sub = el.mediaUrl.mid(6);
         if (sub.startsWith("http://") || sub.startsWith("https://")) {
             el.pendingPlay = false;
+            if (el.etype == ChatElement::Audio) {
+                ToastWidget::show(chatWidget, qFromUtf8("正在启动播放..."), 3500);
+            }
             launchPlayer(sub, false);
             return;
         }
@@ -4519,6 +4522,9 @@ void MainWindow::handleMediaPostproc(MediaDownloadEvent* e) {
 
     if (e->pendingPlay) {
         el.pendingPlay = false;
+        if (el.etype == ChatElement::Audio) {
+            ToastWidget::show(chatWidget, qFromUtf8("正在启动播放..."), 3500);
+        }
         launchPlayer(qFromUtf8(e->localFile), el.gifLikeVideo);
     }
 }
