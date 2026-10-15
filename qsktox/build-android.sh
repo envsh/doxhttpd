@@ -51,10 +51,10 @@ cp "$QSK_ANDROID/lib/qskinny/plugins/platforminputcontexts/"*.so "$LIB_DIR/"
 # 复制 extras 共享库到 APK
 cp "$BUILD_DIR/libgoso.so" "$LIB_DIR/"
 cp "$BUILD_DIR/libcso.so" "$LIB_DIR/"
-cp vendor/lib/${ANDROID_ABI:-arm64-v8a}/libsqlite3.so "$LIB_DIR/"
-cp vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcurl.so "$LIB_DIR/"
-cp vendor/lib/${ANDROID_ABI:-arm64-v8a}/libssl.so "$LIB_DIR/"
-cp vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcrypto.so "$LIB_DIR/"
+cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libsqlite3.so "$LIB_DIR/"
+cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcurl.so "$LIB_DIR/"
+cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libssl.so "$LIB_DIR/"
+cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcrypto.so "$LIB_DIR/"
 
 "$QT_HOST/bin/androiddeployqt" \
     --input "$BUILD_DIR/android-qsktox-deployment-settings.json" \

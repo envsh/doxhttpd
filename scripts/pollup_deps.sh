@@ -6,7 +6,7 @@ pwd
 
 git clone https://github.com/qxcomp/qxcomp.git ../qxcomp
 
-# git clone https://github.com/qxcomp/cxvendor.git ../cxvendor
+git clone https://github.com/qxcomp/cxvendor.git ../cxvendor
 
 # git clone https://github.com/qxcomp/droidcomp.git ../droidcomp
 
