@@ -55,6 +55,8 @@ cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libsqlite3.so "$LIB_DIR/"
 cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcurl.so "$LIB_DIR/"
 cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libssl.so "$LIB_DIR/"
 cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcrypto.so "$LIB_DIR/"
+cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libssl_3.so "$LIB_DIR/"
+cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcrypto_3.so "$LIB_DIR/"
 
 "$QT_HOST/bin/androiddeployqt" \
     --input "$BUILD_DIR/android-qsktox-deployment-settings.json" \

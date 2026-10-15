@@ -1,6 +1,7 @@
 #include "mozpushsender.h"
 #include "androidutils.h"
 #include "webpushcrypto.h"
+#include "pushhandler.h"
 
 #include <QDateTime>
 #include <QDebug>
@@ -17,12 +18,14 @@
 namespace {
 
 // 全部为 CPU/JNI 重活，仅供工作线程调用（勿在主线程调用）。
-bool buildRequestBody(const QString& uaid, const QString& endpoint,
-                      quint64 seq, QByteArray* body, QString* authz)
+bool buildRequestBody(const QString& deriveUaid, const QString& postEndpoint,
+                      const QString& pushType, const QString& payEndpoint,
+                      const QString& payUaid, quint64 seq,
+                      QByteArray* body, QString* authz)
 {
     QByteArray p256dh;
     QByteArray auth;
-    if (!WebPushCrypto::deriveMobSubKeys(uaid, &p256dh, &auth)) {
+    if (!WebPushCrypto::deriveMobSubKeys(deriveUaid, &p256dh, &auth)) {
         qWarning() << "[mozpush] derive keys failed";
         return false;
     }
@@ -34,12 +37,13 @@ bool buildRequestBody(const QString& uaid, const QString& endpoint,
         return false;
     }
     cJSON_AddStringToObject(o, "proto_type", "mobsub");
-    cJSON_AddStringToObject(o, "uaid", "00000000-0000-0000-0000-000000000000");
+    cJSON_AddStringToObject(o, "push_type", pushType.toUtf8().constData());
+    cJSON_AddStringToObject(o, "uaid", payUaid.toUtf8().constData());
     cJSON_AddStringToObject(o, "virtip4", "10.0.0.0");
     cJSON_AddStringToObject(o, "peerid7", deviceName.toUtf8().constData());
     cJSON_AddNumberToObject(o, "seq", static_cast<double>(seq));
     cJSON_AddNumberToObject(o, "ts", static_cast<double>(QDateTime::currentSecsSinceEpoch()));
-    cJSON_AddStringToObject(o, "endpoint", "https://点位");
+    cJSON_AddStringToObject(o, "endpoint", payEndpoint.toUtf8().constData());
     char* js = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);
     if (!js) {
@@ -53,7 +57,7 @@ bool buildRequestBody(const QString& uaid, const QString& endpoint,
         qWarning() << "[mozpush] encrypt failed";
         return false;
     }
-    const QString az = WebPushCrypto::vapidHeader(endpoint);
+    const QString az = WebPushCrypto::vapidHeader(postEndpoint);
     if (az.isEmpty()) {
         qWarning() << "[mozpush] vapid header failed";
         return false;
@@ -126,16 +130,42 @@ void MozpushSender::buildSend()
         return;
     }
 
-    const QString uaid = m_uaid;
+    // push_type 依据当前激活分发器判定（与状态栏同源）
+    QString dist;
+    if (auto* ph = PushHandler::instance()) {
+        dist = ph->currentDistributor();
+    }
+
+    QString pushType;
+    QString payEndpoint;
+    QString payUaid;
+    if (dist == QLatin1String("io.heckel.ntfy")) {
+        // ntfy.sh: payload 只填 endpoint
+        pushType = QStringLiteral("ntfysh");
+        payEndpoint = QSettings().value("pushDeviceEndpoint").toString().trimmed();
+        payUaid = QString();
+    } else if (dist == QLatin1String("org.unifiedpush.distributor.sunup")
+               || dist.isEmpty()) {
+        // sunup(=mozpush) / 桌面无分发器: endpoint + uaid 都填
+        pushType = QStringLiteral("sunup");
+        payEndpoint = m_endpoint;
+        payUaid = m_uaid;
+    } else {
+        qDebug() << "[mozpush] backend" << dist << "not ntfysh/sunup, skip";
+        return;
+    }
+
+    const QString deriveUaid = m_uaid;
     const QString endpoint = m_endpoint;
     const quint64 seq = ++m_seq;
 
     MozpushSender* self = this;
     // 重活移出 UI 线程；完成后经队列连接把 POST 派回主线程
-    std::thread([self, uaid, endpoint, seq]() {
+    std::thread([self, deriveUaid, endpoint, pushType, payEndpoint, payUaid, seq]() {
         QByteArray body;
         QString authz;
-        if (!buildRequestBody(uaid, endpoint, seq, &body, &authz)) {
+        if (!buildRequestBody(deriveUaid, endpoint, pushType, payEndpoint,
+                              payUaid, seq, &body, &authz)) {
             return;
         }
         QMetaObject::invokeMethod(self, [self, body, authz, endpoint]() {
