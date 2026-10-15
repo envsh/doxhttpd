@@ -112,6 +112,7 @@ signals:
     void downloadNeeded(int msgIndex, const QString& mediaUrl);
     void openFullSizeImage(int msgIndex, const QString& mediaUrl);
     void openMediaPlayer(int msgIndex);
+    void ttsSpeakRequested(int msgIndex);
     void resendMessage(int msgIndex);
     void requestRedactMessage(int msgIndex);
     void favoriteClicked(int msgIndex);

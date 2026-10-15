@@ -2,6 +2,7 @@
 #include "pureconsts.hpp"   // 类型常量 kImapMailType / kGomuksRoomType / ...
 #include "aigptbot.h"
 #include "websearchbot.h"
+#include "ttsbot.h"
 #include "lambdaslot.h"
 #include <qframe.h>
 #include <qclipboard.h>
@@ -973,6 +974,32 @@ MessageAttrDefList messageAttribBarDefsForType(const QString& type) {
                                                     "Русский / Deutsch / Français / العربية；sogou 固定中文不随语言改变"));
         langDef.displayOptions = ld;
         defs << langDef;
+    } else if (type == kTtsbotType) {
+        const std::vector<TtsbotProvider>& plist = ttsbotProviders();
+        QStringList svc;    svc << "any" << "all";
+        QStringList svcDisp; svcDisp << "any" << "all";
+        for (size_t i = 0; i < plist.size(); ++i) {
+            svc << qFromUtf8(plist[i].name);
+            svcDisp << qFromUtf8(plist[i].name);
+        }
+        MessageAttrDef def = comboDef("provider", qFromUtf8("合成引擎"), svc, "edge",
+                                      qFromUtf8("TTS 引擎：any=随机取序逐个尝试，首个成功即止 / all=按固定优先级依次尝试 / "
+                                                "指定项=只用该引擎。edge=微软 Edge 免鉴权（默认）/ google=Google 翻译 TTS 免鉴权 / "
+                                                "openai、elevenlabs、dashscope 需 API Key / espeak=本地引擎（离线）"));
+        def.displayOptions = svcDisp;
+        defs << def;
+        defs << lineDef("voice", qFromUtf8("音色"), qFromUtf8("zh-CN-XiaoxiaoNeural"),
+                        qFromUtf8("音色名（部分引擎生效）：edge 如 zh-CN-XiaoxiaoNeural / en-US-EmmaMultilingualNeural；espeak 如 cmn"));
+        {
+            QStringList lw;  lw << "zh-CN" << "en-US" << "ja-JP" << "ko-KR";
+            defs << comboDef("lang", qFromUtf8("语言"), lw, "zh-CN",
+                             qFromUtf8("合成语言/区域（google tl 参数与 SSML xml:lang）"));
+        }
+        {
+            QStringList rt;  rt << "+0%" << "-20%" << "+20%" << "+50%";
+            defs << comboDef("rate", qFromUtf8("语速"), rt, "+0%",
+                             qFromUtf8("语速（edge prosody rate，如 +0% / -20% / +50%）"));
+        }
     } else if (type == kPastebinType) {
         QStringList psvc;  psvc << "any" << "all"
                                 << "pastebin.com" << "dpaste.com" << "0x0.st"

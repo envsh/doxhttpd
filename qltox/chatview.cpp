@@ -1107,6 +1107,9 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
         const int hdrBtnSize = 18;
         const int hdrBtnGap = 4;
         int hdrBtnCnt = 2;
+        // 文本消息头新增 🔊 朗读按钮（入口 B）；仅 Text 且正文非空时显示
+        bool showSpeakBtn = !displayOf(*this).isEmpty();
+        if (showSpeakBtn) { hdrBtnCnt = 3; }
         int hdrBtnAreaW = hdrBtnCnt * hdrBtnSize + (hdrBtnCnt - 1) * hdrBtnGap;
 
         int kAvatarSize = ChatView::kAvatarSize;
@@ -1189,6 +1192,13 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
                     drawEmojiIcon(p, sourceBtnRect, 0x1F4CB, "📋");
                     p.drawEllipse(translateBtnRect);
                     drawEmojiIcon(p, translateBtnRect, 0x1F310, "🌐");
+                    if (showSpeakBtn) {
+                        speakBtnRect = QRect(btnX0 + 2 * (hdrBtnSize + hdrBtnGap), btnY, hdrBtnSize, hdrBtnSize);
+                        p.drawEllipse(speakBtnRect);
+                        drawEmojiIcon(p, speakBtnRect, 0x1F50A, "🔊");
+                    } else {
+                        speakBtnRect = QRect();
+                    }
                 }
             }
 
@@ -1274,6 +1284,13 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
                     drawEmojiIcon(p, sourceBtnRect, 0x1F4CB, "📋");
                     p.drawEllipse(translateBtnRect);
                     drawEmojiIcon(p, translateBtnRect, 0x1F310, "🌐");
+                    if (showSpeakBtn) {
+                        speakBtnRect = QRect(btnX0 + 2 * (hdrBtnSize + hdrBtnGap), btnY, hdrBtnSize, hdrBtnSize);
+                        p.drawEllipse(speakBtnRect);
+                        drawEmojiIcon(p, speakBtnRect, 0x1F50A, "🔊");
+                    } else {
+                        speakBtnRect = QRect();
+                    }
                 }
             }
 
@@ -3272,6 +3289,13 @@ void ChatView::mousePressEvent(QMouseEvent* event) {
                 return;
             }
 
+            // Check speak button click (TTS 朗读入口 B)
+            if (!(*m_history)[msgIndex].speakBtnRect.isNull()
+                && (*m_history)[msgIndex].speakBtnRect.contains(event->pos())) {
+                emit ttsSpeakRequested(msgIndex);
+                return;
+            }
+
             // Check download button click (handled in release, prevent text selection)
             if (!(*m_history)[msgIndex].downloadBtnRect.isNull() &&
                 (*m_history)[msgIndex].downloadBtnRect.contains(event->pos())) {
@@ -3410,6 +3434,13 @@ void ChatView::mouseMoveEvent(QMouseEvent* event) {
         }
         if ((*m_history)[msgIndex].sourceBtnRect.contains(event->pos())) {
             showTempTooltip(this, (*m_history)[msgIndex].sourceBtnRect, qFromUtf8("Source"));
+            setCursor(QCursor(Qt::PointingHandCursor));
+            QWidget::mouseMoveEvent(event);
+            return;
+        }
+        if (!(*m_history)[msgIndex].speakBtnRect.isNull()
+            && (*m_history)[msgIndex].speakBtnRect.contains(event->pos())) {
+            showTempTooltip(this, (*m_history)[msgIndex].speakBtnRect, qFromUtf8("朗读"));
             setCursor(QCursor(Qt::PointingHandCursor));
             QWidget::mouseMoveEvent(event);
             return;
@@ -3717,6 +3748,10 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         hasForward = true;
         forwardMsgId = menu.insertItem(qFromUtf8("转发"));
     }
+    bool hasSpeak = (msgIndex >= 0 && msgIndex < (int)m_history->size()
+                     && (*m_history)[msgIndex].etype == ChatElement::Text
+                     && !(*m_history)[msgIndex].messageText.isEmpty());
+    int speakMsgId = hasSpeak ? menu.insertItem(qFromUtf8("朗读")) : 0;
     QPopupMenu searchSubMenu(this);
     int searchGoogleId = searchSubMenu.insertItem("Google");
     int searchBingId = searchSubMenu.insertItem("Bing");
@@ -3761,6 +3796,12 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
             favLabel = qFromUtf8("收藏/取消");
         favMsgAction = menu.addAction(favLabel);
         forwardMsgAction = menu.addAction(qFromUtf8("转发"));
+    }
+    QAction* speakMsgAction = nullptr;
+    if (msgIndex >= 0 && msgIndex < (int)m_history->size()
+        && (*m_history)[msgIndex].etype == ChatElement::Text
+        && !(*m_history)[msgIndex].messageText.isEmpty()) {
+        speakMsgAction = menu.addAction(qFromUtf8("朗读"));
     }
     QMenu* searchSubMenu = menu.addMenu(_("context.search_selected"));
     QAction* searchGoogleAction = searchSubMenu->addAction("Google");
@@ -3828,6 +3869,8 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         emit sourceClicked(idx);
     } else if (hasTranslate && choice == translateMsgId) {
         emit translateClicked(idx);
+    } else if (hasSpeak && choice == speakMsgId) {
+        emit ttsSpeakRequested(idx);
     } else if (hasFav && choice == favMsgId) {
         emit favoriteClicked(idx);
     } else if (hasForward && choice == forwardMsgId) {
@@ -3882,6 +3925,8 @@ void ChatView::contextMenuEvent(QContextMenuEvent* event) {
         emit sourceClicked(idx);
     } else if (translateMsgAction && chosen == translateMsgAction) {
         emit translateClicked(idx);
+    } else if (speakMsgAction && chosen == speakMsgAction) {
+        emit ttsSpeakRequested(idx);
     } else if (favMsgAction && chosen == favMsgAction) {
         emit favoriteClicked(idx);
     } else if (forwardMsgAction && chosen == forwardMsgAction) {

@@ -81,6 +81,7 @@ struct ChatElement {
     bool needsTranslateResult;
     QRect translateBtnRect;
     QRect sourceBtnRect;
+    QRect speakBtnRect;      // Text 消息头 🔊 朗读按钮（入口 B）
 
     // Shared media fields (Image / Gif / Video)
     QPixmap scaledDisplay;   // 预缩放到显示尺寸的缓存
@@ -231,6 +232,7 @@ signals:
     void openMediaPlayer(int msgIndex);
     void resendMessage(int msgIndex);
     void autoTranslateRequested(int msgIndex, const QString& text, const QString& toLang);
+    void ttsSpeakRequested(int msgIndex);
     void replyRequested(int msgIndex);
     void editRequested(int msgIndex);
     void deleteLocalRequested(int msgIndex);

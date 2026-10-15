@@ -26,6 +26,7 @@
 #include "fanyibot.h"
 #include "aigptbot.h"
 #include "websearchbot.h"
+#include "ttsbot.h"
 #include "jsonview.h"
 #include "appsetup.h"
 #include "assertf.h"
@@ -108,6 +109,7 @@ static const int VIRTUAL_TRANSLATE_ID = -106;
 static const int VIRTUAL_MOBPUSH_ID  = -121;
 static const int VIRTUAL_SNAP_ID     = -122;
 static const int VIRTUAL_WEBSEARCH_ID = -123;
+static const int VIRTUAL_TTSBOT_ID   = -124;
 
 // sticonShowStatusMessage 使用的托盘实例（MainWindow 创建/销毁时维护，不导出）
 static SystemTrayIcon* s_trayIcon = 0;
@@ -484,6 +486,8 @@ MainWindow::MainWindow(QWidget* parent)
             this, SLOT(onOpenFullSizeImage(int, const QString&)));
     connect(chatWidget, SIGNAL(openMediaPlayer(int)),
             this, SLOT(onOpenMediaPlayer(int)));
+    connect(chatWidget, SIGNAL(ttsSpeakRequested(int)),
+            this, SLOT(onTtsSpeakRequested(int)));
     connect(chatWidget, SIGNAL(favoriteClicked(int)), this, SLOT(onFavoriteClicked(int)));
     connect(chatWidget, SIGNAL(peerInfoRequested(int,const QString&,const QString&)),
             this, SLOT(onChatPeerInfoRequested(int,const QString&,const QString&)));
@@ -565,6 +569,7 @@ MainWindow::MainWindow(QWidget* parent)
         addSeed(VIRTUAL_MOBPUSH_ID, kMobPushName, kMobPushType);
         addSeed(VIRTUAL_SNAP_ID, kSnapName, kSnapType);
         addSeed(VIRTUAL_WEBSEARCH_ID, kWebsearchName, kWebsearchType);
+        addSeed(VIRTUAL_TTSBOT_ID, kTtsbotName, kTtsbotType);
         contactListWidget->setContacts(list);
 
     // 虚拟联系人（pastebin/aigptbot/fanyibot）落库：
@@ -576,6 +581,7 @@ MainWindow::MainWindow(QWidget* parent)
             { VIRTUAL_PASTEBIN_ID,  kPastebinName,  kPastebinType  },
             { VIRTUAL_TRANSLATE_ID, kTranslateName, kTranslateType },
             { VIRTUAL_WEBSEARCH_ID, kWebsearchName, kWebsearchType },
+            { VIRTUAL_TTSBOT_ID,    kTtsbotName,    kTtsbotType    },
         };
         auto* cdb = Storage::instance().channelDb();
         if (cdb) {
@@ -1261,6 +1267,95 @@ void MainWindow::customEvent(CustomEventBase* event) {
         return;
     }
 
+    // 文转音合成结果：成功时追加音频气泡（self），失败标记原消息失败
+    if (event->type() == TtsbotDoneType) {
+        TtsbotDoneEvent* evt = static_cast<TtsbotDoneEvent*>(event);
+        chatWidget->loadingBar()->hideLoading(kLoadSendMsg);
+        const std::string typeStr = evt->chatType;
+        const QString typeQ = qFromUtf8(typeStr.c_str());
+        ChatHistory* h = m_chatbuf.ptr(evt->chatId, typeStr);
+        ChatElement* elp = nullptr;
+        // localId==0：朗读入口（无宿主消息待更新，仅向当前会话追加气泡）
+        if (h && evt->localId != 0) {
+            for (size_t i = h->size(); i > 0; --i) {
+                if ((*h)[i - 1].localId == evt->localId) { elp = &(*h)[i - 1]; break; }
+            }
+        }
+        if (evt->success) {
+            if (elp) { elp->sendState = ChatElement::SendSent; }
+            // 追加音频气泡（self）
+            ChatElement ack;
+            ack.etype = ChatElement::Audio;
+            ack.category = "self";
+            ack.senderName = "Me";
+            ack.peerNumber = -1;
+            ack.time = getCurrentTime();
+            ack.sendState = ChatElement::SendSent;   // 显式置位，否则默认 SendSending 会一直转圈
+            ack.messageText = qFromUtf8(evt->text.c_str());
+            QString cap = qFromUtf8("🔊 ");
+            if (!evt->providerUsed.empty()) { cap += qFromUtf8(evt->providerUsed.c_str()); }
+            if (!evt->voice.empty()) { cap += qFromUtf8(" · ") + qFromUtf8(evt->voice.c_str()); }
+            ack.caption = cap;
+            ack.durationSec = evt->durationSec;
+            ack.downloadState = ChatElement::Completed;
+            // 播放定位：字节型/本地 → tts://local_<ts>（字节落 cacheDB）；
+            // URL 型 → tts://<远程url>（播放时剥离前缀直连）
+            if (!evt->audioData.empty()) {
+                std::string keyName = "local_" + std::to_string((long long)time(0))
+                                    + "_" + std::to_string((long long)evt->localId);
+                QString mu = qFromUtf8(("tts://" + keyName).c_str());
+                std::string ck = mediaCacheKey("file", mu);
+                const char* mime = evt->mime.empty() ? "audio/mpeg" : evt->mime.c_str();
+                if (!ck.empty()) {
+                    Storage::instance().cacheDb()->storeMedia(
+                        ck.c_str(), evt->audioData.data(), evt->audioData.size(), mime, 2);
+                }
+                ack.mediaUrl = mu;
+            } else if (!evt->audioUrl.empty()) {
+                ack.mediaUrl = qFromUtf8(("tts://" + evt->audioUrl).c_str());
+            }
+            ack.cachedWidth = -1;
+            m_chatbuf.append(evt->chatId, typeStr, ack);
+            db_writeMessage(evt->chatId, typeStr, ack);
+            QString ackTimeStr = contactListTimeStr(ack.time);
+            contactListWidget->updateContactLastMessage(evt->chatId, typeQ, ack.caption, ackTimeStr);
+            db_writeLastMessage(evt->chatId, typeQ, ack.caption, ackTimeStr);
+            const QString okText = qFromUtf8("语音合成完成 · ") + qFromUtf8(evt->providerUsed.c_str());
+            ToastWidget::show(chatWidget, okText, 2500);
+            stbarShowStatusMessage(okText, SticonInfo, 2500);
+            sticonShowStatusMessage(okText, SticonInfo, 2500);
+            m_lyrics->setPlayedColor(QColor(0x00,0xB4,0xD8));
+            m_lyrics->setLrcText(qFromUtf8("[00:00.000]语音合成完成"));
+            m_lyrics->setPosition(0);
+            m_hintActive = true;
+#ifdef QT3_BUILD
+            m_msgTimer->start(5000, true);
+#else
+            m_msgTimer->start(5000);
+#endif
+        } else {
+            if (elp) {
+                elp->sendState = ChatElement::SendFailed;
+                elp->sendErrorMsg = qFromUtf8(evt->errorMsg.c_str());
+            }
+            const QString failText = qFromUtf8("语音合成失败：") + qFromUtf8(evt->errorMsg.c_str());
+            ToastWidget::show(chatWidget, failText, 6000);
+            stbarShowStatusMessage(failText, SticonCritical, 5000);
+            sticonShowStatusMessage(failText, SticonCritical, 5000);
+            m_lyrics->setPlayedColor(QColor(0xFF,0x44,0x44));
+            m_lyrics->setLrcText(qFromUtf8("[00:00.000]语音合成失败"));
+            m_lyrics->setPosition(0);
+            m_hintActive = true;
+#ifdef QT3_BUILD
+            m_msgTimer->start(5000, true);
+#else
+            m_msgTimer->start(5000);
+#endif
+        }
+        chatWidget->repaintMessages();
+        return;
+    }
+
     // 翻译结果：原消息收尾为发送完成态，另追加一条译文消息（同 pastebin 回执）
     if (event->type() == FanyibotDoneType) {
         FanyibotDoneEvent* evt = static_cast<FanyibotDoneEvent*>(event);
@@ -1518,6 +1613,18 @@ void MainWindow::customEvent(CustomEventBase* event) {
                     cl.append(c);
                     updateContactDb(std::string(kWebsearchType) + "_" + std::to_string(VIRTUAL_WEBSEARCH_ID),
                                     kWebsearchName, "online", -1, "", "", kWebsearchType);
+                }
+                {
+                    Contact* c = new Contact();
+                    c->id = VIRTUAL_TTSBOT_ID;
+                    c->name = qFromUtf8(kTtsbotName);
+                    c->type = kTtsbotType;
+                    c->status = "online";
+                    c->chat_id = "";
+                    c->is_connected = false;
+                    cl.append(c);
+                    updateContactDb(std::string(kTtsbotType) + "_" + std::to_string(VIRTUAL_TTSBOT_ID),
+                                    kTtsbotName, "online", -1, "", "", kTtsbotType);
                 }
                 contactListWidget->setContacts(cl);
             }
@@ -2100,6 +2207,28 @@ void MainWindow::handleWebsearchChatMessage(int64_t localId, const QString& text
     websearchStart(req, this);
 }
 
+void MainWindow::handleTtsMessage(int64_t localId, const QString& text) {
+    const std::string typeStr = std::string(qToUtf8(currentChatType).data());
+    ChatHistory& hist = m_chatbuf.getOrCreate(currentChatId, typeStr);
+    ChatElement* elp = nullptr;
+    for (size_t i = hist.size(); i > 0; --i) {
+        if (hist[i - 1].localId == localId) { elp = &hist[i - 1]; break; }
+    }
+    // 与其它 bot 同机制：首发内存态优先，缺失回落当前属性栏
+    const QMap<QString,QString> ctx = (!elp || elp->sendCtx.isEmpty())
+            ? chatWidget->attribContext() : elp->sendCtx;
+    TtsbotRequest req;
+    req.text     = std::string(qToUtf8(text).data());
+    req.provider = std::string(qToUtf8(mapValue(ctx, "provider")).data());
+    req.voice    = std::string(qToUtf8(mapValue(ctx, "voice")).data());
+    req.lang     = std::string(qToUtf8(mapValue(ctx, "lang")).data());
+    req.rate     = std::string(qToUtf8(mapValue(ctx, "rate")).data());
+    req.localId  = localId;
+    req.chatId   = currentChatId;
+    req.chatType = typeStr;
+    ttsbotSynthStart(req, this);
+}
+
 
 // Qt3 QMap 无 value()，统一按版本取键值（缺键返回空串）
 void MainWindow::handlePastebinMessage(int64_t localId, const QString& text) {
@@ -2191,6 +2320,19 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
 #else
         m_msgTimer->start(5000);
 #endif
+    } else if (type == kTtsbotType) {
+        // 客户端直合成：不调 ToxAPI::sendMessage（sendmsgseq 保持 0），
+        // 真正启动在乐观插入拿到 localId 之后（见块外调用）。
+        chatWidget->loadingBar()->showLoading(kLoadSendMsg, qFromUtf8("合成中..."));
+        m_lyrics->setPlayedColor(QColor(0xBB,0xBB,0xBB));
+        m_lyrics->setLrcText(qFromUtf8("[00:00.000]语音合成中..."));
+        m_lyrics->setPosition(0);   // setLrcText 只装载不定位，需显式定位首行才渲染
+        m_hintActive = true;
+#ifdef QT3_BUILD
+        m_msgTimer->start(5000, true);
+#else
+        m_msgTimer->start(5000);
+#endif
     } else if (type == kPastebinType) {
         // 客户端直传：不调 ToxAPI::sendMessage（sendmsgseq 保持 0），
         // 真正启动在乐观插入拿到 localId 之后（见块外调用）。
@@ -2259,6 +2401,7 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
     int64_t translateLocalId = 0;   // 同上：翻译启动需要 localId 定位元素
     int64_t aigptLocalId = 0;       // 同上：AI GPT Chat 启动需要 localId 定位元素
     int64_t websearchLocalId = 0;   // 同上：网页搜索启动需要 localId 定位元素
+    int64_t ttsLocalId = 0;         // 同上：TTS 文转音启动需要 localId 定位元素
     QString selfTimeStr = timenowhm();
     {
         std::string typeStr = std::string(qToUtf8(currentChatType).data());
@@ -2292,6 +2435,9 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
         if (type == kWebsearchType) {
             websearchLocalId = backEl.localId;   // 保持 SendSending，等待搜索结果事件
         }
+        if (type == kTtsbotType) {
+            ttsLocalId = backEl.localId;         // 保持 SendSending，等待合成结果事件
+        }
     }
     if (type == kPastebinType) {
         handlePastebinMessage(pasteLocalId, message);
@@ -2304,6 +2450,9 @@ void MainWindow::onMessageSending(const QString& message, const QMap<QString,QSt
     }
     if (type == kWebsearchType) {
         handleWebsearchChatMessage(websearchLocalId, message);
+    }
+    if (type == kTtsbotType) {
+        handleTtsMessage(ttsLocalId, message);
     }
     contactListWidget->updateContactLastMessage(currentChatId, currentChatType, message, selfTimeStr);
     db_writeLastMessage(currentChatId, currentChatType, message, selfTimeStr);
@@ -3041,6 +3190,8 @@ void MainWindow::retranslateUi() {
             headerText = qFromUtf8(kSnapName) + " " + QString::number(currentChatId);
         } else if (currentChatType == kWebsearchType) {
             headerText = qFromUtf8(kWebsearchName) + " " + QString::number(currentChatId);
+        } else if (currentChatType == kTtsbotType) {
+            headerText = qFromUtf8(kTtsbotName) + " " + QString::number(currentChatId);
         } else if (!protoStreamEmoji(currentChatType).isEmpty()) {
             QString label;
             std::string type = std::string(qToUtf8(currentChatType).data());
@@ -4044,6 +4195,10 @@ void MainWindow::onResendMessage(int msgIndex) {
         // 保持 SendSending（chatview 入口已置）；先拷出 localId，避免扩容后 el 悬空
         const int64_t lid = el.localId;
         handleWebsearchChatMessage(lid, msgText);
+    } else if (type == kTtsbotType) {
+        // 保持 SendSending（chatview 入口已置）；先拷出 localId，避免扩容后 el 悬空
+        const int64_t lid = el.localId;
+        handleTtsMessage(lid, msgText);
     } else {
         // 扩展上下文：首发内存态优先(可见性/CW/引用与原消息一致，沿用原引用目标)；
         // 缺失(重载/重启后从 DB 恢复)则退化为当前属性栏取值，且不带待发引用/提及
@@ -4127,10 +4282,28 @@ void MainWindow::onOpenFullSizeImage(int msgIndex, const QString& mediaUrl) {
 
 void MainWindow::onOpenMediaPlayer(int msgIndex) {
     if (msgIndex < 0 || msgIndex >= chatWidget->messageCount()) { return; }
-    if (currentChatId < 0) { return; }
 
     ChatElement& el = chatWidget->mutableMessageAt(msgIndex);
     if (el.etype != ChatElement::Video && el.etype != ChatElement::Audio) { return; }
+
+    // TTS 音频气泡：tts://<远程url> 剥前缀直连播放；tts://<key> 仍走本地 cacheDB 管线。
+    // 注意 tts 虚拟联系人的 chatId 为负数（-124），需在 currentChatId<0 守卫前放行。
+    bool isTtsMedia = el.mediaUrl.startsWith("tts://");
+    if (currentChatId < 0 && !isTtsMedia) { return; }
+
+
+    if (el.mediaUrl.startsWith("tts://")) {
+        QString sub = el.mediaUrl.mid(6);
+        if (sub.startsWith("http://") || sub.startsWith("https://")) {
+            el.pendingPlay = false;
+            launchPlayer(sub, false);
+            return;
+        }
+        if (el.pendingPlay) { return; }
+        el.pendingPlay = true;
+        scheduleMediaPlayback(msgIndex, true);
+        return;
+    }
 
     if (el.pendingPlay) { return; }   // 防重入：已等待自动播放
     if (el.downloadState == ChatElement::InProgress) {
@@ -4147,6 +4320,37 @@ void MainWindow::onOpenMediaPlayer(int msgIndex) {
     onRetryClicked(msgIndex, el.mediaUrl, "open_player");
 }
 
+// 入口 B：对已有文本消息朗读。合成结果以音频气泡追加到当前会话（localId=0，不回写原消息）。
+void MainWindow::onTtsSpeakRequested(int msgIndex) {
+    if (msgIndex < 0 || msgIndex >= chatWidget->messageCount()) { return; }
+    if (currentChatId == -1 || currentChatType.isEmpty()) { return; }
+    ChatElement el = chatWidget->messageAt(msgIndex);
+    QString text = el.messageText;
+    if (text.isEmpty()) { return; }
+
+    TtsbotRequest req;
+    req.text     = std::string(qToUtf8(text).data());
+    req.provider = std::string(qToUtf8(Config::value("tts_provider")).data());
+    req.voice    = std::string(qToUtf8(Config::value("tts_voice")).data());
+    req.lang     = std::string(qToUtf8(Config::value("tts_lang")).data());
+    req.rate     = std::string(qToUtf8(Config::value("tts_rate")).data());
+    req.localId  = 0;   // 朗读入口：无宿主消息待更新，仅追加气泡
+    req.chatId   = currentChatId;
+    req.chatType = std::string(qToUtf8(currentChatType).data());
+
+    chatWidget->loadingBar()->showLoading(kLoadSendMsg, qFromUtf8("合成中..."));
+    m_lyrics->setPlayedColor(QColor(0xBB,0xBB,0xBB));
+    m_lyrics->setLrcText(qFromUtf8("[00:00.000]语音合成中..."));
+    m_lyrics->setPosition(0);
+    m_hintActive = true;
+#ifdef QT3_BUILD
+    m_msgTimer->start(5000, true);
+#else
+    m_msgTimer->start(5000);
+#endif
+    ttsbotSynthStart(req, this);
+}
+
 void MainWindow::scheduleMediaPlayback(int msgIndex, bool pendingPlay,
                                        const std::vector<uint8_t>* preloaded,
                                        int chatIdOverride, const QString& chatTypeOverride) {
@@ -4161,10 +4365,13 @@ void MainWindow::scheduleMediaPlayback(int msgIndex, bool pendingPlay,
         if (!t || msgIndex >= t->size()) { return; }
         el = &(*t)[msgIndex];
     } else {
-        if (msgIndex >= chatWidget->messageCount() || currentChatId < 0) { return; }
+        if (msgIndex >= chatWidget->messageCount()) { return; }
+        el = &chatWidget->mutableMessageAt(msgIndex);
+        // TTS 音频位于负数 chatId 的虚拟会话（-124），此处放行；其余媒体仍限非负
+        bool isTtsMedia = el->mediaUrl.startsWith("tts://");
+        if (currentChatId < 0 && !isTtsMedia) { return; }
         chatId = currentChatId;
         chatType = currentChatType;
-        el = &chatWidget->mutableMessageAt(msgIndex);
     }
     if (el->etype != ChatElement::Video && el->etype != ChatElement::Audio
         && el->etype != ChatElement::Gif) { return; }

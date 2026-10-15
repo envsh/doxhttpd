@@ -346,6 +346,8 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
             this, SIGNAL(openFullSizeImage(int, const QString&)));
     connect(messageArea, SIGNAL(openMediaPlayer(int)),
             this, SIGNAL(openMediaPlayer(int)));
+    connect(messageArea, SIGNAL(ttsSpeakRequested(int)),
+            this, SIGNAL(ttsSpeakRequested(int)));
     connect(messageArea, SIGNAL(mentionClicked(const QString&,const QString&)),
             this, SLOT(onMentionClicked(const QString&,const QString&)));
     connect(messageArea, SIGNAL(autoTranslateRequested(int, const QString&, const QString&)),
