@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import java.util.Set;
 import org.unifiedpush.android.connector.PushService;
+import org.unifiedpush.android.connector.data.PublicKeySet;
 import org.unifiedpush.android.connector.data.PushEndpoint;
 import org.unifiedpush.android.connector.data.PushMessage;
 import org.unifiedpush.android.connector.FailedReason;
@@ -44,14 +45,18 @@ public class PushServiceImpl extends PushService {
         return true;
     }
 
-    private static native void onNewEndpointNative(String endpoint, String instance);
+    private static native void onNewEndpointNative(String endpoint, String instance,
+                                                   String pubKey, String auth);
     private static native void onMessageNative(byte[] message, String instance, String distributor);
     private static native void onRegistrationFailedNative(String reason, String instance);
     private static native void onUnregisteredNative(String instance);
 
     @Override
     public void onNewEndpoint(PushEndpoint endpoint, String instance) {
-        onNewEndpointNative(endpoint.getUrl(), instance);
+        PublicKeySet keys = endpoint.getPubKeySet();
+        onNewEndpointNative(endpoint.getUrl(), instance,
+                keys != null ? keys.getPubKey() : "",
+                keys != null ? keys.getAuth() : "");
     }
 
     @Override

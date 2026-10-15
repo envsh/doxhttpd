@@ -20,7 +20,8 @@ namespace {
 // 全部为 CPU/JNI 重活，仅供工作线程调用（勿在主线程调用）。
 bool buildRequestBody(const QString& deriveUaid, const QString& postEndpoint,
                       const QString& pushType, const QString& payEndpoint,
-                      const QString& payUaid, quint64 seq,
+                      const QString& payUaid, const QString& payP256dh,
+                      const QString& payAuth, quint64 seq,
                       QByteArray* body, QString* authz)
 {
     QByteArray p256dh;
@@ -44,6 +45,8 @@ bool buildRequestBody(const QString& deriveUaid, const QString& postEndpoint,
     cJSON_AddNumberToObject(o, "seq", static_cast<double>(seq));
     cJSON_AddNumberToObject(o, "ts", static_cast<double>(QDateTime::currentSecsSinceEpoch()));
     cJSON_AddStringToObject(o, "endpoint", payEndpoint.toUtf8().constData());
+    cJSON_AddStringToObject(o, "p256dh", payP256dh.toUtf8().constData());
+    cJSON_AddStringToObject(o, "auth", payAuth.toUtf8().constData());
     char* js = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);
     if (!js) {
@@ -154,6 +157,10 @@ void MozpushSender::buildSend()
     const QString payEndpoint =
         QSettings().value("pushDeviceEndpoint").toString().trimmed();
     const QString payUaid;   // sunup 下可能为空；空值即空值
+    const QString payP256dh =
+        QSettings().value("pushDevicePubKey").toString().trimmed();
+    const QString payAuth =
+        QSettings().value("pushDeviceAuth").toString().trimmed();
 
     const QString deriveUaid = m_uaid;
     const QString endpoint = m_endpoint;
@@ -161,11 +168,12 @@ void MozpushSender::buildSend()
 
     MozpushSender* self = this;
     // 重活移出 UI 线程；完成后经队列连接把 POST 派回主线程
-    std::thread([self, deriveUaid, endpoint, pushType, payEndpoint, payUaid, seq]() {
+    std::thread([self, deriveUaid, endpoint, pushType, payEndpoint, payUaid,
+                 payP256dh, payAuth, seq]() {
         QByteArray body;
         QString authz;
         if (!buildRequestBody(deriveUaid, endpoint, pushType, payEndpoint,
-                              payUaid, seq, &body, &authz)) {
+                              payUaid, payP256dh, payAuth, seq, &body, &authz)) {
             return;
         }
         QMetaObject::invokeMethod(self, [self, body, authz, endpoint]() {

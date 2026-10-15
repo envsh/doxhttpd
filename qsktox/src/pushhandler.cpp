@@ -502,14 +502,20 @@ static QString jstringToQString(JNIEnv* env, jstring js)
 
 extern "C" JNIEXPORT void JNICALL
 Java_io_fedlet_mobutil_PushServiceImpl_onNewEndpointNative(
-    JNIEnv* env, jobject /*thiz*/, jstring jEndpoint, jstring jInstance)
+    JNIEnv* env, jobject /*thiz*/, jstring jEndpoint, jstring jInstance,
+    jstring jPubKey, jstring jAuth)
 {
     QString endpoint = jstringToQString(env, jEndpoint);
     QString instance = jstringToQString(env, jInstance);
-    qDebug() << "[PushHandler] new endpoint:" << endpoint << "instance:" << instance;
+    QString pubKey = jstringToQString(env, jPubKey);
+    QString auth = jstringToQString(env, jAuth);
+    qDebug() << "[PushHandler] new endpoint:" << endpoint << "instance:" << instance
+             << "pubKey:" << pubKey << "auth.len:" << auth.size();
 
     QSettings s;
     s.setValue("pushDeviceEndpoint", endpoint);
+    s.setValue("pushDevicePubKey", pubKey);
+    s.setValue("pushDeviceAuth", auth);
     s.sync();
 
     if (s_instance) {
