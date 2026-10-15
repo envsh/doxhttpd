@@ -89,15 +89,15 @@ qt_add_executable(qsktox
     ${qlappcom_dir}/media_shmem_cache.cpp
     #${qlappcom_dir}/recorder.cpp
     #${qlappcom_dir}/sound.c
-    #${qlappcom_dir}/eventpoller.cpp
-    #${qlappcom_dir}/unknownparser.cpp
+    ${qlappcom_dir}/eventpoller.cpp
+    ${qlappcom_dir}/unknownparser.cpp
     ${qlappcom_dir}/netproxy.cpp
     ${qlappcom_dir}/webcreds.cpp
-    #${qlappcom_dir}/fanyibot.cpp
-    #${qlappcom_dir}/websearchbot.cpp
-    #${qlappcom_dir}/aigptbot.cpp
-    #${qlappcom_dir}/aigpt_sessions.cpp
-    #${qlappcom_dir}/pasteuploader.cpp
+    ${qlappcom_dir}/fanyibot.cpp
+    ${qlappcom_dir}/websearchbot.cpp
+    ${qlappcom_dir}/aigptbot.cpp
+    ${qlappcom_dir}/aigpt_sessions.cpp
+    ${qlappcom_dir}/pasteuploader.cpp
 
    ${ql3rdparty_dir}/barrust_bloom/bloom.c
 
