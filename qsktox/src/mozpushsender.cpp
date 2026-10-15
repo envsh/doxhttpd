@@ -37,6 +37,7 @@ bool buildRequestBody(const QString& deriveUaid, const QString& postEndpoint,
     if (!o) {
         return false;
     }
+    cJSON_AddStringToObject(o, "action", "register");
     cJSON_AddStringToObject(o, "proto_type", "mobsub");
     cJSON_AddStringToObject(o, "push_type", pushType.toUtf8().constData());
     cJSON_AddStringToObject(o, "uaid", payUaid.toUtf8().constData());
