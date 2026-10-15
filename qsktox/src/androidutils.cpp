@@ -1,6 +1,7 @@
 #include "androidutils.h"
 #include <QCoreApplication>
 #include <QDebug>
+#include <QHostInfo>
 
 #ifdef Q_OS_ANDROID
 #include <QJniObject>
@@ -63,4 +64,62 @@ void showAndroidToast(const QString& message) {
 void showAndroidToast(const QString& message) {
     Q_UNUSED(message)
 }
+#endif
+
+#ifdef Q_OS_ANDROID
+#include <QJniObject>
+
+QString androidDeviceName()
+{
+    QString name;
+    auto future = QNativeInterface::QAndroidApplication::runOnAndroidMainThread([&name]() {
+        QJniObject ctx = QNativeInterface::QAndroidApplication::context();
+        if (!ctx.isValid()) {
+            return;
+        }
+        QJniObject result = QJniObject::callStaticObjectMethod(
+            "io/fedlet/mobutil/PermissionHelper",
+            "getDeviceName",
+            "(Landroid/app/Activity;)Ljava/lang/String;",
+            ctx.object());
+        if (result.isValid()) {
+            name = result.toString();
+        }
+    });
+    future.waitForFinished();
+    if (name.isEmpty()) {
+        name = QHostInfo::localHostName();
+    }
+    if (name.isEmpty()) {
+        name = QStringLiteral("android");
+    }
+    return name;
+}
+
+void androidRequestBluetoothNamePermission()
+{
+    QNativeInterface::QAndroidApplication::runOnAndroidMainThread([]() {
+        QJniObject ctx = QNativeInterface::QAndroidApplication::context();
+        if (!ctx.isValid()) {
+            return;
+        }
+        QJniObject::callStaticMethod<void>(
+            "io/fedlet/mobutil/PermissionHelper",
+            "requestBluetoothConnectPermission",
+            "(Landroid/app/Activity;)V",
+            ctx.object());
+    });
+}
+
+#else
+
+QString androidDeviceName()
+{
+    return QHostInfo::localHostName();
+}
+
+void androidRequestBluetoothNamePermission()
+{
+}
+
 #endif

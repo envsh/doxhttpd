@@ -2,8 +2,11 @@ package io.fedlet.mobutil;
 
 import android.Manifest;
 import android.app.Activity;
+import android.bluetooth.BluetoothAdapter;
+import android.content.ContentResolver;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.provider.Settings;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
@@ -11,6 +14,7 @@ public class PermissionHelper {
     private static final int REQ_NOTIFICATION = 9001;
     private static final int REQ_MEDIA = 9002;
     private static final int REQ_PHONE_CALL = 9003;
+    private static final int REQ_BLUETOOTH = 9004;
 
     public static boolean hasNotificationPermission(Activity activity) {
         if (Build.VERSION.SDK_INT < 33)
@@ -68,5 +72,52 @@ public class PermissionHelper {
             ActivityCompat.requestPermissions(activity,
                 perms.toArray(new String[0]), REQ_PHONE_CALL);
         }
+    }
+
+    // ── 蓝牙连接权限 (仅 Android 12 / API 31+ 需运行时申请) ──
+    public static boolean hasBluetoothConnectPermission(Activity activity) {
+        if (Build.VERSION.SDK_INT < 31)
+            return true;
+        return ContextCompat.checkSelfPermission(activity,
+            Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    public static void requestBluetoothConnectPermission(Activity activity) {
+        if (Build.VERSION.SDK_INT < 31)
+            return;
+        if (hasBluetoothConnectPermission(activity))
+            return;
+        ActivityCompat.requestPermissions(activity,
+            new String[]{Manifest.permission.BLUETOOTH_CONNECT}, REQ_BLUETOOTH);
+    }
+
+    // ── 取手机名: BluetoothAdapter ← Secure.bluetooth_name ← Global.device_name ← Build.MODEL ──
+    public static String getDeviceName(Activity activity) {
+        try {
+            if (hasBluetoothConnectPermission(activity)) {
+                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                if (adapter != null) {
+                    String bt = adapter.getName();
+                    if (bt != null && !bt.isEmpty())
+                        return bt;
+                }
+            }
+        } catch (SecurityException ignored) {
+        }
+
+        ContentResolver cr = activity.getContentResolver();
+
+        String n = Settings.Secure.getString(cr, "bluetooth_name");
+        if (n != null && !n.isEmpty())
+            return n;
+
+        if (Build.VERSION.SDK_INT >= 25) {
+            n = Settings.Global.getString(cr, Settings.Global.DEVICE_NAME);
+            if (n != null && !n.isEmpty())
+                return n;
+        }
+
+        String model = Build.MODEL;
+        return (model != null && !model.isEmpty()) ? model : "";
     }
 }

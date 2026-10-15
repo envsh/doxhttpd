@@ -73,6 +73,10 @@ qt_add_executable(qsktox
     src/mytaphandler.cpp
     src/myscrollarea.h
     src/myscrollarea.cpp
+    src/webpushcrypto.h
+    src/webpushcrypto.cpp
+    src/mozpushsender.h
+    src/mozpushsender.cpp
 
     ${qlappcom_dir}/message_db.cpp
     ${qlappcom_dir}/storage.cpp

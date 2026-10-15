@@ -34,6 +34,7 @@
 #include "pushhandler.h"
 #include "phonemonitor.h"
 #include "androidutils.h"
+#include "mozpushsender.h"
 #include "pagemanager.h"
 #include "msgenlargeoverlay.h"
 #include "messagepage.h"
@@ -361,12 +362,14 @@ int main(int argc, char* argv[]) {
                 qDebug() << "[qsktox] applicationState:" << state
                          << "-> syncing QSettings";
                 QSettings().sync();
+                MozpushSender::instance()->pause();
             }
-#ifdef Q_OS_ANDROID
             if (state == Qt::ApplicationActive) {
+#ifdef Q_OS_ANDROID
                 NetworkMonitor::checkNetwork();
-            }
 #endif
+                MozpushSender::instance()->resume();
+            }
         });
 
 #ifndef Q_OS_ANDROID
@@ -458,6 +461,8 @@ int main(int argc, char* argv[]) {
 
     qDebug() << "[qsktox] KeepAlive service started";
 #endif
+
+    MozpushSender::start();
 
     std::thread(gosoMainLoop).detach();
     std::thread(csoMainLoop).detach();
