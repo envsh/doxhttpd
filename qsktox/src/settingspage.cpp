@@ -189,6 +189,29 @@ SettingsPage::SettingsPage(QQuickItem* parent)
 
     updateGotifyVisibility(0);
 
+    // ── Row 11: Mozilla Push UAID ──
+    auto* row11 = new QskLinearBox(Qt::Horizontal, layout);
+    row11->setSpacing(12);
+    auto* mozUaidLabel = new QskTextLabel("Mozilla UAID", row11);
+    mozUaidLabel->setPreferredWidth(160);
+    m_mozpushUaidEdit = new QskTextField(row11);
+    m_mozpushUaidEdit->setPlaceholderText("uaid");
+    m_mozpushUaidEdit->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    new QskSeparator(Qt::Horizontal, layout);
+
+    // ── Row 12: Mozilla Push Endpoint ──
+    auto* row12 = new QskLinearBox(Qt::Horizontal, layout);
+    row12->setSpacing(12);
+    auto* mozEndpointLabel = new QskTextLabel("Mozilla Endpoint", row12);
+    mozEndpointLabel->setPreferredWidth(160);
+    m_mozpushEndpointEdit = new QskTextField(row12);
+    m_mozpushEndpointEdit->setPlaceholderText(
+        "https://updates.push.services.mozilla.com/wpush/v1/...");
+    m_mozpushEndpointEdit->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    new QskSeparator(Qt::Horizontal, layout);
+
     layout->addStretch(1);
 }
 
@@ -280,6 +303,10 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
     // ── Restore Push Backend settings ──
     m_gotifyUrlEdit->setText(settings.value("gotifyUrl").toString());
     m_gotifyTokenEdit->setText(settings.value("gotifyToken").toString());
+
+    // ── Restore Mozilla Push settings ──
+    m_mozpushUaidEdit->setText(settings.value("mozpushUaid").toString());
+    m_mozpushEndpointEdit->setText(settings.value("mozpushEndpoint").toString());
 
     {
         QString savedBackend = settings.value("pushBackend").toString();
@@ -442,6 +469,16 @@ void SettingsPage::onCreate(const QVariantMap&, const QVariantMap&)
     connect(m_gotifyTokenEdit, &QskTextField::textEdited,
         this, [](const QString& text) {
             QSettings().setValue("gotifyToken", text);
+        });
+
+    // ── Row 11b/12: Mozilla Push settings (save on text change) ──
+    connect(m_mozpushUaidEdit, &QskTextField::textEdited,
+        this, [](const QString& text) {
+            QSettings().setValue("mozpushUaid", text);
+        });
+    connect(m_mozpushEndpointEdit, &QskTextField::textEdited,
+        this, [](const QString& text) {
+            QSettings().setValue("mozpushEndpoint", text);
         });
 
     // Sync debug background (restored value may differ from QskSetup default)

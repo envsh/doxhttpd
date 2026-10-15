@@ -58,6 +58,8 @@ private:
     QskComboBox* m_backendCombo = nullptr;
     QskTextField* m_gotifyUrlEdit = nullptr;
     QskTextField* m_gotifyTokenEdit = nullptr;
+    QskTextField* m_mozpushUaidEdit = nullptr;
+    QskTextField* m_mozpushEndpointEdit = nullptr;
     QskLinearBox* m_gotifyRow = nullptr;
     QskLinearBox* m_gotifyRow2 = nullptr;
     QskSeparator* m_gotifySep1 = nullptr;
