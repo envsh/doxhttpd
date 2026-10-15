@@ -263,6 +263,10 @@ void ToxAPI::pollEvents() {
 // 这是 events 请求参数的唯一出处（timeout/stall/低速/建连超时），成功续拉也必须走这里，
 // 避免重复构造丢参数；同时记录当前 generation，便于守卫丢弃陈旧链。
 void ToxAPI::schedulePoll(int delayMs) {
+    if (!EventPoller::isReady()) {
+        ALOG_WARN("schedulePoll skipped: EventPoller not ready");
+        return;
+    }
     HttpRequest req(buildUrl("/api/events?after=" + std::to_string(s_lastEventId.load()) + "&" + kEventTopic),
                     "GET", "", 35, {{"Accept", "application/x-ndjson"}}, kPollStallSec);
     req.lowSpeedLimit = 999;   // <999B/s 持续 45s → curl 原生中止
