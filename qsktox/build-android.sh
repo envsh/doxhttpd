@@ -104,9 +104,14 @@ EOF
     sed -i '/^dependencies {/r /tmp/up_dep.txt' "$APK_DIR/build.gradle"
 fi
 
-# Qt 模板强制 DEFLATE 压缩全部 .so（useLegacyPackaging true），packageDebug 在堆上
-# 压缩 45 个共 111MB 的库导致 OOM；minSdk≥23 时 false=官方默认的 STORED 页对齐直拷
-sed -i 's/packagingOptions.jniLibs.useLegacyPackaging true/packagingOptions.jniLibs.useLegacyPackaging false/' "$APK_DIR/build.gradle"
+# Qt 模板生成 useLegacyPackaging true（.so DEFLATE 压缩，安装时解压到磁盘）。
+# 注意：Qt 6.9 之前不支持直接从 APK 加载未压缩(STORED)的 .so —— 若改成 false，
+# QtLoader 的 System.load() 无法 dlopen 平台插件，JNI_OnLoad 不执行，
+# 首个 native 调用(QtDisplayManager.handleOrientationChanged)即 UnsatisfiedLinkError 闪退。
+# 必须保持 true；压缩所需堆内存由下方 jvmargs/GRADLE_OPTS 提升解决。
+# 注意：androiddeployqt --aux-mode 不覆写已存在的 build.gradle，故旧产物里的
+# false 会残留，这里显式改回 true（模板默认即 true，全新生成时为 no-op）。
+sed -i 's/packagingOptions.jniLibs.useLegacyPackaging false/packagingOptions.jniLibs.useLegacyPackaging true/' "$APK_DIR/build.gradle"
 
 # 覆盖 manifest（包含所有自定义：activity、intent-filter、权限、service）
 cp android/AndroidManifest.xml "$APK_DIR/AndroidManifest.xml"
@@ -127,11 +132,11 @@ qtTargetAbiList=arm64-v8a
 qtTargetSdkVersion=34
 PROPS
 
-# 5. patch Gradle heap (low-memory device)
-sed -i 's/-Xmx[0-9]*m/-Xmx386m/' "$APK_DIR/gradle.properties"
+# 5. patch Gradle heap (low-memory device); DEFLATE 压缩 111MB lib 需要足够堆
+sed -i 's/-Xmx[0-9]*m/-Xmx2048m/' "$APK_DIR/gradle.properties"
 
 # 6. build debug APK (auto-signed with Android debug key)
-GRADLE_OPTS="-Xmx386m" "$APK_DIR/gradlew" --no-daemon --max-workers=2 -p "$APK_DIR" assembleDebug
+GRADLE_OPTS="-Xmx2048m" "$APK_DIR/gradlew" --no-daemon --max-workers=2 -p "$APK_DIR" assembleDebug
 
 # 6. verify output
 APK=$(find "$APK_DIR/build/outputs" -name "*.apk" 2>/dev/null | head -1)
