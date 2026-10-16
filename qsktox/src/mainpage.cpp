@@ -178,9 +178,18 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             }
             QJsonObject obj = doc.object();
 
-            QString chatId = obj.value("chat_id").toString();
+            QString chatId    = obj.value("chat_id").toString();
+            QString protocol  = obj.value("protocol").toString();
+            QString accountId = obj.value("account_id").toString();
+            QString userId    = obj.value("user_id").toString();
             if (chatId.isEmpty()) {
-                qWarning() << "[MainPage] chat_id is empty, skip";
+                qWarning() << "[MainPage] chat_id is empty, skip"
+                           << "protocol:" << (protocol.isEmpty()
+                                   ? QString::fromUtf8("✗") : QString::fromUtf8("✓"))
+                           << "account_id:" << (accountId.isEmpty()
+                                   ? QString::fromUtf8("✗") : QString::fromUtf8("✓"))
+                           << "user_id:" << (userId.isEmpty()
+                                   ? QString::fromUtf8("✗") : QString::fromUtf8("✓"));
                 return;
             }
 
