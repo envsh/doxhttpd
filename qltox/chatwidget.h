@@ -100,6 +100,12 @@ public:
     void setFavRowids(const std::vector<int64_t>& favRowids) { messageArea->setFavRowids(favRowids); }
     bool isFavRowid(int64_t rowid) const { return messageArea->isFavRowid(rowid); }
     void setFavRowid(int64_t rowid, bool fav) { messageArea->setFavRowid(rowid, fav); }
+    void applyLinkPreview(const QString& key, bool ok, const QString& title,
+                          const QString& description, const QString& site)
+        { messageArea->applyLinkPreview(key, ok, title, description, site); }
+    void resetLinkPreviews() { messageArea->resetLinkPreviews(); }
+    void scanLinkPreviews() { messageArea->scheduleLinkPreviewScan(); }
+    void setLinkPreviewEnabled(bool en) { messageArea->setLinkPreviewEnabled(en); }
     
 signals:
     void messageSent(const QString& message, const QMap<QString,QString>& context);
@@ -119,6 +125,7 @@ signals:
     void screenshotRequested();
     void peerInfoRequested(int peerNumber, const QString& senderName, const QString& pubkey);
     void replyLinkActivated(const QString& peerId, const QString& name);
+    void linkPreviewNeeded(int msgIndex, const QString& url);
 
 private slots:
     void onSendClicked();

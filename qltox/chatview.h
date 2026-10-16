@@ -132,6 +132,15 @@ struct ChatElement {
     QStringList mentions;
     bool redacted = false;
 
+    // Link preview (Text only)
+    enum LinkPreviewState { LinkPreviewNone, LinkPreviewScheduled, LinkPreviewReady, LinkPreviewFailed };
+    LinkPreviewState linkPreviewState;
+    QString linkPreviewUrl;       // 规范化页面 URL（缓存键）
+    QString linkPreviewTitle;
+    QString linkPreviewDesc;
+    QString linkPreviewSite;
+    QRect linkPreviewCardRect;    // 视口坐标，paint 时写入
+
     ChatElement()
         : etype(Text), peerNumber(-1), showTranslation(false)
         , transState(TransState::None), needsTranslateComputed(false), needsTranslateResult(false)
@@ -140,7 +149,8 @@ struct ChatElement {
         , fileSize(0), downloadProgress(0), downloadSpeedBps(0)
         , durationSec(0), gifLikeVideo(false), pendingPlay(false)
         , movie(nullptr)
-        , cachedWidth(-1), height(0), firstInGroup(1), sendState(SendSending) {}
+        , cachedWidth(-1), height(0), firstInGroup(1), sendState(SendSending)
+        , linkPreviewState(LinkPreviewNone) {}
 
     int calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, const QFont& baseFont);
     void paint(QPainter& p, int y, int viewWidth, bool isSelected,
@@ -149,6 +159,10 @@ struct ChatElement {
                const QFont& baseFont, const StyleParams::Palette& pal);
     void startGifLikeAnimation(QWidget* parent, int msgIndex);
     void stopGifLikeAnimation();
+    int linkPreviewCardHeight(int innerW, const QFontMetrics& fm, const QFont& baseFont) const;
+    void drawLinkPreviewCard(QPainter& p, const QRect& cardRect, int innerW,
+                             const QFontMetrics& fm, const QFont& baseFont,
+                             const StyleParams::Palette& pal) const;
 };
 
 QPixmap makeScaledThumb(const QPixmap& src, int mediaW, int mediaH, int maxContainW);
@@ -192,6 +206,11 @@ public:
     void updateElement(int msgIndex);
     void relayout();
     void repaintMessageElement(int msgIndex);
+    void applyLinkPreview(const QString& key, bool ok, const QString& title,
+                          const QString& description, const QString& site);
+    void resetLinkPreviews();
+    void scheduleLinkPreviewScan();
+    void setLinkPreviewEnabled(bool en);
     void onGifFrameUpdated(int msgIndex);
     /// 按 localId 反查下标（从尾反向）；找不到返回 -1。用于跨事件循环的稳定定位
     int indexOfLocalId(int64_t localId) const;
@@ -241,14 +260,18 @@ signals:
     void forwardClicked(int msgIndex);
     void peerInfoRequested(int peerNumber, const QString& senderName, const QString& pubkey);
     void replyLinkActivated(const QString& peerId, const QString& name);
+    void linkPreviewNeeded(int msgIndex, const QString& url);
 
 private slots:
     void onScrollChanged(int value);
     void onAnimTick();
     void flushScrollUpdate();
+    void scanLinkPreviews();
 
 private:
     bool m_scrollUpdatePending = false;
+    bool m_linkPreviewScanPending = false;
+    bool m_linkPreviewEnabled = true;
     void scheduleScrollUpdate();
     void rebuildBlocks();
     void flushEviction();

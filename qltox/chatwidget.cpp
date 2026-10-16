@@ -341,6 +341,7 @@ ChatWidget::ChatWidget(QWidget* parent) : QWidget(parent), m_attrKey() {
     connect(messageArea, SIGNAL(sourceClicked(int)), this, SIGNAL(sourceClicked(int)));
     connect(messageArea, SIGNAL(retryClicked(int, const QString&, const QString&)), this, SIGNAL(retryClicked(int, const QString&, const QString&)));
     connect(messageArea, SIGNAL(downloadNeeded(int, const QString&)), this, SIGNAL(downloadNeeded(int, const QString&)));
+    connect(messageArea, SIGNAL(linkPreviewNeeded(int, const QString&)), this, SIGNAL(linkPreviewNeeded(int, const QString&)));
     connect(messageArea, SIGNAL(resendMessage(int)), this, SIGNAL(resendMessage(int)));
     connect(messageArea, SIGNAL(openFullSizeImage(int, const QString&)),
             this, SIGNAL(openFullSizeImage(int, const QString&)));

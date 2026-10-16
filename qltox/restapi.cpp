@@ -4,11 +4,13 @@
 #include <curl/curl.h>
 #include <cstdlib>
 #include <cctype>
+#include <cstring>
 #include <chrono>
 #include <unistd.h>
 #include <qapplication.h>
 #include <sstream>
 #include "seen_unknown.h"
+#include "linkpreview.h"
 
 // ── Static members ──
 QObject* ToxAPI::s_target = nullptr;
@@ -508,6 +510,23 @@ void ToxAPI::downloadAvatar(const std::string& mxcUrl) {
     auto* ctx = new ApiCtx(ApiAvatarDownload);
     ctx->str2 = mxcUrl;
     request({"/api/media_download?url=" + urlEncode(mxcUrl), "GET"}, ctx);
+}
+
+static const char* kPreviewUA =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
+
+// 链接预览：客户端直连外部站点抓取 HTML（绕开 buildUrl，url 为完整外链）
+void ToxAPI::fetchUrlPreview(const std::string& url, const std::string& urlKey) {
+    auto* ctx = new ApiCtx(ApiUrlPreview);
+    ctx->str1 = url;
+    ctx->str2 = urlKey;
+    HttpRequest req(url, "GET", "", 12);
+    req.followRedirects = true;
+    req.extraHeaders["User-Agent"] = kPreviewUA;
+    req.extraHeaders["Accept"] = "text/html,application/xhtml+xml,*/*;q=0.8";
+    req.extraHeaders["Accept-Encoding"] = "identity";
+    req.extraHeaders["Accept-Language"] = "en-US,en;q=0.8";
+    EventPoller::addRequest(req, onHttpDone, ctx);
 }
 
 void ToxAPI::joinConference(int friendNumber, const std::string& cookie) {
@@ -1343,6 +1362,56 @@ void ToxAPI::dispatchResult(ApiCtx* ctx, const HttpResponse& resp) {
             ev->errorMessage = (code.empty() ? "UNKNOWN" : code) + ": " + (err.empty() ? "translate failed" : err);
         }
         cJSON_Delete(root);
+        QApplication::postEvent(s_target, ev);
+        break;
+    }
+
+    case ApiUrlPreview: {
+        auto* ev = new UrlPreviewEvent();
+        ev->urlKey = ctx->str2;
+        if (resp.httpCode != 200 || resp.body.empty() || !resp.curlErrStr.empty()) {
+            ev->success = false;
+            ev->errorInfo = resp.curlErrStr.empty()
+                ? ("HTTP " + std::to_string(resp.httpCode)) : resp.curlErrStr;
+            QApplication::postEvent(s_target, ev);
+            break;
+        }
+        // Content-Type 校验：仅解析 HTML/XHTML（缺失则不拦）；同时保留原始头用于 charset
+        std::string ctStr;
+        {
+            std::map<std::string,std::string>::const_iterator ct = resp.headers.find("content-type");
+            if (ct != resp.headers.end()) {
+                ctStr = ct->second;
+                std::string t = ctStr;
+                for (size_t i = 0; i < t.size(); ++i) {
+                    t[i] = (char)tolower((unsigned char)t[i]);
+                }
+                if (t.find("text/html") == std::string::npos
+                    && t.find("application/xhtml") == std::string::npos) {
+                    ev->success = false;
+                    ev->errorInfo = "unsupported content-type";
+                    QApplication::postEvent(s_target, ev);
+                    break;
+                }
+            }
+        }
+        std::string body = resp.body;
+        if (body.size() > 512 * 1024) { body.resize(512 * 1024); }
+        LinkPreviewData d;
+        QByteArray html;
+        html.resize((int)body.size());
+        if (!body.empty()) { memcpy(html.data(), body.data(), body.size()); }
+        QString ct = qFromUtf8(ctStr.data(), (int)ctStr.size());
+        if (parseLinkPreviewHtml(html, ct,
+                                 qFromUtf8(ctx->str2.data(), (int)ctx->str2.size()), d)) {
+            ev->success = true;
+            ev->title = std::string(qToUtf8(d.title).data());
+            ev->description = std::string(qToUtf8(d.description).data());
+            ev->siteName = std::string(qToUtf8(d.siteName).data());
+        } else {
+            ev->success = false;
+            ev->errorInfo = "no preview metadata";
+        }
         QApplication::postEvent(s_target, ev);
         break;
     }

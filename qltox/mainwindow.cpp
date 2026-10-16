@@ -79,6 +79,7 @@
 #include <qtimer.h>
 #include <qlabel.h>
 #include "ConfigDialog.h"
+#include "linkpreview.h"
 #include "netproxy.h"
 #include "DialogPopupAnimator.h"
 #include <qpushbutton.h>
@@ -480,6 +481,7 @@ MainWindow::MainWindow(QWidget* parent)
     connect(chatWidget, SIGNAL(sourceClicked(int)), this, SLOT(onSourceClicked(int)));
     connect(chatWidget, SIGNAL(retryClicked(int, const QString&, const QString&)), this, SLOT(onRetryClicked(int, const QString&, const QString&)));
     connect(chatWidget, SIGNAL(downloadNeeded(int, const QString&)), this, SLOT(onDownloadNeeded(int, const QString&)));
+    connect(chatWidget, SIGNAL(linkPreviewNeeded(int, const QString&)), this, SLOT(onLinkPreviewNeeded(int, const QString&)));
     connect(chatWidget, SIGNAL(resendMessage(int)), this, SLOT(onResendMessage(int)));
     connect(chatWidget, SIGNAL(requestRedactMessage(int)), this, SLOT(onRequestRedactMessage(int)));
     connect(chatWidget, SIGNAL(openFullSizeImage(int, const QString&)),
@@ -990,6 +992,25 @@ void MainWindow::customEvent(CustomEventBase* event) {
             AvatarManager::inst().removePending(key);
             stbarShowStatusMessage(qFromUtf8("头像下载失败"), SticonWarning, 3000);
             sticonShowStatusMessage(qFromUtf8("头像下载失败"), SticonWarning, 3000);
+        }
+        return;
+    }
+
+    // 链接预览 HTML 抓取完成
+    if (event->type() == UrlPreviewReadyType) {
+        UrlPreviewEvent* e = static_cast<UrlPreviewEvent*>(event);
+        LinkPreviewCache::inst().clearInflight(qFromUtf8(e->urlKey));
+        LinkPreviewData d;
+        d.ok = e->success;
+        d.url = qFromUtf8(e->urlKey);
+        d.title = qFromUtf8(e->title.c_str());
+        d.description = qFromUtf8(e->description.c_str());
+        d.siteName = qFromUtf8(e->siteName.c_str());
+        LinkPreviewCache::inst().put(qFromUtf8(e->urlKey), d);
+        if (d.ok) {
+            chatWidget->applyLinkPreview(d.url, true, d.title, d.description, d.siteName);
+        } else {
+            chatWidget->applyLinkPreview(qFromUtf8(e->urlKey), false, QString(), QString(), QString());
         }
         return;
     }
@@ -4154,6 +4175,25 @@ void MainWindow::onRetryClicked(int msgIndex, const QString& mediaUrl, const QSt
     startMediaDownload(msgIndex, mediaUrl);
 }
 
+void MainWindow::onLinkPreviewNeeded(int msgIndex, const QString& url) {
+    QString norm = linkPreviewNormalizeUrl(url);
+    if (norm.isEmpty()) { return; }
+    QString k = norm;
+    LinkPreviewData d;
+    if (LinkPreviewCache::inst().get(k, d)) {
+        if (d.ok) {
+            chatWidget->applyLinkPreview(k, true, d.title, d.description, d.siteName);
+        } else {
+            chatWidget->applyLinkPreview(k, false, QString(), QString(), QString());
+        }
+        return;
+    }
+    if (LinkPreviewCache::inst().isInflight(k)) { return; }
+    LinkPreviewCache::inst().markInflight(k);
+    ToxAPI::fetchUrlPreview(std::string(qToUtf8(k).data()),
+                           std::string(qToUtf8(k).data()));
+}
+
 void MainWindow::onDownloadNeeded(int msgIndex, const QString& mediaUrl) {
     // 自动绘制入口：滚动可见即预取缩略图，统一走 download media api，永不弹浏览器
     startMediaDownload(msgIndex, mediaUrl);
@@ -4905,6 +4945,12 @@ void MainWindow::openSettings() {
         qFromUtf8("显示视频"), other);
     other->addWidget(dispVid->checkBox());
 
+    // ── 链接预览 ──
+    BoolConfigItem* linkPrev = new BoolConfigItem(
+        "media/linkPreview", true,
+        qFromUtf8("自动链接预览"), other);
+    other->addWidget(linkPrev->checkBox());
+
     // ── 富媒体自动下载 ──
     BoolConfigItem* dlImg = new BoolConfigItem(
         "media/downloadImage", true,
@@ -4934,6 +4980,7 @@ void MainWindow::openSettings() {
     dlg->registerConfigItem(dispFile);
     dlg->registerConfigItem(dispGif);
     dlg->registerConfigItem(dispVid);
+    dlg->registerConfigItem(linkPrev);
     dlg->registerConfigItem(dlImg);
     dlg->registerConfigItem(dlFile);
     dlg->registerConfigItem(dlGif);
@@ -4984,6 +5031,13 @@ void MainWindow::onSettingsSaved(const SettingsChangedMap& changed) {
     }
     if (changed.contains("network/proxyEnabled") || changed.contains("network/proxyUrl")) {
         applyProxySettings();
+    }
+    if (changed.contains("media/linkPreview")) {
+        QSettings34 lpS(qFromUtf8("qltox"), qFromUtf8("ui"));
+        chatWidget->setLinkPreviewEnabled(
+            lpS.value("media/linkPreview", QVariant(true)).toBool());
+        LinkPreviewCache::inst().clearAll();
+        chatWidget->resetLinkPreviews();
     }
 }
 

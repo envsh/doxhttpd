@@ -128,6 +128,7 @@ public:
     static void downloadMedia(int chatId, const std::string& chatType, int msgIndex,
                               const std::string& mxcUrl, int fileSize = -1);
     static void downloadAvatar(const std::string& mxcUrl);
+    static void fetchUrlPreview(const std::string& url, const std::string& urlKey);
     static bool setSelfInfoSync(const std::string& name, const std::string& statusMessage);
     static bool joinGroupSync(int friendNumber, const std::string& chatId,
                               const std::string& name = "", const std::string& password = "");

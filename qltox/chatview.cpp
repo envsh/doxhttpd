@@ -18,6 +18,8 @@
 #include "translator.h"
 #include "restapi.h"
 #include "eventpoller.h"
+#include "linkpreview.h"
+#include "qsettings34.h"
 #include "pureconsts.hpp"
 #include "toastwidget.h"
 #ifdef QT3_BUILD
@@ -34,6 +36,11 @@ static const int kMinMediaH = 50;
 
 // ── 气泡宽度占可用宽度的百分比 ──
 static const int kBubbleWidthPct = 85;
+
+static bool linkPreviewEnabled() {
+    QSettings34 s(qFromUtf8("qltox"), qFromUtf8("ui"));
+    return s.value("media/linkPreview", QVariant(true)).toBool();
+}
 
 static bool isSameSender(const ChatElement& a, const ChatElement& b) {
     return a.category == b.category
@@ -914,6 +921,12 @@ int ChatElement::calcHeight(int viewWidth, const QFontMetrics& fm, int emojiW, c
             bubbleHeight += kBubbleVPad / 2 + transLineCount * sfm.lineSpacing() + kBubbleVPad + 7;
         }
 
+        // 链接预览卡片（翻译展示时不共存，height/paint 一致）
+        if (!(showTranslation && !translatedText.isEmpty())
+            && linkPreviewState == LinkPreviewReady) {
+            bubbleHeight += kBubbleVPad / 2 + linkPreviewCardHeight(bubbleTextWidth, fm, baseFont);
+        }
+
         if (!firstInGroup) {
             return bubbleHeight + kPad / 2 + kMsgSpacing;
         }
@@ -1103,6 +1116,7 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
         int headerH = fm.lineSpacing();
         QRect textRect;
         QRect bubbleRect;
+        linkPreviewCardRect = QRect();
 
         const int hdrBtnSize = 18;
         const int hdrBtnGap = 4;
@@ -1412,6 +1426,17 @@ void ChatElement::paint(QPainter& p, int y, int viewWidth, bool isSelected,
 #  endif
 #endif
                 p.setFont(baseFont);
+            }
+        }
+        // 链接预览卡片（底部锚定；翻译展示时不共存）
+        if (!(showTranslation && !translatedText.isEmpty())
+            && linkPreviewState == LinkPreviewReady) {
+            int cardH = linkPreviewCardHeight(textRect.width(), fm, baseFont);
+            if (cardH > 0) {
+                QRect cardRect(textRect.x(), bubbleRect.bottom() - kBubbleVPad - cardH,
+                               textRect.width(), cardH);
+                drawLinkPreviewCard(p, cardRect, textRect.width(), fm, baseFont, pal);
+                linkPreviewCardRect = cardRect;
             }
         }
         if (!firstInGroup) { drawGroupedTime(p, baseFont, fm, bubbleRect, time, pal); }
@@ -2126,6 +2151,87 @@ paintMediaContent(p, bubbleRect, etype, isGifLikeVideo(*this),
     }
 }
 
+int ChatElement::linkPreviewCardHeight(int innerW, const QFontMetrics& fm,
+                                       const QFont& baseFont) const {
+    if (linkPreviewState != LinkPreviewReady) { return 0; }
+    if (showTranslation && !translatedText.isEmpty()) { return 0; }
+    if (linkPreviewTitle.isEmpty() && linkPreviewDesc.isEmpty()) { return 0; }
+    int w = innerW;
+    if (w < 20) { w = 20; }
+    QFont smallFont = baseFont;
+    int pt = smallFont.pointSize() - 2;
+    if (pt < 8) { pt = 8; }
+    smallFont.setPointSize(pt);
+    QFontMetrics sfm(smallFont);
+    int pad = 6;
+    int h = pad;
+    if (!linkPreviewSite.isEmpty()) { h += sfm.lineSpacing(); }
+    if (!linkPreviewTitle.isEmpty()) { h += fm.lineSpacing(); }
+    if (!linkPreviewDesc.isEmpty()) { h += sfm.lineSpacing(); }
+    h += pad;
+    return h;
+}
+
+void ChatElement::drawLinkPreviewCard(QPainter& p, const QRect& cardRect, int innerW,
+                                      const QFontMetrics& fm, const QFont& baseFont,
+                                      const StyleParams::Palette& pal) const {
+    if (linkPreviewState != LinkPreviewReady || cardRect.height() <= 0) { return; }
+    p.save();
+    p.setPen(pal.textMuted);
+    p.setBrush(pal.baseBg);
+#ifdef QT3_BUILD
+    p.drawRoundRect(cardRect, 4, 4);
+#else
+    p.drawRoundedRect(cardRect, ChatView::kBubbleRadius, ChatView::kBubbleRadius);
+#endif
+    int pad = 6;
+    int left = cardRect.left() + pad;
+    int right = cardRect.right() - pad;
+    int textW = right - left;
+    if (textW < 10) { textW = 10; }
+    int y = cardRect.top() + pad;
+
+    QFont smallFont = baseFont;
+    int pt = smallFont.pointSize() - 2;
+    if (pt < 8) { pt = 8; }
+    smallFont.setPointSize(pt);
+    QFontMetrics sfm(smallFont);
+
+    if (!linkPreviewSite.isEmpty()) {
+        p.setFont(smallFont);
+        p.setPen(pal.textMuted);
+        QString line = linkPreviewSite;
+#ifndef QT3_BUILD
+        line = sfm.elidedText(line, Qt::ElideRight, textW);
+#endif
+        p.drawText(QRect(left, y, textW, sfm.lineSpacing()),
+                   Qt::AlignLeft | Qt::AlignVCenter, line);
+        y += sfm.lineSpacing();
+    }
+    if (!linkPreviewTitle.isEmpty()) {
+        p.setFont(baseFont);
+        p.setPen(pal.textPrimary);
+        QString line = linkPreviewTitle;
+#ifndef QT3_BUILD
+        line = fm.elidedText(line, Qt::ElideRight, textW);
+#endif
+        p.drawText(QRect(left, y, textW, fm.lineSpacing()),
+                   Qt::AlignLeft | Qt::AlignVCenter, line);
+        y += fm.lineSpacing();
+    }
+    if (!linkPreviewDesc.isEmpty()) {
+        p.setFont(smallFont);
+        p.setPen(pal.textMuted);
+        QString line = linkPreviewDesc;
+#ifndef QT3_BUILD
+        line = sfm.elidedText(line, Qt::ElideRight, textW);
+#endif
+        p.drawText(QRect(left, y, textW, sfm.lineSpacing()),
+                   Qt::AlignLeft | Qt::AlignVCenter, line);
+    }
+    p.restore();
+}
+
 void ChatElement::startGifLikeAnimation(QWidget* parent, int msgIndex) {
     if (movie) { return; }
     if (gifPath.isEmpty()) { return; }
@@ -2337,6 +2443,7 @@ ChatView::ChatView(QWidget* parent)
 {
     m_totalHeight = 0;
     m_scrollPos = 0;
+    m_linkPreviewEnabled = linkPreviewEnabled();
     for (int i = 0; i < 128; i++) {
         m_ascW[i] = (uint8_t)std::min(qFontWidth(m_fm, QChar(i)), 255);
     }
@@ -2470,6 +2577,7 @@ void ChatView::setBuffer(ChatHistory* hist) {
     relayout();
     scrollToBottom();
     updateFull();
+    scheduleLinkPreviewScan();
 }
 
 void ChatView::scrollToBottom() {
@@ -2537,6 +2645,7 @@ void ChatView::onInsertOne(size_t index) {
     m_totalHeight += el.height;
     _appendToBlocks(el.height);
     scheduleScrollUpdate();
+    scheduleLinkPreviewScan();
 }
 
 void ChatView::onInsertRange(size_t start, size_t cnt) {
@@ -2565,6 +2674,7 @@ void ChatView::onInsertRange(size_t start, size_t cnt) {
     m_vScrollBar->setValue(m_scrollPos);
     m_vScrollBar->showTemporarily();
     updateFull();
+    scheduleLinkPreviewScan();
 }
 
 void ChatView::onUpdateOne(size_t index) {
@@ -2689,6 +2799,88 @@ void ChatView::repaintMessageElement(int msgIndex) {
     QRect r = messageRect(msgIndex);
     if (r.isEmpty()) { return; }
     QWidget::update(r);
+}
+
+// ───── 链接预览 ─────
+void ChatView::scheduleLinkPreviewScan() {
+    if (!m_linkPreviewEnabled) { return; }
+    if (m_linkPreviewScanPending) { return; }
+    m_linkPreviewScanPending = true;
+    QTimer::singleShot(0, this, SLOT(scanLinkPreviews()));
+}
+
+void ChatView::scanLinkPreviews() {
+    m_linkPreviewScanPending = false;
+    if (!m_history || !m_linkPreviewEnabled) { return; }
+    std::pair<int,int> range = visibleMessageRange();
+    if (range.first < 0) { return; }
+    for (int i = range.first; i <= range.second; ++i) {
+        ChatElement& el = (*m_history)[i];
+        if (el.etype != ChatElement::Text) { continue; }
+        if (el.linkPreviewState == ChatElement::LinkPreviewNone) {
+            std::vector<LinkSpan> links = extractLinks(el.messageText);
+            if (links.empty()) { continue; }
+            QString url = linkPreviewNormalizeUrl(links[0].url);
+            if (url.isEmpty()) { continue; }
+            el.linkPreviewUrl = url;
+            el.linkPreviewState = ChatElement::LinkPreviewScheduled;
+            emit linkPreviewNeeded(i, url);
+        } else if (el.linkPreviewState == ChatElement::LinkPreviewScheduled) {
+            LinkPreviewData d;
+            if (LinkPreviewCache::inst().get(el.linkPreviewUrl, d)) {
+                if (d.ok) {
+                    el.linkPreviewTitle = d.title;
+                    el.linkPreviewDesc = d.description;
+                    el.linkPreviewSite = d.siteName;
+                    el.linkPreviewState = ChatElement::LinkPreviewReady;
+                } else {
+                    el.linkPreviewState = ChatElement::LinkPreviewFailed;
+                }
+                el.cachedWidth = -1;
+                updateElement(i);
+            }
+        }
+    }
+}
+
+void ChatView::applyLinkPreview(const QString& key, bool ok, const QString& title,
+                                const QString& description, const QString& site) {
+    if (!m_history) { return; }
+    for (size_t i = 0; i < m_history->size(); ++i) {
+        ChatElement& el = (*m_history)[i];
+        if (el.linkPreviewUrl != key) { continue; }
+        if (ok) {
+            el.linkPreviewTitle = title;
+            el.linkPreviewDesc = description;
+            el.linkPreviewSite = site;
+            el.linkPreviewState = ChatElement::LinkPreviewReady;
+        } else {
+            el.linkPreviewState = ChatElement::LinkPreviewFailed;
+        }
+        el.cachedWidth = -1;
+        updateElement((int)i);
+    }
+}
+
+void ChatView::resetLinkPreviews() {
+    if (!m_history) { return; }
+    for (size_t i = 0; i < m_history->size(); ++i) {
+        ChatElement& el = (*m_history)[i];
+        el.linkPreviewState = ChatElement::LinkPreviewNone;
+        el.linkPreviewUrl = QString();
+        el.linkPreviewTitle = QString();
+        el.linkPreviewDesc = QString();
+        el.linkPreviewSite = QString();
+        el.linkPreviewCardRect = QRect();
+    }
+    relayout();
+    scheduleLinkPreviewScan();
+}
+
+void ChatView::setLinkPreviewEnabled(bool en) {
+    if (m_linkPreviewEnabled == en) { return; }
+    m_linkPreviewEnabled = en;
+    if (en) { scheduleLinkPreviewScan(); }
 }
 
 void ChatView::relayout() {
@@ -3310,6 +3502,15 @@ void ChatView::mousePressEvent(QMouseEvent* event) {
             if ((*m_history)[msgIndex].category == "self"
                 && (*m_history)[msgIndex].sendState == ChatElement::SendFailed
                 && (*m_history)[msgIndex].resendIconRect.contains(event->pos())) {
+                return;
+            }
+
+            // Check link preview card click
+            if ((*m_history)[msgIndex].etype == ChatElement::Text
+                && !(*m_history)[msgIndex].linkPreviewCardRect.isNull()
+                && (*m_history)[msgIndex].linkPreviewCardRect.contains(event->pos())) {
+                QString u = (*m_history)[msgIndex].linkPreviewUrl;
+                if (!u.isEmpty()) { qOpenUrl(u); }
                 return;
             }
 
@@ -4093,6 +4294,7 @@ void ChatView::onScrollChanged(int value) {
     }
     m_vScrollBar->showTemporarily();
     flushEviction();
+    scheduleLinkPreviewScan();
 }
 
 void ChatView::flushEviction() {

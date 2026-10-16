@@ -81,6 +81,7 @@ protected slots:
     void onTranslateForSendRequested(const QString& text, const QString& targetLang);
     void onSourceClicked(int msgIndex);
     void onDownloadNeeded(int msgIndex, const QString& mediaUrl);
+    void onLinkPreviewNeeded(int msgIndex, const QString& url);
     void onRetryClicked(int msgIndex, const QString& mediaUrl, const QString& source);
     void onResendMessage(int msgIndex);
     void onRequestRedactMessage(int msgIndex);

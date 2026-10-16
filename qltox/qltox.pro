@@ -146,6 +146,10 @@ INCLUDEPATH += $$SQLITE_CFLAGS
 LIBS += $$SQLITE_LIBS
 DEFINES += HAVE_SQLITE
 
+# 链接预览：gumbo (HTML5 解析)。iconv 在 glibc 内置，macOS 需显式链接。
+LIBS += -lgumbo
+macx: LIBS += -liconv
+
 # 库路径和链接
 # QMAKE_LIBDIR_FLAGS += -L/opt/qt338sh/lib
 
