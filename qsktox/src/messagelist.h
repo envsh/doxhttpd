@@ -66,6 +66,7 @@ Q_SIGNALS:
     void rowClicked(int row);
     void rowLongPressed(int row, const QPointF& scenePos);
     void rowDoubleClicked(int row);
+    void avatarClicked(int row, const QPointF& pos);
 
 protected:
     void geometryChangeEvent(QskGeometryChangeEvent*) override;

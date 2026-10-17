@@ -428,10 +428,21 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
     tapHandler->setGesturePolicy(QQuickTapHandler::DragThreshold);
     connect(tapHandler, &QQuickTapHandler::singleTapped, this,
         [this](QEventPoint point, Qt::MouseButton) {
-            int row = rowFromContentY(point.position().y());
-            if (row >= 0 && row < m_items.size()) {
-                Q_EMIT rowClicked(row);
+            QPointF localPos = point.position();
+            int row = rowFromContentY(localPos.y());
+            if (row < 0 || row >= m_items.size()) return;
+            if (!m_items[row].isSelf) {
+                const qreal avatarX = SIDE_MARGIN;
+                const qreal avatarSize = AVATAR_SIZE;
+                qreal avatarY = m_rowYOffsets[row] + NAME_HEIGHT + (m_rowHeights[row] - avatarSize) / 2.0;
+                if (avatarY < NAME_HEIGHT + 2) avatarY = NAME_HEIGHT + 2;
+                if (localPos.x() >= avatarX && localPos.x() <= avatarX + avatarSize &&
+                    localPos.y() >= avatarY && localPos.y() <= avatarY + avatarSize) {
+                    Q_EMIT avatarClicked(row, mapToScene(localPos));
+                    return;
+                }
             }
+            Q_EMIT rowClicked(row);
         });
     // 双击改由 MyScrollArea::childMouseEventFilter 检测
     // connect(tapHandler, &QQuickTapHandler::doubleTapped, this,
