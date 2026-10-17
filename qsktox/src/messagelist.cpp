@@ -168,7 +168,7 @@ static qreal calcRowHeight(const MessageItem& item, qreal availableWidth)
     msgFont.setPixelSize(16);
     QFontMetrics msgFm(msgFont);
 
-    qreal maxBubbleWidth = availableWidth * 65.0 / 100.0;
+    qreal maxBubbleWidth = availableWidth * 85.0 / 100.0;
     qreal contentWidth = msgFm.horizontalAdvance(item.content);
     if (contentWidth > maxBubbleWidth - BUBBLE_PADDING_H * 2) {
         contentWidth = maxBubbleWidth - BUBBLE_PADDING_H * 2;
@@ -239,7 +239,7 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
     painter->setFont(msgFont);
     QFontMetrics msgFm(msgFont);
 
-    const qreal maxBubbleWidth = w * 65.0 / 100.0;
+    const qreal maxBubbleWidth = w * 85.0 / 100.0;
 
     // 计算内容宽度
     QString displayContent = m_item.content;

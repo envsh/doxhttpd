@@ -45,7 +45,22 @@ static void jniKeepScreenOn(bool on) {
 #endif
 }
 
+namespace {
 
+// timestamp 单位自适应：按数值位数判断 秒 / 毫秒 / 微秒
+qint64 epochSeconds(qint64 v)
+{
+    const qint64 a = (v < 0) ? -v : v;
+    if (a >= 100000000000000LL) {   // ≥1e14（约16位）：微秒
+        return v / 1000000;
+    }
+    if (a >= 100000000000LL) {      // ≥1e11（约13位）：毫秒
+        return v / 1000;
+    }
+    return v;                       // 约10位：秒
+}
+
+} // namespace
 
 MainPage::MainPage(QQuickItem* parent)
     : Page(parent)
@@ -169,7 +184,7 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     connect(PushHandler::instance(), &PushHandler::pushMessage,
         this, [this](const QByteArray& message, const QString& instance) {
             qDebug() << "[MainPage] push message received, size:" << message.size()
-                     << "content:" << QString::fromUtf8(message).left(300);
+                     << "content:" << QString::fromUtf8(message).left(600);
 
             QJsonDocument doc = QJsonDocument::fromJson(message);
             if (!doc.isObject()) {
@@ -203,9 +218,7 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
 
             QString timeStr;
             if (timestamp > 0) {
-                timeStr = QDateTime::fromSecsSinceEpoch(timestamp).toString("HH:mm");
-            } else {
-                timeStr = QTime::currentTime().toString("HH:mm");
+                timeStr = QDateTime::fromSecsSinceEpoch(epochSeconds(timestamp)).toString("HH:mm");
             }
 
             static const QColor s_palette[] = {

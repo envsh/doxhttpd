@@ -187,8 +187,10 @@ void ChannelRowNode::paint(QPainter* painter, const QSize& size, const void*)
     timeFont.setPixelSize(11);
     painter->setFont(timeFont);
     painter->setPen(QColor("#666"));
+    const QString shownTime = m_item.time.isEmpty()
+        ? QStringLiteral("--:--") : m_item.time;
     painter->drawText(QRect(textRight - 60, 10, 60, 16),
-        Qt::AlignRight | Qt::AlignVCenter, m_item.time);
+        Qt::AlignRight | Qt::AlignVCenter, shownTime);
 
     // ── 第1行：标题（bold，白色）──
     QFont titleFont;

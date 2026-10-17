@@ -444,7 +444,7 @@ int main(int argc, char* argv[]) {
     QObject::connect(PushHandler::instance(), &PushHandler::pushMessage,
         [](const QByteArray& message, const QString& instance) {
             qDebug() << "[PushHandler] push received, size:" << message.size()
-                     << "content:" << QString::fromUtf8(message).left(300);
+                     << "content:" << QString::fromUtf8(message).left(600);
         });
 
     // 触发注册流程
