@@ -77,6 +77,7 @@ qt_add_executable(qsktox
     src/webpushcrypto.cpp
     src/mozpushsender.h
     src/mozpushsender.cpp
+	src/davobfus.cpp
 
     ${qlappcom_dir}/message_db.cpp
     ${qlappcom_dir}/storage.cpp
