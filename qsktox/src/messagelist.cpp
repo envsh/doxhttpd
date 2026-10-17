@@ -17,6 +17,25 @@ static constexpr qreal TIME_HEIGHT = 14;
 static constexpr qreal BUBBLE_PADDING_H = 12;
 static constexpr qreal BUBBLE_PADDING_V = 8;
 static constexpr qreal SIDE_MARGIN = 12;
+static constexpr qreal AVATAR_SIZE = 36;
+static constexpr qreal AVATAR_SPACING = 8;
+
+static const QColor s_msgPalette[] = {
+    QColor("#4CAF50"), QColor("#2196F3"), QColor("#FF9800"), QColor("#E91E63"), QColor("#9C27B0"), QColor("#00BCD4"), QColor("#FF5722"), QColor("#795548"), QColor("#607D8B"),
+};
+static constexpr int s_msgPaletteSize = sizeof(s_msgPalette) / sizeof(s_msgPalette[0]);
+
+inline QString msgFirstLetter(const QString& s)
+{
+    if (s.isEmpty()) return QString(" ");
+    return QString(s.at(0)).toUpper();
+}
+
+inline QColor msgColorForName(const QString& s)
+{
+    if (s.isEmpty()) return QColor("#607D8B");
+    return s_msgPalette[qHash(s) % s_msgPaletteSize];
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // 120 条共享模拟消息数据（长短不一）
@@ -300,13 +319,30 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
         painter->drawText(QRectF(bubbleX, bubbleY + bubbleHeight + 1, timeW, TIME_HEIGHT),
             Qt::AlignLeft | Qt::AlignVCenter, m_item.time);
     } else {
-        // ── 他人的消息：左侧对齐，灰色气泡 ──
-        qreal bubbleX = SIDE_MARGIN;
+        // ── 他人的消息：左侧对齐，灰色气泡 + 头像 ──
         qreal bubbleY = NAME_HEIGHT;
+        qreal avatarX = SIDE_MARGIN;
+        qreal avatarY = bubbleY + (bubbleHeight - AVATAR_SIZE) / 2.0;
+        if (avatarY < NAME_HEIGHT + 2) avatarY = NAME_HEIGHT + 2;
+        qreal bubbleX = SIDE_MARGIN + AVATAR_SIZE + AVATAR_SPACING;
+
+        // 头像背景
+        QColor avatarBg = m_item.avatarColor.isValid() ? m_item.avatarColor : msgColorForName(m_item.sender);
+        QString avatarLet = m_item.avatarLetter.isEmpty() ? msgFirstLetter(m_item.sender) : m_item.avatarLetter;
+        painter->setBrush(avatarBg);
+        painter->setPen(Qt::NoPen);
+        painter->drawEllipse(QRectF(avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE));
+        painter->setPen(Qt::white);
+        QFont avatarFont;
+        avatarFont.setPixelSize(16);
+        avatarFont.setBold(true);
+        painter->setFont(avatarFont);
+        painter->drawText(QRectF(avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE), Qt::AlignCenter, avatarLet);
 
         // 名字
+        painter->setFont(nameFont);
         painter->setPen(QColor("#888"));
-        painter->drawText(QRectF(SIDE_MARGIN, 2, 200, NAME_HEIGHT - 4),
+        painter->drawText(QRectF(bubbleX, 2, 200, NAME_HEIGHT - 4),
             Qt::AlignLeft | Qt::AlignVCenter, m_item.sender);
 
         // 气泡背景

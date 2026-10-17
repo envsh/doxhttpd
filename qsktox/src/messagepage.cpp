@@ -124,6 +124,8 @@ void MessagePage::sendMessage()
     item.content = text;
     item.time = QTime::currentTime().toString("HH:mm");
     item.isSelf = true;
+    item.avatarLetter = QString::fromUtf8("我").at(0).toUpper();
+    item.avatarColor  = QColor("#1565C0");
 
     m_messageList->appendMessage(item);
     m_input->setText("");

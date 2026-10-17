@@ -15,6 +15,8 @@ struct MessageItem {
     QString content;
     QString time;
     bool    isSelf;
+    QString avatarLetter;
+    QColor  avatarColor;
 };
 
 class MessageRowNode : public QskPaintedNode

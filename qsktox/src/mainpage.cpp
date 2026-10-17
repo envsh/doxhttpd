@@ -236,6 +236,13 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             msgItem.content = text;
             msgItem.time = timeStr;
             msgItem.isSelf = false;
+            {
+                QString sname = username.isEmpty() ? chatName : username;
+                if (sname.isEmpty()) sname = chatId;
+                msgItem.avatarLetter = QString(sname.isEmpty() ? QChar(' ') : sname.at(0)).toUpper();
+                static const QColor mp[] = {QColor("#4CAF50"),QColor("#2196F3"),QColor("#FF9800"),QColor("#E91E63"),QColor("#9C27B0"),QColor("#00BCD4"),QColor("#FF5722"),QColor("#795548"),QColor("#607D8B")};
+                msgItem.avatarColor = mp[qHash(sname) % 9];
+            }
             MessageStore::instance()->addMessage(chatId, msgItem);
 
             ChannelItem chItem;
