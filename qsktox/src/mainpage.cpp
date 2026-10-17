@@ -349,7 +349,6 @@ void MainPage::showToast(const QString& msg, int durationMs) {
 }
 
 void MainPage::showChannelMenu(int row, const QPointF& pos) {
-    Q_UNUSED(row)
     Q_UNUSED(pos)
 
     for (auto* old : findChildren<QskMenu*>())
@@ -362,12 +361,26 @@ void MainPage::showChannelMenu(int row, const QPointF& pos) {
     menu->addOption(QskLabelData("Mute"));
     menu->addOption(QskLabelData("Pin"));
     menu->addOption(QskLabelData("Delete"));
+    menu->addSeparator();
+    menu->addOption(QskLabelData(QString::fromUtf8("详细信息")));
 
     menu->setOrigin(pos);
 
-    connect(menu, &QskMenu::triggered, this, [this](int index) {
-        Q_UNUSED(index)
-        if (auto* m = qobject_cast<QskMenu*>(sender()))
+    connect(menu, &QskMenu::triggered, this, [this, row](int index) {
+        if (index == 3) {
+            if (row >= 0 && m_channelList && row < m_channelList->count()) {
+                const auto& ch = m_channelList->channelItem(row);
+                QString info = QString::fromUtf8("标题: ") + ch.title +
+                               QString::fromUtf8("\nID: ") + ch.chatId +
+                               QString::fromUtf8("\n最后消息: ") + ch.lastMessage +
+                               QString::fromUtf8("\n时间: ") + ch.time +
+                               QString::fromUtf8("\n未读: ") + QString::number(ch.unreadCount);
+                showToast(info, 4000);
+            } else {
+                showToast(QString::fromUtf8("暂无详细信息"));
+            }
+        }
+        if (auto* m = qobject_cast<QskMenu*>(QObject::sender()))
             m->close();
     });
 
@@ -375,10 +388,8 @@ void MainPage::showChannelMenu(int row, const QPointF& pos) {
         auto* overlay = new MenuOverlay(menu);
         connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
     }
-
     menu->open();
 }
-
 void MainPage::handleShareIntent(const QString& action, const QString& mimeType,
                                    const QString& text, const QString& urisJson)
 {

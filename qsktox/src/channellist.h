@@ -59,6 +59,12 @@ public:
     void populateData();
     void insertOrUpdateChannel(const QString& chatId, const ChannelItem& item);
     QString chatIdForRow(int row) const;
+    int count() const { return m_items.size(); }
+    const ChannelItem& channelItem(int row) const {
+        static ChannelItem dummy;
+        if (row >= 0 && row < m_items.size()) return m_items[row];
+        return dummy;
+    }
 
 Q_SIGNALS:
     void rowClicked(int row, const QString& chatName);
