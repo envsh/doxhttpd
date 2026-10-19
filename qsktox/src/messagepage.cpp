@@ -4,6 +4,7 @@
 #include "androidutils.h"
 #include "menuoverlay.h"
 #include "mozpushsender.h"
+#include "virtualcontacts.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QClipboard>
@@ -213,9 +214,6 @@ void MessagePage::sendMessage()
         return;
     }
 
-    const quint64 reqseq =
-        MozpushSender::instance()->sendMessage(m_protocol, m_chatId, text);
-
     MessageItem item;
     item.sender = QString::fromUtf8("我");
     item.content = text;
@@ -223,6 +221,18 @@ void MessagePage::sendMessage()
     item.isSelf = true;
     item.avatarLetter = QString::fromUtf8("我").at(0).toUpper();
     item.avatarColor  = QColor("#1565C0");
+
+    if (isVirtualProtocol(m_protocol)) {
+        // P0：虚拟联系人仅本地回路（P1 在此接入对应 bot + host 回执）
+        item.sendState = MessageItem::SendSent;
+        m_messageList->appendMessage(item);
+        m_input->setText("");
+        return;
+    }
+
+    const quint64 reqseq =
+        MozpushSender::instance()->sendMessage(m_protocol, m_chatId, text);
+
     item.reqSeq = reqseq;
     if (reqseq == 0) {
         item.sendState = MessageItem::SendFailed;

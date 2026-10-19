@@ -10,6 +10,7 @@
 #include <QTimer>
 #include <QtMath>
 #include <QskEvent.h>
+#include "virtualcontacts.h"
 
 static constexpr qreal ROW_HEIGHT = 68;
 static constexpr int MAX_CHANNELS = 200;
@@ -349,6 +350,24 @@ void ChannelListWidget::populateData()
 
     m_items.clear();
     m_chatIdIndex.clear();
+
+    // ── 虚拟联系人（合成频道，置顶）──
+    const QVector<VirtualContact>& vcs = virtualContacts();
+    for (int i = 0; i < vcs.size(); ++i) {
+        const VirtualContact& vc = vcs[i];
+        ChannelItem item;
+        item.avatarLetter = QString::fromUtf8(vc.emoji);
+        item.avatarColor  = s_palette[i % (sizeof(s_palette) / sizeof(s_palette[0]))];
+        item.title        = QString::fromUtf8(vc.name);
+        item.unreadCount  = 0;
+        item.chatId       = QString::number(vc.id);
+        item.chatType     = QStringLiteral("virtual");
+        item.protocol     = QString::fromUtf8(vc.type);
+        m_items.append(item);
+        m_chatIdIndex[item.chatId] = m_items.size() - 1;
+    }
+
+    // ── 示例频道（mock）──
     for (int i = 0; i < s_mockCount; ++i) {
         m_items.append(s_mockData[i]);
         m_items.last().chatType = QStringLiteral("group");
