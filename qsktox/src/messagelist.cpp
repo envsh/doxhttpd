@@ -1,5 +1,6 @@
 #include "messagelist.h"
 #include "messagestore.h"
+#include "msgdb_bridge.h"
 #include <private/qquicktaphandler_p.h>
 #include <private/qquickpincharea_p.h>
 #include <QPainter>
@@ -627,7 +628,52 @@ bool MessageListWidget::updateSendStateByLocalId(qint64 localId,
     return false;
 }
 
-void MessageListWidget::setChannel(const QString& chatId)
+int64_t MessageListWidget::rowidForLocalId(qint64 localId) const
+{
+    if (localId == 0) {
+        return 0;
+    }
+    for (const auto& it : m_items) {
+        if (it.localId == localId) {
+            return it.dbRowid;
+        }
+    }
+    return 0;
+}
+
+void MessageListWidget::backfillRowid(qint64 localId, int64_t rowid)
+{
+    if (localId == 0 || rowid <= 0) {
+        return;
+    }
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items[i].localId == localId) {
+            m_items[i].dbRowid = rowid;
+            return;
+        }
+    }
+}
+
+void MessageListWidget::updateSendStateByRowid(int64_t rowid,
+                                               MessageItem::SendState state)
+{
+    if (rowid <= 0) {
+        return;
+    }
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items[i].dbRowid != rowid) {
+            continue;
+        }
+        m_items[i].sendState = state;
+        auto it = m_visibleRows.find(i);
+        if (it != m_visibleRows.end()) {
+            (*it)->setMessageData(m_items[i]);
+        }
+        return;
+    }
+}
+
+void MessageListWidget::setChannel(const QString& protocol, const QString& chatId)
 {
     if (m_fadeAnimator) {
         m_fadeAnimator->stop();
@@ -637,6 +683,7 @@ void MessageListWidget::setChannel(const QString& chatId)
     setOpacity(1.0);
 
     m_chatId = chatId;
+    m_chanProtocol = protocol;
     m_items.clear();
     m_rowHeights.clear();
     m_rowYOffsets.clear();
@@ -650,7 +697,14 @@ void MessageListWidget::setChannel(const QString& chatId)
         return;
     }
 
-    auto msgs = MessageStore::instance()->getMessages(m_chatId);
+    // 优先从 SQLite 加载历史（chanid 需 protocol）
+    QVector<MessageItem> msgs;
+    if (!m_chanProtocol.isEmpty()) {
+        msgs = MsgDbBridge::loadMessages(m_chanProtocol, m_chatId, 50);
+    }
+    if (msgs.isEmpty()) {
+        msgs = MessageStore::instance()->getMessages(m_chatId);
+    }
     for (const auto& msg : msgs) {
         m_items.append(msg);
     }

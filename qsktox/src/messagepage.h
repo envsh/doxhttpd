@@ -29,6 +29,9 @@ private:
                    const QString& errorMsg,
                    const QString& remoteUrl, const QString& mime,
                    int durationSec, const QByteArray& audioData);
+    static void onRowidBackfilled(void* ctx, const QString& protocol,
+                                  const QString& chatId, qint64 localId,
+                                  int64_t rowid);
 
     MessageListWidget* m_messageList = nullptr;
     QskTextField* m_input = nullptr;

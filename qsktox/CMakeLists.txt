@@ -56,6 +56,8 @@ qt_add_executable(qsktox
     src/virtualbothost.cpp
     src/ttsaudio.h
     src/ttsaudio.cpp
+    src/msgdb_bridge.h
+    src/msgdb_bridge.cpp
     src/messagelist.h
     src/messagelist.cpp
     src/messagepage.h

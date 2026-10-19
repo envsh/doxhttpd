@@ -38,6 +38,7 @@
 #include "pagemanager.h"
 #include "msgenlargeoverlay.h"
 #include "messagepage.h"
+#include "storage.h"
 
 #include <memory>
 #include <thread>
@@ -161,6 +162,17 @@ int main(int argc, char* argv[]) {
 
     QCoreApplication::setOrganizationName("fedlet");
     QCoreApplication::setApplicationName("qsktox");
+
+    // ── 本地存储（虚拟频道消息持久化）──
+    {
+        const QString dir = QStandardPaths::writableLocation(
+            QStandardPaths::AppDataLocation);
+        QDir().mkpath(dir);
+        const QByteArray dbDir = dir.toUtf8();
+        if (!Storage::instance().init(dbDir.constData())) {
+            qWarning() << "[qsktox] Storage::init FAILED:" << dir;
+        }
+    }
 
 #ifdef Q_OS_ANDROID
     qputenv("QSG_RENDER_LOOP", "basic");

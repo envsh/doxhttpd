@@ -4,6 +4,7 @@
 #include "androidutils.h"
 #include "menuoverlay.h"
 #include "mozpushsender.h"
+#include "msgdb_bridge.h"
 #include "virtualcontacts.h"
 #include "virtualbothost.h"
 #include "aigptbot.h"
@@ -59,7 +60,8 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     // ── MessageList ──
     m_messageList = new MessageListWidget(layout);
     m_messageList->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
-    m_messageList->setChannel(chatId);
+    MsgDbBridge::ensureChannel(m_protocol, m_chatId, channelName);
+    m_messageList->setChannel(m_protocol, chatId);
 
     // ── Avatar click menu ──
     connect(m_messageList, &MessageListWidget::avatarClicked,
@@ -219,7 +221,7 @@ void MessagePage::onNewIntent(const QVariantMap& launchArgs)
         m_titleLabel->setText(channelName);
     }
     if (m_messageList) {
-        m_messageList->setChannel(chatId);
+        m_messageList->setChannel(m_protocol, chatId);
     }
 }
 
@@ -245,6 +247,7 @@ void MessagePage::sendMessage()
     if (vk == kVirtualLocalNoop) {
         item.sendState = MessageItem::SendSent;
         m_messageList->appendMessage(item);
+        MsgDbBridge::insertMessage(m_protocol, m_chatId, item, nullptr, nullptr);
         m_input->setText("");
         return;
     }
@@ -252,6 +255,8 @@ void MessagePage::sendMessage()
         item.localId = VirtualBotHost::nextLocalId();
         item.sendState = MessageItem::SendSending;
         m_messageList->appendMessage(item);
+        MsgDbBridge::insertMessage(m_protocol, m_chatId, item,
+                                   &MessagePage::onRowidBackfilled, this);
         m_input->setText("");
         sendToVirtualBot(vk, item.localId, text);
         return;
@@ -269,7 +274,20 @@ void MessagePage::sendMessage()
     }
 
     m_messageList->appendMessage(item);
+    MsgDbBridge::insertMessage(m_protocol, m_chatId, item, nullptr, nullptr);
     m_input->setText("");
+}
+
+void MessagePage::onRowidBackfilled(void* ctx, const QString& protocol,
+                                    const QString& chatId, qint64 localId,
+                                    int64_t rowid)
+{
+    Q_UNUSED(protocol)
+    Q_UNUSED(chatId)
+    auto* self = static_cast<MessagePage*>(ctx);
+    if (self && self->m_messageList) {
+        self->m_messageList->backfillRowid(localId, rowid);
+    }
 }
 
 void MessagePage::sendToVirtualBot(int kind, qint64 localId, const QString& text)
@@ -354,10 +372,14 @@ void MessagePage::onBotDone(int chatId, const QString& protocol, qint64 localId,
     if (!success) {
         m_messageList->updateSendStateByLocalId(
             localId, MessageItem::SendFailed, errorMsg);
+        MsgDbBridge::updateSendStateByRowid(
+            m_messageList->rowidForLocalId(localId), MessageItem::SendFailed);
         return;
     }
     m_messageList->updateSendStateByLocalId(
         localId, MessageItem::SendSent, QString());
+    MsgDbBridge::updateSendStateByRowid(
+        m_messageList->rowidForLocalId(localId), MessageItem::SendSent);
 
     MessageItem ack;
     ack.sender = QString::fromUtf8("我");
@@ -368,6 +390,7 @@ void MessagePage::onBotDone(int chatId, const QString& protocol, qint64 localId,
     ack.avatarColor  = QColor("#1565C0");
     ack.sendState = MessageItem::SendSent;
     m_messageList->appendMessage(ack);
+    MsgDbBridge::insertMessage(m_protocol, m_chatId, ack, nullptr, nullptr);
 }
 
 void MessagePage::onTtsDone(int chatId, qint64 localId, bool success,
@@ -384,6 +407,9 @@ void MessagePage::onTtsDone(int chatId, qint64 localId, bool success,
             localId,
             success ? MessageItem::SendSent : MessageItem::SendFailed,
             success ? QString() : errorMsg);
+        MsgDbBridge::updateSendStateByRowid(
+            m_messageList->rowidForLocalId(localId),
+            success ? MessageItem::SendSent : MessageItem::SendFailed);
     }
     if (!success) {
         return;
@@ -414,4 +440,5 @@ void MessagePage::onTtsDone(int chatId, qint64 localId, bool success,
     ack.audioMime = mime;
     ack.durationSec = durationSec;
     m_messageList->appendMessage(ack);
+    MsgDbBridge::insertMessage(m_protocol, m_chatId, ack, nullptr, nullptr);
 }

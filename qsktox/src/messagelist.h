@@ -22,6 +22,7 @@ struct MessageItem {
     QString sendError;
     quint64 reqSeq = 0;
     qint64  localId = 0;
+    int64_t dbRowid = 0;
     bool    isAudio = false;
     QString mediaUrl;
     QString audioMime;
@@ -68,7 +69,7 @@ public:
 
     void populateMessages();
     void appendMessage(const MessageItem& item);
-    void setChannel(const QString& chatId);
+    void setChannel(const QString& protocol, const QString& chatId);
     int messageCount() const { return m_items.size(); }
     const MessageItem& messageItem(int row) const { return m_items[row]; }
     void setSendStatus(quint64 reqseq, bool success, const QString& error);
@@ -76,6 +77,9 @@ public:
                          quint64 reqseq, const QString& error);
     bool updateSendStateByLocalId(qint64 localId, MessageItem::SendState state,
                                   const QString& error);
+    int64_t rowidForLocalId(qint64 localId) const;
+    void backfillRowid(qint64 localId, int64_t rowid);
+    void updateSendStateByRowid(int64_t rowid, MessageItem::SendState state);
 
 Q_SIGNALS:
     void rowClicked(int row);
@@ -96,6 +100,7 @@ private:
 
     QQuickItem* m_contentView = nullptr;
     QString m_chatId;
+    QString m_chanProtocol;
     QVector<MessageItem> m_items;
     QVector<qreal> m_rowHeights;
     QVector<qreal> m_rowYOffsets;
