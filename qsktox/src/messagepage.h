@@ -20,6 +20,13 @@ protected:
 
 private:
     void sendMessage();
+    void sendToVirtualBot(int kind, qint64 localId, const QString& text);
+    void onBotDone(int chatId, const QString& protocol, qint64 localId,
+                   bool success, const QString& text,
+                   const QString& providerUsed, const QString& errorMsg);
+    void onTtsDone(int chatId, qint64 localId, bool success,
+                   const QString& caption, const QString& text,
+                   const QString& errorMsg);
 
     MessageListWidget* m_messageList = nullptr;
     QskTextField* m_input = nullptr;

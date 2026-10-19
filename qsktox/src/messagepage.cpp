@@ -5,6 +5,12 @@
 #include "menuoverlay.h"
 #include "mozpushsender.h"
 #include "virtualcontacts.h"
+#include "virtualbothost.h"
+#include "aigptbot.h"
+#include "websearchbot.h"
+#include "fanyibot.h"
+#include "pasteuploader.h"
+#include "ttsbot.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QClipboard>
@@ -171,6 +177,12 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             m_messageList->setSendStatus(reqseq, success, error);
         });
 
+    // ── 虚拟联系人 bot 结果 ──
+    connect(VirtualBotHost::instance(), &VirtualBotHost::botDone,
+        this, &MessagePage::onBotDone);
+    connect(VirtualBotHost::instance(), &VirtualBotHost::ttsDone,
+        this, &MessagePage::onTtsDone);
+
     // ── 点击失败消息重发 ──
     connect(m_messageList, &MessageListWidget::retryRequested,
         this, [this](int row) {
@@ -222,11 +234,19 @@ void MessagePage::sendMessage()
     item.avatarLetter = QString::fromUtf8("我").at(0).toUpper();
     item.avatarColor  = QColor("#1565C0");
 
-    if (isVirtualProtocol(m_protocol)) {
-        // P0：虚拟联系人仅本地回路（P1 在此接入对应 bot + host 回执）
+    VirtualSendKind vk = virtualSendKind(m_protocol);
+    if (vk == kVirtualLocalNoop) {
         item.sendState = MessageItem::SendSent;
         m_messageList->appendMessage(item);
         m_input->setText("");
+        return;
+    }
+    if (vk != kVirtualNone) {
+        item.localId = VirtualBotHost::nextLocalId();
+        item.sendState = MessageItem::SendSending;
+        m_messageList->appendMessage(item);
+        m_input->setText("");
+        sendToVirtualBot(vk, item.localId, text);
         return;
     }
 
@@ -243,4 +263,129 @@ void MessagePage::sendMessage()
 
     m_messageList->appendMessage(item);
     m_input->setText("");
+}
+
+void MessagePage::sendToVirtualBot(int kind, qint64 localId, const QString& text)
+{
+    const QByteArray tb = text.toUtf8();
+    const QByteArray cb = m_protocol.toUtf8();
+    const int chatId = m_chatId.toInt();
+    const std::string typeStr(cb.constData(), cb.size());
+
+    if (kind == kVirtualBotAigpt) {
+        AigptbotRequest req;
+        req.text     = std::string(tb.constData(), tb.size());
+        req.provider = "any";
+        req.model    = "";
+        req.brief    = false;
+        req.thinking = false;
+        req.search   = false;
+        req.newChat  = false;
+        req.localId  = (long long)localId;
+        req.chatId   = chatId;
+        req.chatType = typeStr;
+        aigptbotChatStart(req, VirtualBotHost::instance());
+        return;
+    }
+    if (kind == kVirtualBotWebsearch) {
+        WebsearchRequest req;
+        req.text     = std::string(tb.constData(), tb.size());
+        req.backend  = "any";
+        req.lang     = "zh";
+        req.localId  = (long long)localId;
+        req.chatId   = chatId;
+        req.chatType = typeStr;
+        websearchStart(req, VirtualBotHost::instance());
+        return;
+    }
+    if (kind == kVirtualBotTranslate) {
+        FanyibotRequest req;
+        req.text     = std::string(tb.constData(), tb.size());
+        req.toLang   = "中文";
+        req.engine   = "any";
+        req.localId  = (long long)localId;
+        req.chatId   = chatId;
+        req.chatType = typeStr;
+        fanyibotTranslateStart(req, VirtualBotHost::instance());
+        return;
+    }
+    if (kind == kVirtualBotPaste) {
+        PasteRequest req;
+        req.text     = std::string(tb.constData(), tb.size());
+        req.kind     = kPasteKindText;
+        req.provider = "any";
+        req.expire   = "auto";
+        req.localId  = (long long)localId;
+        req.chatId   = chatId;
+        req.chatType = typeStr;
+        pasteUploadStart(req, VirtualBotHost::instance());
+        return;
+    }
+    if (kind == kVirtualBotTts) {
+        TtsbotRequest req;
+        req.text     = std::string(tb.constData(), tb.size());
+        req.provider = "edge";
+        req.voice    = "zh-CN-XiaoxiaoNeural";
+        req.lang     = "zh-CN";
+        req.rate     = "+0%";
+        req.localId  = (long long)localId;
+        req.chatId   = chatId;
+        req.chatType = typeStr;
+        ttsbotSynthStart(req, VirtualBotHost::instance());
+        return;
+    }
+}
+
+void MessagePage::onBotDone(int chatId, const QString& protocol, qint64 localId,
+                            bool success, const QString& text,
+                            const QString& providerUsed, const QString& errorMsg)
+{
+    Q_UNUSED(providerUsed)
+    if (QString::number(chatId) != m_chatId || protocol != m_protocol) {
+        return;
+    }
+    if (!success) {
+        m_messageList->updateSendStateByLocalId(
+            localId, MessageItem::SendFailed, errorMsg);
+        return;
+    }
+    m_messageList->updateSendStateByLocalId(
+        localId, MessageItem::SendSent, QString());
+
+    MessageItem ack;
+    ack.sender = QString::fromUtf8("我");
+    ack.content = text;
+    ack.time = QTime::currentTime().toString("HH:mm");
+    ack.isSelf = true;
+    ack.avatarLetter = QString::fromUtf8("我").at(0).toUpper();
+    ack.avatarColor  = QColor("#1565C0");
+    ack.sendState = MessageItem::SendSent;
+    m_messageList->appendMessage(ack);
+}
+
+void MessagePage::onTtsDone(int chatId, qint64 localId, bool success,
+                            const QString& caption, const QString& text,
+                            const QString& errorMsg)
+{
+    if (QString::number(chatId) != m_chatId || m_protocol != QLatin1String("tts")) {
+        return;
+    }
+    if (localId != 0) {
+        m_messageList->updateSendStateByLocalId(
+            localId,
+            success ? MessageItem::SendSent : MessageItem::SendFailed,
+            success ? QString() : errorMsg);
+    }
+    if (!success) {
+        return;
+    }
+    MessageItem ack;
+    ack.sender = QString::fromUtf8("我");
+    ack.content = caption + QString::fromUtf8("\n") + text;
+    ack.time = QTime::currentTime().toString("HH:mm");
+    ack.isSelf = true;
+    ack.avatarLetter = QString::fromUtf8("我").at(0).toUpper();
+    ack.avatarColor  = QColor("#1565C0");
+    ack.sendState = MessageItem::SendSent;
+    m_messageList->appendMessage(ack);
 }

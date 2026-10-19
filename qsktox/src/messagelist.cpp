@@ -603,6 +603,28 @@ void MessageListWidget::updateSendState(int row, MessageItem::SendState state,
     }
 }
 
+bool MessageListWidget::updateSendStateByLocalId(qint64 localId,
+                                                 MessageItem::SendState state,
+                                                 const QString& error)
+{
+    if (localId == 0) {
+        return false;
+    }
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items[i].localId != localId) {
+            continue;
+        }
+        m_items[i].sendState = state;
+        m_items[i].sendError = error;
+        auto it = m_visibleRows.find(i);
+        if (it != m_visibleRows.end()) {
+            (*it)->setMessageData(m_items[i]);
+        }
+        return true;
+    }
+    return false;
+}
+
 void MessageListWidget::setChannel(const QString& chatId)
 {
     if (m_fadeAnimator) {

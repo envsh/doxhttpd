@@ -21,6 +21,7 @@ struct MessageItem {
     SendState sendState = SendSending;
     QString sendError;
     quint64 reqSeq = 0;
+    qint64  localId = 0;
 };
 
 class MessageRowNode : public QskPaintedNode
@@ -69,6 +70,8 @@ public:
     void setSendStatus(quint64 reqseq, bool success, const QString& error);
     void updateSendState(int row, MessageItem::SendState state,
                          quint64 reqseq, const QString& error);
+    bool updateSendStateByLocalId(qint64 localId, MessageItem::SendState state,
+                                  const QString& error);
 
 Q_SIGNALS:
     void rowClicked(int row);

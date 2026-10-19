@@ -52,6 +52,8 @@ qt_add_executable(qsktox
     src/channellist.cpp
     src/virtualcontacts.h
     src/virtualcontacts.cpp
+    src/virtualbothost.h
+    src/virtualbothost.cpp
     src/messagelist.h
     src/messagelist.cpp
     src/messagepage.h
