@@ -17,9 +17,11 @@ public:
     static MozpushSender* instance();
     static void start();
 
-    // 返回本次发送的 reqseq（未配置 uaid/endpoint 时返回 0）。
+    // 返回本次发送的 reqseq（未配置 uaid/endpoint 或构造失败时返回 0）。
+    // 失败原因（若非空）写入 *errorOut。
     quint64 sendMessage(const QString& type, const QString& id, const QString& message,
-                        const QMap<QString,QString>& attributes = QMap<QString,QString>());
+                        const QMap<QString,QString>& attributes = QMap<QString,QString>(),
+                        QString* errorOut = nullptr);
 
     void resume();
     void pause();

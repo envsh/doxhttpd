@@ -190,11 +190,13 @@ void MozpushSender::buildSend()
 
 quint64 MozpushSender::sendMessage(const QString& type, const QString& id,
                                    const QString& message,
-                                   const QMap<QString,QString>& attributes)
+                                   const QMap<QString,QString>& attributes,
+                                   QString* errorOut)
 {
     reloadSettings();
     if (m_uaid.isEmpty() || m_endpoint.isEmpty()) {
         qWarning() << "[mozpush] sendMessage: uaid/endpoint 未配置";
+        if (errorOut) { *errorOut = QStringLiteral("未配置推送端点"); }
         return 0;
     }
 
@@ -207,6 +209,7 @@ quint64 MozpushSender::sendMessage(const QString& type, const QString& id,
     };
     cJSON* o = cJSON_CreateObject();
     if (!o) {
+        if (errorOut) { *errorOut = QStringLiteral("构造请求失败"); }
         return 0;
     }
     cJSON_AddStringToObject(o, "action", "sendmsg");
@@ -223,6 +226,7 @@ quint64 MozpushSender::sendMessage(const QString& type, const QString& id,
     char* js = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);
     if (!js) {
+        if (errorOut) { *errorOut = QStringLiteral("构造请求失败"); }
         return 0;
     }
     const QByteArray payload(js);
@@ -237,6 +241,10 @@ quint64 MozpushSender::sendMessage(const QString& type, const QString& id,
         QByteArray body;
         QString authz;
         if (!encryptAndSign(deriveUaid, endpoint, payload, &body, &authz)) {
+            // signal emission 线程安全；AutoConnection 下跨线程发射自动 queued，
+            // 槽在接收对象（UI）线程执行（Qt 官方 Threads and QObjects 文档）
+            emit self->messageSent(reqseq, false,
+                                   QStringLiteral("推送加密失败"));
             return;
         }
         QMetaObject::invokeMethod(self, [self, body, authz, endpoint, reqseq]() {

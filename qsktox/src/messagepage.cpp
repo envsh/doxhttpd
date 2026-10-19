@@ -262,13 +262,15 @@ void MessagePage::sendMessage()
         return;
     }
 
-    const quint64 reqseq =
-        MozpushSender::instance()->sendMessage(m_protocol, m_chatId, text);
+    QString sendErr;
+    const quint64 reqseq = MozpushSender::instance()->sendMessage(
+        m_protocol, m_chatId, text, QMap<QString,QString>(), &sendErr);
 
     item.reqSeq = reqseq;
     if (reqseq == 0) {
         item.sendState = MessageItem::SendFailed;
-        item.sendError = QString::fromUtf8("未配置推送端点");
+        item.sendError = sendErr.isEmpty()
+            ? QString::fromUtf8("未配置推送端点") : sendErr;
     } else {
         item.sendState = MessageItem::SendSending;
     }
