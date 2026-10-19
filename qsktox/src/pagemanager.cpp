@@ -84,7 +84,10 @@ void PageManager::activatePage(Page* page)
     if (m_destroyTimer.isActive()) {
         m_destroyTimer.stop();
         if (m_pendingDestroy) {
-            destroyPage(m_pendingDestroy);
+            // 若正在激活的页就是待销毁页，则取消销毁并复用，避免误删当前页
+            if (m_pendingDestroy != page) {
+                destroyPage(m_pendingDestroy);
+            }
             m_pendingDestroy = nullptr;
         }
     }

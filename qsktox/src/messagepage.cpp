@@ -39,9 +39,9 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
     connect(backBtn, &QskAbstractButton::clicked, this, &Page::finish);
 
-    auto* title = new QskTextLabel(channelName, topBar);
-    title->setAlignment(Qt::AlignCenter);
-    title->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    m_titleLabel = new QskTextLabel(channelName, topBar);
+    m_titleLabel->setAlignment(Qt::AlignCenter);
+    m_titleLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
 
     // ── MessageList ──
     m_messageList = new MessageListWidget(layout);
@@ -159,6 +159,19 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             connect(overlay, &MsgEnlargeOverlay::closed,
                     overlay, &QObject::deleteLater);
         });
+}
+
+void MessagePage::onNewIntent(const QVariantMap& launchArgs)
+{
+    QString channelName = launchArgs.value("channelName").toString();
+    QString chatId = launchArgs.value("chatId").toString();
+
+    if (m_titleLabel) {
+        m_titleLabel->setText(channelName);
+    }
+    if (m_messageList) {
+        m_messageList->setChannel(chatId);
+    }
 }
 
 void MessagePage::sendMessage()

@@ -254,8 +254,10 @@ void ChannelRowNode::paint(QPainter* painter, const QSize& size, const void*)
 
 QskHashValue ChannelRowNode::hash(const void*) const
 {
-    return qHash(m_item.title) ^ qHash(m_item.lastMessage)
-        ^ qHash(m_item.time) ^ qHash(m_item.unreadCount);
+    return qHash(m_item.chatId) ^ qHash(m_item.title)
+        ^ qHash(m_item.lastMessage) ^ qHash(m_item.time)
+        ^ qHash(m_item.unreadCount) ^ qHash(m_item.avatarLetter)
+        ^ qHash(static_cast<uint>(m_item.avatarColor.rgb()));
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -339,6 +341,11 @@ ChannelListWidget::~ChannelListWidget()
 
 void ChannelListWidget::populateData()
 {
+    for (auto* row : std::as_const(m_visibleRows)) {
+        row->deleteLater();
+    }
+    m_visibleRows.clear();
+
     m_items.clear();
     m_chatIdIndex.clear();
     for (int i = 0; i < s_mockCount; ++i) {
@@ -432,7 +439,8 @@ void ChannelListWidget::updateVisibleRows()
         }
     }
 
-    // 创建新进入可见范围的行
+    // 创建新进入可见范围的行；已存在的行同步刷新，避免 prepend/removeAt
+    // 导致 m_items 下标位移后，可见行显示的数据与下标错位
     for (int i = rowMin; i <= rowMax; ++i) {
         if (!m_visibleRows.contains(i)) {
             auto* row = new ChannelRowItem(m_contentView);
@@ -441,6 +449,11 @@ void ChannelListWidget::updateVisibleRows()
             row->setWidth(m_contentView->width());
             row->setChannelData(m_items[i]);
             m_visibleRows[i] = row;
+        } else {
+            ChannelRowItem* row = m_visibleRows[i];
+            row->setY(i * ROW_HEIGHT);
+            row->setWidth(m_contentView->width());
+            row->setChannelData(m_items[i]);
         }
     }
 }
