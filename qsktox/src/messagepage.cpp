@@ -11,6 +11,7 @@
 #include "fanyibot.h"
 #include "pasteuploader.h"
 #include "ttsbot.h"
+#include "ttsaudio.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QClipboard>
@@ -20,6 +21,7 @@
 #include <QskMenu.h>
 #include <QskLabelData.h>
 #include <QTime>
+#include <QDateTime>
 
 MessagePage::MessagePage(QQuickItem* parent)
     : Page(parent)
@@ -162,6 +164,11 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     // ── Double click handler ──
     connect(m_messageList, &MessageListWidget::rowDoubleClicked,
         this, [this](int row) {
+            const MessageItem& mi = m_messageList->messageItem(row);
+            if (mi.isAudio && !mi.mediaUrl.isEmpty()) {
+                TtsAudio::instance()->play(mi.mediaUrl);
+                return;
+            }
 			// showAndroidToast(QString::fromUtf8("双击第 %1 条消息").arg(row + 1));
             for (auto* old : findChildren<MsgEnlargeOverlay*>())
                 old->deleteLater();
@@ -365,7 +372,9 @@ void MessagePage::onBotDone(int chatId, const QString& protocol, qint64 localId,
 
 void MessagePage::onTtsDone(int chatId, qint64 localId, bool success,
                             const QString& caption, const QString& text,
-                            const QString& errorMsg)
+                            const QString& errorMsg,
+                            const QString& remoteUrl, const QString& mime,
+                            int durationSec, const QByteArray& audioData)
 {
     if (QString::number(chatId) != m_chatId || m_protocol != QLatin1String("tts")) {
         return;
@@ -379,6 +388,19 @@ void MessagePage::onTtsDone(int chatId, qint64 localId, bool success,
     if (!success) {
         return;
     }
+
+    QString key;
+    if (!audioData.isEmpty()) {
+        key = QStringLiteral("tts://local_%1_%2")
+                  .arg(QDateTime::currentMSecsSinceEpoch())
+                  .arg(localId);
+    } else if (!remoteUrl.isEmpty()) {
+        key = QStringLiteral("tts://") + remoteUrl;
+    }
+    if (!key.isEmpty()) {
+        TtsAudio::instance()->store(key, audioData, mime, remoteUrl);
+    }
+
     MessageItem ack;
     ack.sender = QString::fromUtf8("我");
     ack.content = caption + QString::fromUtf8("\n") + text;
@@ -387,5 +409,9 @@ void MessagePage::onTtsDone(int chatId, qint64 localId, bool success,
     ack.avatarLetter = QString::fromUtf8("我").at(0).toUpper();
     ack.avatarColor  = QColor("#1565C0");
     ack.sendState = MessageItem::SendSent;
+    ack.isAudio = !key.isEmpty();
+    ack.mediaUrl = key;
+    ack.audioMime = mime;
+    ack.durationSec = durationSec;
     m_messageList->appendMessage(ack);
 }

@@ -393,7 +393,9 @@ QskHashValue MessageRowNode::hash(const void*) const
 {
     return qHash(m_item.sender) ^ qHash(m_item.content)
         ^ qHash(m_item.time) ^ qHash(m_item.isSelf)
-        ^ qHash(static_cast<int>(m_item.sendState));
+        ^ qHash(static_cast<int>(m_item.sendState))
+        ^ qHash(m_item.mediaUrl) ^ qHash(m_item.audioMime)
+        ^ qHash(m_item.isAudio) ^ m_item.durationSec;
 }
 
 // ═══════════════════════════════════════════════════════════════════

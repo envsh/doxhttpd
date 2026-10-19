@@ -111,7 +111,12 @@ void VirtualBotHost::customEvent(QEvent* event)
         }
         emit ttsDone(evt->chatId, (qint64)evt->localId, evt->success,
                      caption, QString::fromUtf8(evt->text.c_str()),
-                     QString::fromUtf8(evt->errorMsg.c_str()));
+                     QString::fromUtf8(evt->errorMsg.c_str()),
+                     QString::fromUtf8(evt->audioUrl.c_str()),
+                     QString::fromUtf8(evt->mime.c_str()),
+                     evt->durationSec,
+                     QByteArray(reinterpret_cast<const char*>(evt->audioData.data()),
+                                (int)evt->audioData.size()));
         return;
     }
     QObject::customEvent(event);

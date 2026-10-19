@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Quick Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Quick Network Multimedia)
 find_package(QSkinny REQUIRED)
 
 if(ANDROID)
@@ -54,6 +54,8 @@ qt_add_executable(qsktox
     src/virtualcontacts.cpp
     src/virtualbothost.h
     src/virtualbothost.cpp
+    src/ttsaudio.h
+    src/ttsaudio.cpp
     src/messagelist.h
     src/messagelist.cpp
     src/messagepage.h
@@ -134,7 +136,7 @@ target_include_directories(qsktox PRIVATE
     ${qlcomp_dir}
 )
 
-target_link_libraries(qsktox PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate)
+target_link_libraries(qsktox PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::Multimedia)
 
 # ── extras/go 共享库 (c-shared) ──
 set(GO_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/extras/go)

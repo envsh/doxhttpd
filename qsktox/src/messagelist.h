@@ -22,6 +22,10 @@ struct MessageItem {
     QString sendError;
     quint64 reqSeq = 0;
     qint64  localId = 0;
+    bool    isAudio = false;
+    QString mediaUrl;
+    QString audioMime;
+    int     durationSec = 0;
 };
 
 class MessageRowNode : public QskPaintedNode

@@ -26,7 +26,9 @@ private:
                    const QString& providerUsed, const QString& errorMsg);
     void onTtsDone(int chatId, qint64 localId, bool success,
                    const QString& caption, const QString& text,
-                   const QString& errorMsg);
+                   const QString& errorMsg,
+                   const QString& remoteUrl, const QString& mime,
+                   int durationSec, const QByteArray& audioData);
 
     MessageListWidget* m_messageList = nullptr;
     QskTextField* m_input = nullptr;

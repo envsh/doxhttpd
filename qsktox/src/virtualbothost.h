@@ -17,7 +17,9 @@ Q_SIGNALS:
                  const QString& providerUsed, const QString& errorMsg);
     void ttsDone(int chatId, qint64 localId, bool success,
                  const QString& caption, const QString& text,
-                 const QString& errorMsg);
+                 const QString& errorMsg,
+                 const QString& remoteUrl, const QString& mime,
+                 int durationSec, const QByteArray& audioData);
 
 protected:
     void customEvent(QEvent* event) override;
