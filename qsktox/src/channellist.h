@@ -20,6 +20,7 @@ struct ChannelItem {
     QString time;
     int     unreadCount;
     QString chatId;
+    QString chatType;
 };
 
 class ChannelRowNode : public QskPaintedNode
@@ -59,6 +60,7 @@ public:
     void populateData();
     void insertOrUpdateChannel(const QString& chatId, const ChannelItem& item);
     QString chatIdForRow(int row) const;
+    QString chatTypeForRow(int row) const;
     int count() const { return m_items.size(); }
     const ChannelItem& channelItem(int row) const {
         static ChannelItem dummy;

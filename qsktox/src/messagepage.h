@@ -24,6 +24,8 @@ private:
     MessageListWidget* m_messageList = nullptr;
     QskTextField* m_input = nullptr;
     QskTextLabel* m_titleLabel = nullptr;
+    QString m_chatId;
+    QString m_chatType;
 };
 
 #endif

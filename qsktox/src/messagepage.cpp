@@ -3,6 +3,7 @@
 #include "msgenlargeoverlay.h"
 #include "androidutils.h"
 #include "menuoverlay.h"
+#include "mozpushsender.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QClipboard>
@@ -22,6 +23,11 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
 {
     QString channelName = launchArgs.value("channelName").toString();
     QString chatId = launchArgs.value("chatId").toString();
+    m_chatId = chatId;
+    m_chatType = launchArgs.value("chatType").toString();
+    if (m_chatType.isEmpty()) {
+        m_chatType = QStringLiteral("group");
+    }
 
     setAutoLayoutChildren(true);
     auto* layout = new QskLinearBox(Qt::Vertical, this);
@@ -165,6 +171,11 @@ void MessagePage::onNewIntent(const QVariantMap& launchArgs)
 {
     QString channelName = launchArgs.value("channelName").toString();
     QString chatId = launchArgs.value("chatId").toString();
+    m_chatId = chatId;
+    m_chatType = launchArgs.value("chatType").toString();
+    if (m_chatType.isEmpty()) {
+        m_chatType = QStringLiteral("group");
+    }
 
     if (m_titleLabel) {
         m_titleLabel->setText(channelName);
@@ -194,4 +205,6 @@ void MessagePage::sendMessage()
 
     m_messageList->appendMessage(item);
     m_input->setText("");
+
+    MozpushSender::instance()->sendMessage(m_chatType, m_chatId, text);
 }

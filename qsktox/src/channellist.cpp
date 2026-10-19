@@ -257,7 +257,8 @@ QskHashValue ChannelRowNode::hash(const void*) const
     return qHash(m_item.chatId) ^ qHash(m_item.title)
         ^ qHash(m_item.lastMessage) ^ qHash(m_item.time)
         ^ qHash(m_item.unreadCount) ^ qHash(m_item.avatarLetter)
-        ^ qHash(static_cast<uint>(m_item.avatarColor.rgb()));
+        ^ qHash(static_cast<uint>(m_item.avatarColor.rgb()))
+        ^ qHash(m_item.chatType);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -350,6 +351,7 @@ void ChannelListWidget::populateData()
     m_chatIdIndex.clear();
     for (int i = 0; i < s_mockCount; ++i) {
         m_items.append(s_mockData[i]);
+        m_items.last().chatType = QStringLiteral("group");
     }
 
     qreal viewW = viewContentsRect().width();
@@ -411,6 +413,14 @@ QString ChannelListWidget::chatIdForRow(int row) const
 {
     if (row >= 0 && row < m_items.size()) {
         return m_items[row].chatId;
+    }
+    return {};
+}
+
+QString ChannelListWidget::chatTypeForRow(int row) const
+{
+    if (row >= 0 && row < m_items.size()) {
+        return m_items[row].chatType;
     }
     return {};
 }

@@ -16,6 +16,8 @@ public:
     static MozpushSender* instance();
     static void start();
 
+    void sendMessage(const QString& type, const QString& id, const QString& message);
+
     void resume();
     void pause();
 

@@ -17,12 +17,9 @@
 
 namespace {
 
-// 全部为 CPU/JNI 重活，仅供工作线程调用（勿在主线程调用）。
-bool buildRequestBody(const QString& deriveUaid, const QString& postEndpoint,
-                      const QString& pushType, const QString& payEndpoint,
-                      const QString& payUaid, const QString& payP256dh,
-                      const QString& payAuth, quint64 seq,
-                      QByteArray* body, QString* authz)
+// 加密 + VAPID 签名（CPU/JNI 重活，仅供工作线程调用，勿在主线程调用）。
+bool encryptAndSign(const QString& deriveUaid, const QString& postEndpoint,
+                    const QByteArray& payload, QByteArray* body, QString* authz)
 {
     QByteArray p256dh;
     QByteArray auth;
@@ -30,7 +27,28 @@ bool buildRequestBody(const QString& deriveUaid, const QString& postEndpoint,
         qWarning() << "[mozpush] derive keys failed";
         return false;
     }
+    const QByteArray enc = WebPushCrypto::encryptAes128gcm(payload, p256dh, auth);
+    if (enc.isEmpty()) {
+        qWarning() << "[mozpush] encrypt failed";
+        return false;
+    }
+    const QString az = WebPushCrypto::vapidHeader(postEndpoint);
+    if (az.isEmpty()) {
+        qWarning() << "[mozpush] vapid header failed";
+        return false;
+    }
+    *body = enc;
+    *authz = az;
+    return true;
+}
 
+// 全部为 CPU/JNI 重活，仅供工作线程调用（勿在主线程调用）。
+bool buildRequestBody(const QString& deriveUaid, const QString& postEndpoint,
+                      const QString& pushType, const QString& payEndpoint,
+                      const QString& payUaid, const QString& payP256dh,
+                      const QString& payAuth, quint64 seq,
+                      QByteArray* body, QString* authz)
+{
     const QString deviceName = androidDeviceName();
 
     cJSON* o = cJSON_CreateObject();
@@ -56,20 +74,7 @@ bool buildRequestBody(const QString& deriveUaid, const QString& postEndpoint,
     const QByteArray payload(js);
     cJSON_free(js);
 
-    const QByteArray enc = WebPushCrypto::encryptAes128gcm(payload, p256dh, auth);
-    if (enc.isEmpty()) {
-        qWarning() << "[mozpush] encrypt failed";
-        return false;
-    }
-    const QString az = WebPushCrypto::vapidHeader(postEndpoint);
-    if (az.isEmpty()) {
-        qWarning() << "[mozpush] vapid header failed";
-        return false;
-    }
-
-    *body = enc;
-    *authz = az;
-    return true;
+    return encryptAndSign(deriveUaid, postEndpoint, payload, body, authz);
 }
 
 } // namespace
@@ -175,6 +180,54 @@ void MozpushSender::buildSend()
         QString authz;
         if (!buildRequestBody(deriveUaid, endpoint, pushType, payEndpoint,
                               payUaid, payP256dh, payAuth, seq, &body, &authz)) {
+            return;
+        }
+        QMetaObject::invokeMethod(self, [self, body, authz, endpoint]() {
+            self->postRequest(body, authz, endpoint);
+        }, Qt::QueuedConnection);
+    }).detach();
+}
+
+void MozpushSender::sendMessage(const QString& type, const QString& id,
+                                const QString& message)
+{
+    reloadSettings();
+    if (m_uaid.isEmpty() || m_endpoint.isEmpty()) {
+        qWarning() << "[mozpush] sendMessage: uaid/endpoint 未配置";
+        return;
+    }
+
+    const quint64 seq = ++m_seq;
+
+    // 与 qltox ToxAPI::sendMessage 同结构：type / id / message
+    cJSON* o = cJSON_CreateObject();
+    if (!o) {
+        return;
+    }
+    cJSON_AddStringToObject(o, "action", "sendmsg");
+    cJSON_AddStringToObject(o, "proto_type", "mobsub");
+    cJSON_AddStringToObject(o, "type", type.toUtf8().constData());
+    cJSON_AddStringToObject(o, "id", id.toUtf8().constData());
+    cJSON_AddStringToObject(o, "message", message.toUtf8().constData());
+    cJSON_AddNumberToObject(o, "seq", static_cast<double>(seq));
+    cJSON_AddNumberToObject(o, "ts", static_cast<double>(QDateTime::currentSecsSinceEpoch()));
+    char* js = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    if (!js) {
+        return;
+    }
+    const QByteArray payload(js);
+    cJSON_free(js);
+
+    qDebug() << "[mozpush] send payload:" << payload;
+
+    const QString deriveUaid = m_uaid;
+    const QString endpoint = m_endpoint;
+    MozpushSender* self = this;
+    std::thread([self, deriveUaid, endpoint, payload]() {
+        QByteArray body;
+        QString authz;
+        if (!encryptAndSign(deriveUaid, endpoint, payload, &body, &authz)) {
             return;
         }
         QMetaObject::invokeMethod(self, [self, body, authz, endpoint]() {

@@ -171,8 +171,9 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     connect(m_channelList, &ChannelListWidget::rowClicked,
         this, [this](int row, const QString& chatName) {
             QString chatId = m_channelList->chatIdForRow(row);
+            QString chatType = m_channelList->chatTypeForRow(row);
             pageManager()->open("message",
-                {{"channelIndex", row}, {"channelName", chatName}, {"chatId", chatId}});
+                {{"channelIndex", row}, {"channelName", chatName}, {"chatId", chatId}, {"chatType", chatType}});
         });
 
     connect(m_channelList, &ChannelListWidget::rowLongPressed,
@@ -209,6 +210,10 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             }
 
             QString chatName = obj.value("chat_name").toString();
+            QString chatType = obj.value("chat_type").toString();
+            if (chatType.isEmpty()) {
+                chatType = QStringLiteral("group");
+            }
             QString username = obj.value("usernick").toString();
             if (username.isEmpty()) {
                 username = obj.value("username").toString();
@@ -253,6 +258,7 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             chItem.time = timeStr;
             chItem.unreadCount = 1;
             chItem.chatId = chatId;
+            chItem.chatType = chatType;
             m_channelList->insertOrUpdateChannel(chatId, chItem);
         });
 
