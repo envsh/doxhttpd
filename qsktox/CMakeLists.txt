@@ -100,6 +100,8 @@ qt_add_executable(qsktox
     ${qlappcom_dir}/aigpt_sessions.cpp
     ${qlappcom_dir}/pasteuploader.cpp
     ${qlappcom_dir}/linkpreview.cpp
+    ${qlappcom_dir}/edgedrm.cpp
+    ${qlappcom_dir}/ttsbot.cpp
 
    ${ql3rdparty_dir}/barrust_bloom/bloom.c
 
