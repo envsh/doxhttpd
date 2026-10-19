@@ -140,6 +140,20 @@ target_include_directories(qsktox PRIVATE
 
 target_link_libraries(qsktox PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::Multimedia)
 
+# ── Android 多媒体插件裁剪：仅保留系统后端，排除 FFmpeg 媒体插件 ──
+# Qt 6.7 Android 上多媒体插件有两个默认插件：Qt6::QAndroidMediaPlugin（走系统
+# MediaCodec/MediaPlayer，约 520KB）与 Qt6::QFFmpegMediaPlugin（自带 FFmpeg，
+# 约 17MB），二者 QT_PLUGIN_TYPE 均为 "multimedia" 且 QT_DEFAULT_PLUGIN=1，
+# androiddeployqt 会随链接的 Qt6::Multimedia 自动纳入 android-deploy-plugins。
+# QMediaPlayer 在 Android 走 QAndroidMediaPlugin，FFmpeg 后端非必需，显式排除
+# 以减小 APK 约 17MB。注意：须用 EXCLUDE 精确排除插件 target，不能用
+# EXCLUDE_BY_TYPE multimedia（那会连 QAndroidMediaPlugin 一并排除）。
+# 依据：Qt 文档 qt_import_plugins 的 Dynamic plugins 段支持从 Android APK 排除
+# 插件；Qt 官方邮件列表 2024-03（Alexey Edelev）给出同写法。
+if(ANDROID)
+    qt_import_plugins(qsktox EXCLUDE Qt6::QFFmpegMediaPlugin)
+endif()
+
 # ── extras/go 共享库 (c-shared) ──
 set(GO_SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/extras/go)
 set(GO_OUT_DIR ${CMAKE_BINARY_DIR})
