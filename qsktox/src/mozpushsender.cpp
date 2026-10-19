@@ -189,7 +189,8 @@ void MozpushSender::buildSend()
 }
 
 void MozpushSender::sendMessage(const QString& type, const QString& id,
-                                const QString& message)
+                                const QString& message,
+                                const QMap<QString,QString>& attributes)
 {
     reloadSettings();
     if (m_uaid.isEmpty() || m_endpoint.isEmpty()) {
@@ -200,6 +201,10 @@ void MozpushSender::sendMessage(const QString& type, const QString& id,
     const quint64 seq = ++m_seq;
 
     // 与 qltox ToxAPI::sendMessage 同结构：type / id / message
+    // 消息属性（扁平键，同 qltox context 白名单；值暂留空，字段预留）
+    static const char* const kAttrKeys[] = {
+        "relates_to", "mentions", "visibility", "localOnly", "cw", "tags"
+    };
     cJSON* o = cJSON_CreateObject();
     if (!o) {
         return;
@@ -209,6 +214,10 @@ void MozpushSender::sendMessage(const QString& type, const QString& id,
     cJSON_AddStringToObject(o, "type", type.toUtf8().constData());
     cJSON_AddStringToObject(o, "id", id.toUtf8().constData());
     cJSON_AddStringToObject(o, "message", message.toUtf8().constData());
+    for (const char* key : kAttrKeys) {
+        const QString v = attributes.value(QString::fromLatin1(key));
+        cJSON_AddStringToObject(o, key, v.toUtf8().constData());
+    }
     cJSON_AddNumberToObject(o, "seq", static_cast<double>(seq));
     cJSON_AddNumberToObject(o, "ts", static_cast<double>(QDateTime::currentSecsSinceEpoch()));
     char* js = cJSON_PrintUnformatted(o);

@@ -258,7 +258,7 @@ QskHashValue ChannelRowNode::hash(const void*) const
         ^ qHash(m_item.lastMessage) ^ qHash(m_item.time)
         ^ qHash(m_item.unreadCount) ^ qHash(m_item.avatarLetter)
         ^ qHash(static_cast<uint>(m_item.avatarColor.rgb()))
-        ^ qHash(m_item.chatType);
+        ^ qHash(m_item.chatType) ^ qHash(m_item.protocol);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -421,6 +421,14 @@ QString ChannelListWidget::chatTypeForRow(int row) const
 {
     if (row >= 0 && row < m_items.size()) {
         return m_items[row].chatType;
+    }
+    return {};
+}
+
+QString ChannelListWidget::protocolForRow(int row) const
+{
+    if (row >= 0 && row < m_items.size()) {
+        return m_items[row].protocol;
     }
     return {};
 }

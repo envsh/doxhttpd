@@ -25,9 +25,7 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     QString chatId = launchArgs.value("chatId").toString();
     m_chatId = chatId;
     m_chatType = launchArgs.value("chatType").toString();
-    if (m_chatType.isEmpty()) {
-        m_chatType = QStringLiteral("group");
-    }
+    m_protocol = launchArgs.value("protocol").toString();
 
     setAutoLayoutChildren(true);
     auto* layout = new QskLinearBox(Qt::Vertical, this);
@@ -173,9 +171,7 @@ void MessagePage::onNewIntent(const QVariantMap& launchArgs)
     QString chatId = launchArgs.value("chatId").toString();
     m_chatId = chatId;
     m_chatType = launchArgs.value("chatType").toString();
-    if (m_chatType.isEmpty()) {
-        m_chatType = QStringLiteral("group");
-    }
+    m_protocol = launchArgs.value("protocol").toString();
 
     if (m_titleLabel) {
         m_titleLabel->setText(channelName);
@@ -206,5 +202,5 @@ void MessagePage::sendMessage()
     m_messageList->appendMessage(item);
     m_input->setText("");
 
-    MozpushSender::instance()->sendMessage(m_chatType, m_chatId, text);
+    MozpushSender::instance()->sendMessage(m_protocol, m_chatId, text);
 }

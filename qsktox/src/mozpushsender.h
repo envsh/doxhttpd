@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QString>
 #include <QByteArray>
+#include <QMap>
 #include <QTimer>
 
 class QNetworkAccessManager;
@@ -16,7 +17,8 @@ public:
     static MozpushSender* instance();
     static void start();
 
-    void sendMessage(const QString& type, const QString& id, const QString& message);
+    void sendMessage(const QString& type, const QString& id, const QString& message,
+                     const QMap<QString,QString>& attributes = QMap<QString,QString>());
 
     void resume();
     void pause();

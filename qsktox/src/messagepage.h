@@ -26,6 +26,7 @@ private:
     QskTextLabel* m_titleLabel = nullptr;
     QString m_chatId;
     QString m_chatType;
+    QString m_protocol;
 };
 
 #endif
