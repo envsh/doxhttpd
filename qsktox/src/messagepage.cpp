@@ -163,6 +163,28 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             connect(overlay, &MsgEnlargeOverlay::closed,
                     overlay, &QObject::deleteLater);
         });
+
+    // ── 发送状态回填（reqseq 唯一，仅匹配自己刚发出的那条）──
+    connect(MozpushSender::instance(), &MozpushSender::messageSent,
+        this, [this](quint64 reqseq, bool success, const QString& error) {
+            m_messageList->setSendStatus(reqseq, success, error);
+        });
+
+    // ── 点击失败消息重发 ──
+    connect(m_messageList, &MessageListWidget::retryRequested,
+        this, [this](int row) {
+            const QString text = m_messageList->messageItem(row).content;
+            const quint64 reqseq =
+                MozpushSender::instance()->sendMessage(m_protocol, m_chatId, text);
+            if (reqseq == 0) {
+                m_messageList->updateSendState(
+                    row, MessageItem::SendFailed, 0,
+                    QString::fromUtf8("未配置推送端点"));
+            } else {
+                m_messageList->updateSendState(
+                    row, MessageItem::SendSending, reqseq, QString());
+            }
+        });
 }
 
 void MessagePage::onNewIntent(const QVariantMap& launchArgs)
@@ -191,6 +213,9 @@ void MessagePage::sendMessage()
         return;
     }
 
+    const quint64 reqseq =
+        MozpushSender::instance()->sendMessage(m_protocol, m_chatId, text);
+
     MessageItem item;
     item.sender = QString::fromUtf8("我");
     item.content = text;
@@ -198,9 +223,14 @@ void MessagePage::sendMessage()
     item.isSelf = true;
     item.avatarLetter = QString::fromUtf8("我").at(0).toUpper();
     item.avatarColor  = QColor("#1565C0");
+    item.reqSeq = reqseq;
+    if (reqseq == 0) {
+        item.sendState = MessageItem::SendFailed;
+        item.sendError = QString::fromUtf8("未配置推送端点");
+    } else {
+        item.sendState = MessageItem::SendSending;
+    }
 
     m_messageList->appendMessage(item);
     m_input->setText("");
-
-    MozpushSender::instance()->sendMessage(m_protocol, m_chatId, text);
 }

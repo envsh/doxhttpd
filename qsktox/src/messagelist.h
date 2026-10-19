@@ -11,12 +11,16 @@
 #include <QPointer>
 #include <QPointF>
 struct MessageItem {
+    enum SendState { SendSending, SendSent, SendFailed };
     QString sender;
     QString content;
     QString time;
     bool    isSelf;
     QString avatarLetter;
     QColor  avatarColor;
+    SendState sendState = SendSending;
+    QString sendError;
+    quint64 reqSeq = 0;
 };
 
 class MessageRowNode : public QskPaintedNode
@@ -29,6 +33,7 @@ public:
 
 private:
     MessageItem m_item;
+    QRectF m_statusRect;
 };
 
 class MessageRowItem : public QQuickItem
@@ -61,12 +66,16 @@ public:
     void setChannel(const QString& chatId);
     int messageCount() const { return m_items.size(); }
     const MessageItem& messageItem(int row) const { return m_items[row]; }
+    void setSendStatus(quint64 reqseq, bool success, const QString& error);
+    void updateSendState(int row, MessageItem::SendState state,
+                         quint64 reqseq, const QString& error);
 
 Q_SIGNALS:
     void rowClicked(int row);
     void rowLongPressed(int row, const QPointF& scenePos);
     void rowDoubleClicked(int row);
     void avatarClicked(int row, const QPointF& pos);
+    void retryRequested(int row);
 
 protected:
     void geometryChangeEvent(QskGeometryChangeEvent*) override;

@@ -182,23 +182,23 @@ void MozpushSender::buildSend()
                               payUaid, payP256dh, payAuth, seq, &body, &authz)) {
             return;
         }
-        QMetaObject::invokeMethod(self, [self, body, authz, endpoint]() {
-            self->postRequest(body, authz, endpoint);
+        QMetaObject::invokeMethod(self, [self, body, authz, endpoint, seq]() {
+            self->postRequest(body, authz, endpoint, seq, false);
         }, Qt::QueuedConnection);
     }).detach();
 }
 
-void MozpushSender::sendMessage(const QString& type, const QString& id,
-                                const QString& message,
-                                const QMap<QString,QString>& attributes)
+quint64 MozpushSender::sendMessage(const QString& type, const QString& id,
+                                   const QString& message,
+                                   const QMap<QString,QString>& attributes)
 {
     reloadSettings();
     if (m_uaid.isEmpty() || m_endpoint.isEmpty()) {
         qWarning() << "[mozpush] sendMessage: uaid/endpoint 未配置";
-        return;
+        return 0;
     }
 
-    const quint64 seq = ++m_seq;
+    const quint64 reqseq = m_reqSeq++;
 
     // 与 qltox ToxAPI::sendMessage 同结构：type / id / message
     // 消息属性（扁平键，同 qltox context 白名单；值暂留空，字段预留）
@@ -207,7 +207,7 @@ void MozpushSender::sendMessage(const QString& type, const QString& id,
     };
     cJSON* o = cJSON_CreateObject();
     if (!o) {
-        return;
+        return 0;
     }
     cJSON_AddStringToObject(o, "action", "sendmsg");
     cJSON_AddStringToObject(o, "proto_type", "mobsub");
@@ -218,12 +218,12 @@ void MozpushSender::sendMessage(const QString& type, const QString& id,
         const QString v = attributes.value(QString::fromLatin1(key));
         cJSON_AddStringToObject(o, key, v.toUtf8().constData());
     }
-    cJSON_AddNumberToObject(o, "seq", static_cast<double>(seq));
+    cJSON_AddNumberToObject(o, "seq", static_cast<double>(reqseq));
     cJSON_AddNumberToObject(o, "ts", static_cast<double>(QDateTime::currentSecsSinceEpoch()));
     char* js = cJSON_PrintUnformatted(o);
     cJSON_Delete(o);
     if (!js) {
-        return;
+        return 0;
     }
     const QByteArray payload(js);
     cJSON_free(js);
@@ -233,20 +233,22 @@ void MozpushSender::sendMessage(const QString& type, const QString& id,
     const QString deriveUaid = m_uaid;
     const QString endpoint = m_endpoint;
     MozpushSender* self = this;
-    std::thread([self, deriveUaid, endpoint, payload]() {
+    std::thread([self, deriveUaid, endpoint, payload, reqseq]() {
         QByteArray body;
         QString authz;
         if (!encryptAndSign(deriveUaid, endpoint, payload, &body, &authz)) {
             return;
         }
-        QMetaObject::invokeMethod(self, [self, body, authz, endpoint]() {
-            self->postRequest(body, authz, endpoint);
+        QMetaObject::invokeMethod(self, [self, body, authz, endpoint, reqseq]() {
+            self->postRequest(body, authz, endpoint, reqseq, true);
         }, Qt::QueuedConnection);
     }).detach();
+
+    return reqseq;
 }
 
 void MozpushSender::postRequest(const QByteArray& body, const QString& authz,
-                                const QString& endpoint)
+                                const QString& endpoint, quint64 reqseq, bool notify)
 {
     QNetworkRequest req{QUrl(endpoint)};
     req.setHeader(QNetworkRequest::ContentTypeHeader, "application/octet-stream");
@@ -255,14 +257,20 @@ void MozpushSender::postRequest(const QByteArray& body, const QString& authz,
     req.setRawHeader("Authorization", authz.toUtf8());
 
     QNetworkReply* reply = m_nam->post(req, body);
-    connect(reply, &QNetworkReply::finished, reply, [reply]() {
+    connect(reply, &QNetworkReply::finished, reply, [this, reply, reqseq, notify]() {
         const int status =
             reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         if (reply->error() != QNetworkReply::NoError) {
             qWarning() << "[mozpush] send failed: status=" << status
                        << reply->errorString();
+            if (notify) {
+                emit messageSent(reqseq, false, reply->errorString());
+            }
         } else {
             qDebug() << "[mozpush] send ok: status=" << status;
+            if (notify) {
+                emit messageSent(reqseq, true, QString());
+            }
         }
         reply->deleteLater();
     });

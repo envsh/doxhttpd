@@ -318,6 +318,23 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
         int timeW = QFontMetrics(timeFont).horizontalAdvance(m_item.time);
         painter->drawText(QRectF(bubbleX, bubbleY + bubbleHeight + 1, timeW, TIME_HEIGHT),
             Qt::AlignLeft | Qt::AlignVCenter, m_item.time);
+
+        // 发送状态：⏳ 发送中 / ✓ 已发送 / ❗ 发送失败
+        m_statusRect = QRectF(bubbleX + timeW + 6, bubbleY + bubbleHeight + 1,
+            TIME_HEIGHT, TIME_HEIGHT);
+        QString statusText;
+        QColor statusColor(0x66, 0x66, 0x66);
+        if (m_item.sendState == MessageItem::SendSending) {
+            statusText = QString::fromUtf8("⏳");
+        } else if (m_item.sendState == MessageItem::SendSent) {
+            statusText = QString::fromUtf8("✓");
+            statusColor = QColor(0x4C, 0xAF, 0x50);
+        } else {
+            statusText = QString::fromUtf8("❗");
+            statusColor = QColor(0xE5, 0x39, 0x35);
+        }
+        painter->setPen(statusColor);
+        painter->drawText(m_statusRect, Qt::AlignLeft | Qt::AlignVCenter, statusText);
     } else {
         // ── 他人的消息：左侧对齐，灰色气泡 + 头像 ──
         qreal bubbleY = NAME_HEIGHT;
@@ -375,7 +392,8 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
 QskHashValue MessageRowNode::hash(const void*) const
 {
     return qHash(m_item.sender) ^ qHash(m_item.content)
-        ^ qHash(m_item.time) ^ qHash(m_item.isSelf);
+        ^ qHash(m_item.time) ^ qHash(m_item.isSelf)
+        ^ qHash(static_cast<int>(m_item.sendState));
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -431,6 +449,11 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
             QPointF localPos = point.position();
             int row = rowFromContentY(localPos.y());
             if (row < 0 || row >= m_items.size()) return;
+            if (m_items[row].isSelf
+                && m_items[row].sendState == MessageItem::SendFailed) {
+                Q_EMIT retryRequested(row);
+                return;
+            }
             if (!m_items[row].isSelf) {
                 const qreal avatarX = SIDE_MARGIN;
                 const qreal avatarSize = AVATAR_SIZE;
@@ -547,6 +570,37 @@ void MessageListWidget::appendMessage(const MessageItem& item)
     setScrollPos(QPointF(0, qMax(0.0, totalH - viewH)));
 
     updateVisibleRows();
+}
+
+void MessageListWidget::setSendStatus(quint64 reqseq, bool success, const QString& error)
+{
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (!m_items[i].isSelf || m_items[i].reqSeq != reqseq) {
+            continue;
+        }
+        m_items[i].sendState = success ? MessageItem::SendSent : MessageItem::SendFailed;
+        m_items[i].sendError = success ? QString() : error;
+        auto it = m_visibleRows.find(i);
+        if (it != m_visibleRows.end()) {
+            (*it)->setMessageData(m_items[i]);
+        }
+        return;
+    }
+}
+
+void MessageListWidget::updateSendState(int row, MessageItem::SendState state,
+                                        quint64 reqseq, const QString& error)
+{
+    if (row < 0 || row >= m_items.size()) {
+        return;
+    }
+    m_items[row].sendState = state;
+    m_items[row].reqSeq = reqseq;
+    m_items[row].sendError = error;
+    auto it = m_visibleRows.find(row);
+    if (it != m_visibleRows.end()) {
+        (*it)->setMessageData(m_items[row]);
+    }
 }
 
 void MessageListWidget::setChannel(const QString& chatId)

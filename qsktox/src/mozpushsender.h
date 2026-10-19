@@ -17,11 +17,15 @@ public:
     static MozpushSender* instance();
     static void start();
 
-    void sendMessage(const QString& type, const QString& id, const QString& message,
-                     const QMap<QString,QString>& attributes = QMap<QString,QString>());
+    // 返回本次发送的 reqseq（未配置 uaid/endpoint 时返回 0）。
+    quint64 sendMessage(const QString& type, const QString& id, const QString& message,
+                        const QMap<QString,QString>& attributes = QMap<QString,QString>());
 
     void resume();
     void pause();
+
+Q_SIGNALS:
+    void messageSent(quint64 reqseq, bool success, const QString& error);
 
 public slots:
     void sendNow();
@@ -31,13 +35,14 @@ private:
     void reloadSettings();
     void buildSend();
     void postRequest(const QByteArray& body, const QString& authz,
-                     const QString& endpoint);
+                     const QString& endpoint, quint64 reqseq, bool notify);
 
     QNetworkAccessManager* m_nam = nullptr;
     QTimer m_timer;
     QString m_uaid;
     QString m_endpoint;
-    quint64 m_seq = 0;
+    quint64 m_seq = 0;     // register(register action) 的 seq
+    quint64 m_reqSeq = 100;   // 下一个 reqseq，从 100 开始，跨联系人全局唯一
 };
 
 #endif
