@@ -51,6 +51,8 @@ private:
     bool m_dirty = true;
 };
 
+class StaggerFadeAnimator;
+
 class ChannelListWidget : public MyScrollArea
 {
     Q_OBJECT
@@ -79,11 +81,13 @@ protected:
 
 private:
     void updateVisibleRows();
+    void startFadeIn();
 
     QQuickItem* m_contentView = nullptr;
     QVector<ChannelItem> m_items;
     QHash<QString, int> m_chatIdIndex;
     QMap<int, ChannelRowItem*> m_visibleRows;
+    StaggerFadeAnimator* m_fadeAnimator = nullptr;
 };
 
 class StaggerFadeAnimator : public QskAnimator
@@ -93,6 +97,7 @@ public:
 
 protected:
     void advance(qreal value) override;
+    void done() override;
 
 private:
     QPointer<QQuickItem> m_target;

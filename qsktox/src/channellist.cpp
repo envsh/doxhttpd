@@ -335,6 +335,11 @@ ChannelListWidget::ChannelListWidget(QQuickItem* parent)
 
 ChannelListWidget::~ChannelListWidget()
 {
+    if (m_fadeAnimator) {
+        m_fadeAnimator->stop();
+        delete m_fadeAnimator;
+        m_fadeAnimator = nullptr;
+    }
     for (auto* row : std::as_const(m_visibleRows)) {
         delete row;
     }
@@ -378,12 +383,22 @@ void ChannelListWidget::populateData()
     m_contentView->setSize(QSizeF(viewW, m_items.size() * ROW_HEIGHT));
     update();
     updateVisibleRows();
+    startFadeIn();
+}
 
+void ChannelListWidget::startFadeIn()
+{
+    if (m_fadeAnimator) {
+        m_fadeAnimator->stop();
+        delete m_fadeAnimator;
+        m_fadeAnimator = nullptr;
+    }
+    setOpacity(1.0);
     QTimer::singleShot(100, this, [this]() {
         if (window()) {
-            auto* anim = new StaggerFadeAnimator(this, this);
-            anim->setWindow(window());
-            anim->start();
+            m_fadeAnimator = new StaggerFadeAnimator(this);
+            m_fadeAnimator->setWindow(window());
+            m_fadeAnimator->start();
         }
     });
 }
@@ -469,8 +484,10 @@ void ChannelListWidget::updateVisibleRows()
     auto it = m_visibleRows.begin();
     while (it != m_visibleRows.end()) {
         if (it.key() < rowMin || it.key() > rowMax) {
-            it.value()->deleteLater();
+            ChannelRowItem* doomed = it.value();
             it = m_visibleRows.erase(it);
+            doomed->setVisible(false);
+            doomed->deleteLater();
         } else {
             ++it;
         }
@@ -520,10 +537,6 @@ StaggerFadeAnimator::StaggerFadeAnimator(QQuickItem* target, QObject* parent)
     Q_UNUSED(parent)
     setDuration(800);
     setEasingCurve(QEasingCurve::OutCubic);
-
-    if (m_target) {
-        m_target->setOpacity(0.0);
-    }
 }
 
 void StaggerFadeAnimator::advance(qreal value)
@@ -532,6 +545,13 @@ void StaggerFadeAnimator::advance(qreal value)
         return;
     }
     m_target->setOpacity(value);
+}
+
+void StaggerFadeAnimator::done()
+{
+    if (m_target) {
+        m_target->setOpacity(1.0);
+    }
 }
 
 #include "moc_channellist.cpp"

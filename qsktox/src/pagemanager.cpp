@@ -191,6 +191,15 @@ void PageManager::setStackBoxCurrent(Page* page)
     if (m_stackBox->currentItem() != page) {
         m_stackBox->setCurrentItem(page);
     }
+
+    // QskStackBoxAnimator::done() 会用「索引」itemAtIndex(start/end) 无条件
+    // setVisible(i==1)；快速来回切换时动画被中途 stop()->done()，索引可能
+    // 因延时 removeItem 重排而错位，把当前页（如 MainPage）藏掉导致白屏。
+    // 此处显式保证「当前项必定可见」，并刷新场景图，作为最终保险。
+    if (!page->isVisible()) {
+        page->setVisible(true);
+    }
+    m_stackBox->update();
 }
 
 // ── 查询 ──
@@ -258,8 +267,19 @@ void PageManager::open(const QString& id, const QVariantMap& args,
                             addToCache(popPage);
                         }
                         QTimer::singleShot(250, this, [this, popPage]() {
-                            if (m_stackBox->indexOf(popPage) >= 0) {
+                            // 该页已不再是当前项时才从 stackbox 移除，避免误差可见性
+                            if (popPage != currentPage() &&
+                                m_stackBox->indexOf(popPage) >= 0) {
                                 m_stackBox->removeItem(popPage);
+                            }
+                            // 移除后索引可能重排，校正当前项可见性
+                            if (Page* cp = currentPage()) {
+                                if (!cp->isVisible()) {
+                                    cp->setVisible(true);
+                                }
+                            }
+                            if (m_stackBox) {
+                                m_stackBox->update();
                             }
                         });
                     }
@@ -390,9 +410,18 @@ void PageManager::back()
         if (policy == CachePolicy::Transient) {
             m_pendingDestroy = current;
             m_destroyTimer.singleShot(250, this, [this]() {
-                if (m_pendingDestroy) {
+                // 仅当该页仍不是当前项时才销毁，避免快速切回后误删当前页
+                if (m_pendingDestroy && m_pendingDestroy != currentPage()) {
                     destroyPage(m_pendingDestroy);
                     m_pendingDestroy = nullptr;
+                    if (Page* cp = currentPage()) {
+                        if (!cp->isVisible()) {
+                            cp->setVisible(true);
+                        }
+                    }
+                    if (m_stackBox) {
+                        m_stackBox->update();
+                    }
                 }
             });
         } else {
@@ -402,11 +431,20 @@ void PageManager::back()
             }
             m_pendingRemove = current;
             QTimer::singleShot(250, this, [this]() {
-                if (m_pendingRemove) {
+                // 仅当该页不再是当前项时才移除
+                if (m_pendingRemove && m_pendingRemove != currentPage()) {
                     if (m_stackBox->indexOf(m_pendingRemove) >= 0) {
                         m_stackBox->removeItem(m_pendingRemove);
                     }
                     m_pendingRemove = nullptr;
+                    if (Page* cp = currentPage()) {
+                        if (!cp->isVisible()) {
+                            cp->setVisible(true);
+                        }
+                    }
+                    if (m_stackBox) {
+                        m_stackBox->update();
+                    }
                 }
             });
         }
@@ -436,9 +474,17 @@ void PageManager::replace(const QString& id, const QVariantMap& args)
         deactivateCurrentPage();
         m_pendingDestroy = current;
         m_destroyTimer.singleShot(250, this, [this]() {
-            if (m_pendingDestroy) {
+            if (m_pendingDestroy && m_pendingDestroy != currentPage()) {
                 destroyPage(m_pendingDestroy);
                 m_pendingDestroy = nullptr;
+            }
+            if (Page* cp = currentPage()) {
+                if (!cp->isVisible()) {
+                    cp->setVisible(true);
+                }
+            }
+            if (m_stackBox) {
+                m_stackBox->update();
             }
         });
     }

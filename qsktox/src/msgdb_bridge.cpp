@@ -3,6 +3,9 @@
 #include "message_db.h"
 #include "channel_db.h"
 #include <QDebug>
+#include <QCoreApplication>
+#include <QMetaObject>
+#include <QPointer>
 
 namespace {
 
@@ -102,7 +105,15 @@ void insertMessage(const QString& protocol, const QString& chatId,
                 return;
             }
             if (cb) {
-                cb(ctx, protocol, chatId, localId, rowid);
+                QPointer<QObject> guard(static_cast<QObject*>(ctx));
+                QMetaObject::invokeMethod(
+                    QCoreApplication::instance(),
+                    [guard, cb, ctx, protocol, chatId, localId, rowid]() {
+                        if (guard) {
+                            cb(ctx, protocol, chatId, localId, rowid);
+                        }
+                    },
+                    Qt::QueuedConnection);
             }
         });
 }
