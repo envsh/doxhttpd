@@ -549,6 +549,7 @@ void MessageAttribBar::setTypeLabel(const QString& text)
     } else {
         m_typeLabel->setText(text);
         m_typeLabel->setVisible(true);
+        m_typeLabel->polish();
     }
     layoutItems();
 }

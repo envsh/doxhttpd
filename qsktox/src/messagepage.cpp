@@ -167,6 +167,7 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     // ── 属性组件条(输入区下方,随类型动态重建) ──
     m_attrBar = new MessageAttribBar(layout);
     m_attrBar->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    m_attrBar->setTypeLabel(m_protocol);
     m_attrBar->setDefs(messageAttribBarDefsForType(m_protocol));
 
     // ── Double click handler ──
@@ -230,6 +231,7 @@ void MessagePage::onNewIntent(const QVariantMap& launchArgs)
         m_messageList->setChannel(m_protocol, chatId);
     }
     if (m_attrBar) {
+        m_attrBar->setTypeLabel(m_protocol);
         m_attrBar->setDefs(messageAttribBarDefsForType(m_protocol));
     }
 }
