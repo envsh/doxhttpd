@@ -4,6 +4,7 @@
 #include "page.h"
 
 class MessageListWidget;
+class MessageAttribBar;
 class QskTextField;
 class QskTextLabel;
 
@@ -34,6 +35,7 @@ private:
                                   int64_t rowid);
 
     MessageListWidget* m_messageList = nullptr;
+    MessageAttribBar* m_attrBar = nullptr;
     QskTextField* m_input = nullptr;
     QskTextLabel* m_titleLabel = nullptr;
     QString m_chatId;

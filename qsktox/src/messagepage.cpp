@@ -1,4 +1,5 @@
 #include "messagepage.h"
+#include "messageattribbar.h"
 #include "messagelist.h"
 #include "msgenlargeoverlay.h"
 #include "androidutils.h"
@@ -163,6 +164,11 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
     connect(sendBtn, &QskAbstractButton::clicked, this, &MessagePage::sendMessage);
 
+    // ── 属性组件条(输入区下方,随类型动态重建) ──
+    m_attrBar = new MessageAttribBar(layout);
+    m_attrBar->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    m_attrBar->setDefs(messageAttribBarDefsForType(m_protocol));
+
     // ── Double click handler ──
     connect(m_messageList, &MessageListWidget::rowDoubleClicked,
         this, [this](int row) {
@@ -222,6 +228,9 @@ void MessagePage::onNewIntent(const QVariantMap& launchArgs)
     }
     if (m_messageList) {
         m_messageList->setChannel(m_protocol, chatId);
+    }
+    if (m_attrBar) {
+        m_attrBar->setDefs(messageAttribBarDefsForType(m_protocol));
     }
 }
 

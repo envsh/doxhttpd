@@ -62,6 +62,8 @@ qt_add_executable(qsktox
     src/messagelist.cpp
     src/messagepage.h
     src/messagepage.cpp
+    src/messageattribbar.h
+    src/messageattribbar.cpp
     src/msgenlargeoverlay.h
     src/msgenlargeoverlay.cpp
     src/settingspage.h
@@ -110,6 +112,7 @@ qt_add_executable(qsktox
     ${qlappcom_dir}/linkpreview.cpp
     ${qlappcom_dir}/edgedrm.cpp
     ${qlappcom_dir}/ttsbot.cpp
+    ${qlappcom_dir}/messageattribdefs.cpp
 
    ${ql3rdparty_dir}/barrust_bloom/bloom.c
 
@@ -151,7 +154,7 @@ target_link_libraries(qsktox PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::C
 # 依据：Qt 文档 qt_import_plugins 的 Dynamic plugins 段支持从 Android APK 排除
 # 插件；Qt 官方邮件列表 2024-03（Alexey Edelev）给出同写法。
 if(ANDROID)
-    qt_import_plugins(qsktox EXCLUDE Qt6::QFFmpegMediaPlugin)
+#    qt_import_plugins(qsktox EXCLUDE Qt6::QFFmpegMediaPlugin)
 endif()
 
 # ── extras/go 共享库 (c-shared) ──
