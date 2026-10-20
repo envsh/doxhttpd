@@ -81,6 +81,7 @@ private:
     TagInput* m_edit = nullptr;
     int m_markIndex = -1;
     std::function<void()> m_relayout;
+    bool m_inLayout = false;
 
     int sizeHintHeight() const;
     QskBox* makeChip(const QString& t);
@@ -334,6 +335,8 @@ void TagEditor::handleBackspaceEmpty()
 
 void TagEditor::relayout()
 {
+    if (m_inLayout) { return; }
+    m_inLayout = true;
     const int kW = (static_cast<int>(width()) > 24)
             ? static_cast<int>(width()) : 220;
     int x = 3;
@@ -362,8 +365,8 @@ void TagEditor::relayout()
         ew = kW - 6;
     }
     m_edit->setGeometry(x, y + (rowH - eh) / 2, ew, eh);
-    setPreferredHeight(y + rowH + 3);
     setFixedHeight(y + rowH + 3);
+    m_inLayout = false;
 }
 
 void TagEditor::updateLayout()
@@ -375,7 +378,7 @@ void TagEditor::updateLayout()
 void TagEditor::geometryChangeEvent(QskGeometryChangeEvent* e)
 {
     QskControl::geometryChangeEvent(e);
-    relayout();
+    if (!m_inLayout) { relayout(); }
 }
 
 // ── MessageAttribBar ──────────────────────────────────────────────────────
@@ -524,7 +527,6 @@ void MessageAttribBar::layoutItems()
     }
     const int h = y + rowH + 2;
     setFixedHeight(h);
-    setPreferredHeight(h);
     m_inLayout = false;
 }
 
@@ -677,5 +679,5 @@ void MessageAttribBar::updateLayout()
 void MessageAttribBar::geometryChangeEvent(QskGeometryChangeEvent* e)
 {
     QskControl::geometryChangeEvent(e);
-    layoutItems();
+    if (!m_inLayout) { layoutItems(); }
 }
