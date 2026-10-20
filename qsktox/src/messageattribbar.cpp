@@ -3,6 +3,8 @@
 #include <QskBox.h>
 #include <QskBoxShapeMetrics.h>
 #include <QskEvent.h>
+#include <QskMenu.h>
+#include <QQuickWindow>
 #include <QInputMethodEvent>
 #include <QKeyEvent>
 #include <QFocusEvent>
@@ -27,6 +29,37 @@ static QString elideTagText(const QString& s, int maxW, const QFont& f)
     }
     return fm.elidedText(s, Qt::ElideRight, maxW);
 }
+
+// 下拉框：QskComboBox 的 popup 固定自 combo 左下向下展开、无窗口边界夹取，
+// 位于页面底部时会被窗口裁切。覆写 openPopup，在其建菜单后按下方剩余空间
+// 决定是否把菜单翻转到 combo 上方。
+class UpwardComboBox : public QskComboBox
+{
+public:
+    using QskComboBox::QskComboBox;
+
+protected:
+    void openPopup() override
+    {
+        QskComboBox::openPopup();
+
+        auto* menu = findChild<QskMenu*>();
+        if (menu == nullptr) {
+            return;
+        }
+        QQuickWindow* win = window();
+        if (win == nullptr) {
+            return;
+        }
+
+        const qreal menuH = menu->sizeConstraint().height();
+        const QPointF topScene = mapToScene(QPointF(0.0, 0.0));
+        const QPointF bottomScene = mapToScene(QPointF(0.0, height()));
+        if (bottomScene.y() + menuH > win->contentItem()->height()) {
+            menu->setOrigin(QPointF(bottomScene.x(), topScene.y() - menuH));
+        }
+    }
+};
 
 class TagEditor;
 
@@ -415,7 +448,7 @@ void MessageAttribBar::rebuildChildren()
         QskControl* ctl = nullptr;
         switch (d.kind) {
         case MessageAttrDef::kCombo: {
-            auto* cb = new QskComboBox(this);
+            auto* cb = new UpwardComboBox(this);
             QStringList display;
             it.wireOptions = d.options;
             for (int j = 0; j < d.options.size(); ++j) {
