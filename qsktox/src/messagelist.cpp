@@ -11,6 +11,8 @@
 #include <QtMath>
 #include <QskEvent.h>
 #include <QTimer>
+#include <QTextLayout>
+#include <QTextOption>
 
 static constexpr qreal MIN_ROW_HEIGHT = 60;
 static constexpr qreal NAME_HEIGHT = 20;
@@ -182,24 +184,59 @@ static constexpr int s_mockCount = sizeof(s_mockMessages) / sizeof(s_mockMessage
 // 计算单条消息行高
 // ═══════════════════════════════════════════════════════════════════
 
+// 用 QTextLayout 按真实排版算文本高度与行数, 供布局与绘制共用(单一真源)
+struct MessageTextMetrics {
+    int lines = 1;
+    qreal height = 0.0;
+};
+
+static MessageTextMetrics measureMessageText(const QString& content,
+                                             const QFont& msgFont,
+                                             qreal textWidth)
+{
+    MessageTextMetrics m;
+    if (textWidth <= 0.0) {
+        QFontMetrics fm(msgFont);
+        m.height = fm.height();
+        return m;
+    }
+
+    QTextOption textOption;
+    textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+
+    QTextLayout layout(content, msgFont);
+    layout.setTextOption(textOption);
+    layout.beginLayout();
+    qreal y = 0.0;
+    m.lines = 0;
+    while (true) {
+        QTextLine line = layout.createLine();
+        if (!line.isValid()) {
+            break;
+        }
+        line.setLineWidth(textWidth);
+        line.setPosition(QPointF(0.0, y));
+        y += line.height();
+        ++m.lines;
+    }
+    layout.endLayout();
+    if (m.lines < 1) {
+        m.lines = 1;
+    }
+    m.height = y;
+    return m;
+}
+
 static qreal calcRowHeight(const MessageItem& item, qreal availableWidth)
 {
     QFont msgFont;
     msgFont.setPixelSize(16);
-    QFontMetrics msgFm(msgFont);
 
-    qreal maxBubbleWidth = availableWidth * 85.0 / 100.0;
-    qreal contentWidth = msgFm.horizontalAdvance(item.content);
-    if (contentWidth > maxBubbleWidth - BUBBLE_PADDING_H * 2) {
-        contentWidth = maxBubbleWidth - BUBBLE_PADDING_H * 2;
-    }
+    const qreal maxBubbleWidth = availableWidth * 85.0 / 100.0;
+    const qreal textWidth = maxBubbleWidth - BUBBLE_PADDING_H * 2;
 
-    int lines = 1;
-    if (contentWidth > 0) {
-        lines = qCeil((qreal)msgFm.horizontalAdvance(item.content) / contentWidth);
-    }
-    int lineHeight = msgFm.height();
-    qreal textHeight = lines * lineHeight;
+    const MessageTextMetrics tm = measureMessageText(item.content, msgFont, textWidth);
+    const qreal textHeight = tm.height;
     qreal bubbleHeight = textHeight + BUBBLE_PADDING_V * 2;
     if (bubbleHeight < 36) {
         bubbleHeight = 36;
@@ -263,22 +300,20 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
 
     // 计算内容宽度
     QString displayContent = m_item.content;
-    qreal contentWidth = msgFm.horizontalAdvance(displayContent);
-    if (contentWidth > maxBubbleWidth - BUBBLE_PADDING_H * 2) {
-        contentWidth = maxBubbleWidth - BUBBLE_PADDING_H * 2;
+    const qreal textWidth = maxBubbleWidth - BUBBLE_PADDING_H * 2;
+    const MessageTextMetrics tm = measureMessageText(displayContent, msgFont, textWidth);
+    qreal contentWidth = textWidth;
+    const qreal naturalWidth = msgFm.horizontalAdvance(displayContent);
+    if (naturalWidth < contentWidth) {
+        contentWidth = naturalWidth;
     }
     qreal bubbleWidth = contentWidth + BUBBLE_PADDING_H * 2;
     if (bubbleWidth < 40) {
         bubbleWidth = 40;
     }
 
-    // 计算行数和高度
-    int lineHeight = msgFm.height();
-    int lines = 1;
-    if (contentWidth > 0) {
-        lines = qCeil((qreal)msgFm.horizontalAdvance(displayContent) / contentWidth);
-    }
-    qreal textHeight = lines * lineHeight;
+    // 行数和高度: 与布局端一致(measureMessageText)
+    const qreal textHeight = tm.height;
     qreal bubbleHeight = textHeight + BUBBLE_PADDING_V * 2;
     if (bubbleHeight < 36) {
         bubbleHeight = 36;
@@ -305,11 +340,27 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
 
         // 消息文字（支持多行）
         painter->setPen(Qt::white);
-        QRectF textRect(bubbleX + BUBBLE_PADDING_H, bubbleY + BUBBLE_PADDING_V,
+        const QRectF textRect(bubbleX + BUBBLE_PADDING_H, bubbleY + BUBBLE_PADDING_V,
             contentWidth, textHeight);
         QTextOption textOption;
         textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
-        painter->drawText(textRect, displayContent, textOption);
+        QTextLayout textLayout(displayContent, msgFont);
+        textLayout.setTextOption(textOption);
+        textLayout.beginLayout();
+        {
+            qreal ty = 0.0;
+            while (true) {
+                QTextLine line = textLayout.createLine();
+                if (!line.isValid()) {
+                    break;
+                }
+                line.setLineWidth(contentWidth);
+                line.setPosition(QPointF(0.0, ty));
+                ty += line.height();
+            }
+        }
+        textLayout.endLayout();
+        textLayout.draw(painter, textRect.topLeft());
 
         // 时间
         QFont timeFont;
@@ -372,11 +423,27 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
 
         // 消息文字（支持多行）
         painter->setPen(QColor("#ddd"));
-        QRectF textRect(bubbleX + BUBBLE_PADDING_H, bubbleY + BUBBLE_PADDING_V,
+        const QRectF textRect(bubbleX + BUBBLE_PADDING_H, bubbleY + BUBBLE_PADDING_V,
             contentWidth, textHeight);
         QTextOption textOption2;
         textOption2.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
-        painter->drawText(textRect, displayContent, textOption2);
+        QTextLayout textLayout2(displayContent, msgFont);
+        textLayout2.setTextOption(textOption2);
+        textLayout2.beginLayout();
+        {
+            qreal ty = 0.0;
+            while (true) {
+                QTextLine line = textLayout2.createLine();
+                if (!line.isValid()) {
+                    break;
+                }
+                line.setLineWidth(contentWidth);
+                line.setPosition(QPointF(0.0, ty));
+                ty += line.height();
+            }
+        }
+        textLayout2.endLayout();
+        textLayout2.draw(painter, textRect.topLeft());
 
         // 时间
         QFont timeFont;
