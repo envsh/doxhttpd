@@ -229,6 +229,9 @@ void MessagePage::onNewIntent(const QVariantMap& launchArgs)
     }
     if (m_messageList) {
         m_messageList->setChannel(m_protocol, chatId);
+        if (!isVirtualProtocol(m_protocol)) {
+            MsgDbBridge::markRead(m_protocol, m_chatId, m_messageList->lastRowid());
+        }
     }
     if (m_attrBar) {
         m_attrBar->setTypeLabel(m_protocol);
@@ -259,6 +262,9 @@ void MessagePage::sendMessage()
         item.sendState = MessageItem::SendSent;
         m_messageList->appendMessage(item);
         MsgDbBridge::insertMessage(m_protocol, m_chatId, item, nullptr, nullptr);
+        MsgDbBridge::upsertChannel(m_protocol, m_chatId, m_chatId,
+            QStringLiteral("online"), false, text, item.time,
+            QDateTime::currentSecsSinceEpoch());
         m_input->setText("");
         return;
     }
@@ -404,6 +410,9 @@ void MessagePage::onBotDone(int chatId, const QString& protocol, qint64 localId,
     ack.sendState = MessageItem::SendSent;
     m_messageList->appendMessage(ack);
     MsgDbBridge::insertMessage(m_protocol, m_chatId, ack, nullptr, nullptr);
+    MsgDbBridge::upsertChannel(m_protocol, m_chatId, m_chatId,
+        QStringLiteral("online"), false, text, ack.time,
+        QDateTime::currentSecsSinceEpoch());
 }
 
 void MessagePage::onTtsDone(int chatId, qint64 localId, bool success,
@@ -454,4 +463,7 @@ void MessagePage::onTtsDone(int chatId, qint64 localId, bool success,
     ack.durationSec = durationSec;
     m_messageList->appendMessage(ack);
     MsgDbBridge::insertMessage(m_protocol, m_chatId, ack, nullptr, nullptr);
+    MsgDbBridge::upsertChannel(m_protocol, m_chatId, m_chatId,
+        QStringLiteral("online"), false, text, ack.time,
+        QDateTime::currentSecsSinceEpoch());
 }

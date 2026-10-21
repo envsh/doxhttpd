@@ -708,6 +708,17 @@ int64_t MessageListWidget::rowidForLocalId(qint64 localId) const
     return 0;
 }
 
+int64_t MessageListWidget::lastRowid() const
+{
+    int64_t maxRowid = 0;
+    for (const auto& it : m_items) {
+        if (it.dbRowid > maxRowid) {
+            maxRowid = it.dbRowid;
+        }
+    }
+    return maxRowid;
+}
+
 void MessageListWidget::backfillRowid(qint64 localId, int64_t rowid)
 {
     if (localId == 0 || rowid <= 0) {

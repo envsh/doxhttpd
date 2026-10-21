@@ -61,6 +61,7 @@ public:
     ~ChannelListWidget() override;
 
     void populateData();
+    void reloadFromDb();
     void insertOrUpdateChannel(const QString& chatId, const ChannelItem& item);
     QString chatIdForRow(int row) const;
     QString chatTypeForRow(int row) const;
@@ -82,6 +83,7 @@ protected:
 private:
     void updateVisibleRows();
     void startFadeIn();
+    void appendDbChannels();
 
     QQuickItem* m_contentView = nullptr;
     QVector<ChannelItem> m_items;

@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QMetaObject>
 #include <QPointer>
+#include <QDateTime>
 
 namespace {
 
@@ -56,20 +57,110 @@ QString chanKey(const QString& protocol, const QString& chatId)
     return protocol + QStringLiteral("_") + chatId;
 }
 
+static QString protocolOfChanid(const QString& chanid)
+{
+    const int sep = chanid.lastIndexOf(QLatin1Char('_'));
+    if (sep <= 0) {
+        return QString();
+    }
+    return chanid.left(sep);
+}
+
+static QString chatIdOfChanid(const QString& chanid)
+{
+    const int sep = chanid.lastIndexOf(QLatin1Char('_'));
+    if (sep <= 0 || sep >= chanid.size() - 1) {
+        return QString();
+    }
+    return chanid.mid(sep + 1);
+}
+
 void ensureChannel(const QString& protocol, const QString& chatId,
                    const QString& name)
 {
+    upsertChannel(protocol, chatId, name, QStringLiteral("online"),
+                  false, QString(), QString(),
+                  QDateTime::currentSecsSinceEpoch());
+}
+
+QVector<ChannelRecord> loadChannels()
+{
+    QVector<ChannelRecord> out;
     auto* cdb = Storage::instance().channelDb();
     if (!cdb) {
+        return out;
+    }
+    std::vector<ChannelRow> rows = cdb->load_all_channels();
+    for (const auto& r : rows) {
+        const QString chanid = QString::fromUtf8(r.chanid.c_str());
+        ChannelRecord rec;
+        rec.protocol        = protocolOfChanid(chanid);
+        rec.chatId          = chatIdOfChanid(chanid);
+        if (rec.chatId.isEmpty()) {
+            continue;
+        }
+        rec.name            = QString::fromUtf8(r.name.c_str());
+        rec.status          = QString::fromUtf8(r.status.c_str());
+        rec.lastMessageText = QString::fromUtf8(r.last_message_text.c_str());
+        rec.lastMessageTime = QString::fromUtf8(r.last_message_time.c_str());
+        rec.unreadCount     = r.unread_count;
+        rec.lastActive      = r.last_active;
+        rec.isConnected     = r.is_connected != 0;
+        out.append(rec);
+    }
+    return out;
+}
+
+void upsertChannel(const QString& protocol, const QString& chatId,
+                   const QString& name, const QString& status,
+                   bool isConnected, const QString& lastMessageText,
+                   const QString& lastMessageTime, qint64 lastActive)
+{
+    if (protocol.isEmpty() || chatId.isEmpty()) {
+        return;
+    }
+    auto* async = Storage::instance().channelDbAsync();
+    if (!async) {
         return;
     }
     ChannelRow row;
-    row.chanid       = chanKey(protocol, chatId).toUtf8().constData();
-    row.proto_type   = protocol.toUtf8().constData();
-    row.name         = name.toUtf8().constData();
-    row.status       = "online";
-    row.is_connected = 0;
-    cdb->update_contact_channel(row);
+    row.chanid            = chanKey(protocol, chatId).toUtf8().constData();
+    row.proto_type        = protocol.toUtf8().constData();
+    row.name              = name.toUtf8().constData();
+    row.status            = status.toUtf8().constData();
+    row.is_connected      = isConnected ? 1 : 0;
+    row.last_message_text = lastMessageText.toUtf8().constData();
+    row.last_message_time = lastMessageTime.toUtf8().constData();
+    row.last_active       = lastActive;
+    async->update_contact_channel(std::move(row), nullptr);
+}
+
+void incrementUnread(const QString& protocol, const QString& chatId,
+                     int64_t msgRowid)
+{
+    if (protocol.isEmpty() || chatId.isEmpty()) {
+        return;
+    }
+    auto* async = Storage::instance().channelDbAsync();
+    if (!async) {
+        return;
+    }
+    async->increment_unread(chanKey(protocol, chatId).toUtf8().constData(),
+                            1, msgRowid, nullptr);
+}
+
+void markRead(const QString& protocol, const QString& chatId,
+              int64_t lastReadRowid)
+{
+    if (protocol.isEmpty() || chatId.isEmpty()) {
+        return;
+    }
+    auto* async = Storage::instance().channelDbAsync();
+    if (!async) {
+        return;
+    }
+    async->mark_read(chanKey(protocol, chatId).toUtf8().constData(),
+                     lastReadRowid, nullptr);
 }
 
 QVector<MessageItem> loadMessages(const QString& protocol,

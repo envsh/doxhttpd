@@ -7,10 +7,35 @@
 
 namespace MsgDbBridge {
 
+struct ChannelRecord {
+    QString protocol;
+    QString chatId;
+    QString name;
+    QString status;
+    QString lastMessageText;
+    QString lastMessageTime;
+    int     unreadCount = 0;
+    qint64  lastActive = 0;
+    bool    isConnected = false;
+};
+
 QString chanKey(const QString& protocol, const QString& chatId);
 
 void ensureChannel(const QString& protocol, const QString& chatId,
                    const QString& name);
+
+QVector<ChannelRecord> loadChannels();
+
+void upsertChannel(const QString& protocol, const QString& chatId,
+                   const QString& name, const QString& status,
+                   bool isConnected, const QString& lastMessageText,
+                   const QString& lastMessageTime, qint64 lastActive);
+
+void incrementUnread(const QString& protocol, const QString& chatId,
+                     int64_t msgRowid);
+
+void markRead(const QString& protocol, const QString& chatId,
+              int64_t lastReadRowid);
 
 QVector<MessageItem> loadMessages(const QString& protocol,
                                   const QString& chatId, int limit);

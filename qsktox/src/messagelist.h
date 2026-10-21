@@ -78,6 +78,7 @@ public:
     bool updateSendStateByLocalId(qint64 localId, MessageItem::SendState state,
                                   const QString& error);
     int64_t rowidForLocalId(qint64 localId) const;
+    int64_t lastRowid() const;
     void backfillRowid(qint64 localId, int64_t rowid);
     void updateSendStateByRowid(int64_t rowid, MessageItem::SendState state);
 

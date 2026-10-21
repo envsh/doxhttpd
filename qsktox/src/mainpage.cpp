@@ -6,6 +6,8 @@
 #include "pushstatusbar.h"
 #include "pushhandler.h"
 #include "messagestore.h"
+#include "msgdb_bridge.h"
+#include "virtualcontacts.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskPushButton.h>
@@ -163,6 +165,26 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     // ── Push Status Bar ──
     new PushStatusBar(layout);
 
+    // ── 虚拟频道播种（bot 类需先落库：messages.chanid 外键引用 channels）──
+    {
+        const QVector<VirtualContact>& vcs = virtualContacts();
+        for (const auto& vc : vcs) {
+            const QString proto = QString::fromUtf8(vc.type);
+            const int kind = virtualSendKind(proto);
+            if (kind != kVirtualBotAigpt
+                && kind != kVirtualBotPaste
+                && kind != kVirtualBotTranslate
+                && kind != kVirtualBotWebsearch
+                && kind != kVirtualBotTts) {
+                continue;
+            }
+            MsgDbBridge::upsertChannel(proto, QString::number(vc.id),
+                QString::fromUtf8(vc.name), QStringLiteral("online"),
+                false, QString(), QString(),
+                QDateTime::currentSecsSinceEpoch());
+        }
+    }
+
     // ── ChannelList (频道列表) ──
     m_channelList = new ChannelListWidget(layout);
     m_channelList->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
@@ -260,6 +282,11 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             chItem.chatType = chatType;
             chItem.protocol = protocol;
             m_channelList->insertOrUpdateChannel(chatId, chItem);
+
+            MsgDbBridge::upsertChannel(protocol, chatId, chItem.title,
+                QStringLiteral("online"), false, text, timeStr,
+                QDateTime::currentSecsSinceEpoch());
+            MsgDbBridge::incrementUnread(protocol, chatId, 0);
         });
 
     // ── Toast label (initially hidden, overlaid on top) ──
