@@ -26,6 +26,7 @@ MessageItem itemFromRow(const MessageRow& row)
     it.avatarLetter = it.sender.isEmpty() ? QChar(' ')
                                           : it.sender.at(0).toUpper();
     it.avatarColor = QColor("#1565C0");
+    it.dbRowid     = row.rowid;
     return it;
 }
 
@@ -104,6 +105,8 @@ QVector<ChannelRecord> loadChannels()
         rec.lastMessageText = QString::fromUtf8(r.last_message_text.c_str());
         rec.lastMessageTime = QString::fromUtf8(r.last_message_time.c_str());
         rec.unreadCount     = r.unread_count;
+        rec.lastMessageRowid = r.last_message_rowid;
+        rec.lastReadRowid    = r.last_read_rowid;
         rec.lastActive      = r.last_active;
         rec.isConnected     = r.is_connected != 0;
         out.append(rec);
@@ -147,6 +150,88 @@ void incrementUnread(const QString& protocol, const QString& chatId,
     }
     async->increment_unread(chanKey(protocol, chatId).toUtf8().constData(),
                             1, msgRowid, nullptr);
+}
+
+void updateChannelLastMessage(const QString& protocol, const QString& chatId,
+                              const QString& text, const QString& timeStr,
+                              int64_t msgRowid)
+{
+    if (protocol.isEmpty() || chatId.isEmpty()) {
+        return;
+    }
+    auto* async = Storage::instance().channelDbAsync();
+    if (!async) {
+        return;
+    }
+    ChannelUpdate upd;
+    upd.hasLastMessageText = true;
+    upd.last_message_text  = text.toUtf8().constData();
+    upd.hasLastMessageTime = true;
+    upd.last_message_time  = timeStr.toUtf8().constData();
+    upd.hasLastActive      = true;
+    upd.last_active        = (int64_t)QDateTime::currentSecsSinceEpoch();
+    if (msgRowid > 0) {
+        upd.hasLastMessageRowid = true;
+        upd.last_message_rowid  = msgRowid;
+    }
+    async->update_channel(chanKey(protocol, chatId).toUtf8().constData(),
+                          std::move(upd), nullptr);
+}
+
+namespace {
+struct IncomingCtx {
+    QString protocol;
+    QString chatId;
+    QString name;
+    QString text;
+    QString timeStr;
+    bool    isCurrentChat;
+    IncomingDone cb;
+    void*   userCtx;
+};
+} // namespace
+
+void onIncomingMessage(const QString& protocol, const QString& chatId,
+                       const QString& name, const MessageItem& item,
+                       bool isCurrentChat, IncomingDone cb, void* ctx)
+{
+    if (protocol.isEmpty() || chatId.isEmpty()) {
+        return;
+    }
+    ensureChannel(protocol, chatId, name);
+
+    auto* db = Storage::instance().messageDbAsync();
+    if (!db) {
+        return;
+    }
+    MessageRow row = rowFromItem(chanKey(protocol, chatId), item);
+    IncomingCtx* c = new IncomingCtx;
+    c->protocol      = protocol;
+    c->chatId        = chatId;
+    c->name          = name;
+    c->text          = item.content;
+    c->timeStr       = item.time;
+    c->isCurrentChat = isCurrentChat;
+    c->cb            = cb;
+    c->userCtx       = ctx;
+    db->insert_message(std::move(row), [c](int64_t rowid) {
+        QMetaObject::invokeMethod(
+            QCoreApplication::instance(),
+            [c, rowid]() {
+                if (rowid > 0) {
+                    updateChannelLastMessage(c->protocol, c->chatId,
+                                             c->text, c->timeStr, rowid);
+                    if (!c->isCurrentChat) {
+                        incrementUnread(c->protocol, c->chatId, rowid);
+                    }
+                    if (c->cb) {
+                        c->cb(c->userCtx, c->protocol, c->chatId, rowid);
+                    }
+                }
+                delete c;
+            },
+            Qt::QueuedConnection);
+    });
 }
 
 void markRead(const QString& protocol, const QString& chatId,

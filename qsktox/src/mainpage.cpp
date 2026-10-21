@@ -281,12 +281,20 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             chItem.chatId = chatId;
             chItem.chatType = chatType;
             chItem.protocol = protocol;
-            m_channelList->insertOrUpdateChannel(chatId, chItem);
 
-            MsgDbBridge::upsertChannel(protocol, chatId, chItem.title,
-                QStringLiteral("online"), false, text, timeStr,
-                QDateTime::currentSecsSinceEpoch());
-            MsgDbBridge::incrementUnread(protocol, chatId, 0);
+            bool isCurrent = false;
+            if (auto* pm = pageManager()) {
+                if (auto* mp = qobject_cast<MessagePage*>(pm->currentPage())) {
+                    isCurrent = (mp->chatId() == chatId
+                                 && mp->protocol() == protocol);
+                }
+            }
+
+            MsgDbBridge::onIncomingMessage(protocol, chatId, chItem.title,
+                                           msgItem, isCurrent, nullptr, nullptr);
+
+            chItem.unreadCount = isCurrent ? 0 : 1;
+            m_channelList->insertOrUpdateChannel(chatId, chItem);
         });
 
     // ── Toast label (initially hidden, overlaid on top) ──

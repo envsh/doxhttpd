@@ -15,6 +15,8 @@ struct ChannelRecord {
     QString lastMessageText;
     QString lastMessageTime;
     int     unreadCount = 0;
+    qint64  lastMessageRowid = 0;
+    qint64  lastReadRowid = 0;
     qint64  lastActive = 0;
     bool    isConnected = false;
 };
@@ -33,6 +35,16 @@ void upsertChannel(const QString& protocol, const QString& chatId,
 
 void incrementUnread(const QString& protocol, const QString& chatId,
                      int64_t msgRowid);
+
+void updateChannelLastMessage(const QString& protocol, const QString& chatId,
+                              const QString& text, const QString& timeStr,
+                              int64_t msgRowid);
+
+typedef void (*IncomingDone)(void* ctx, const QString& protocol,
+                             const QString& chatId, int64_t rowid);
+void onIncomingMessage(const QString& protocol, const QString& chatId,
+                       const QString& name, const MessageItem& item,
+                       bool isCurrentChat, IncomingDone cb, void* ctx);
 
 void markRead(const QString& protocol, const QString& chatId,
               int64_t lastReadRowid);

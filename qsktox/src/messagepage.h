@@ -14,6 +14,9 @@ class MessagePage : public Page
 public:
     MessagePage(QQuickItem* parent = nullptr);
 
+    QString chatId() const { return m_chatId; }
+    QString protocol() const { return m_protocol; }
+
 protected:
     void onCreate(const QVariantMap& launchArgs,
                   const QVariantMap& savedState) override;
