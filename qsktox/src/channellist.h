@@ -88,7 +88,7 @@ private:
 
     QQuickItem* m_contentView = nullptr;
     QVector<ChannelItem> m_items;
-    QHash<QString, int> m_chatIdIndex;
+    QHash<QString, int> m_chanKeyIndex;
     QMap<int, ChannelRowItem*> m_visibleRows;
     StaggerFadeAnimator* m_fadeAnimator = nullptr;
 };

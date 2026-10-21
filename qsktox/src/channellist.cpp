@@ -348,7 +348,7 @@ void ChannelListWidget::populateData()
     m_visibleRows.clear();
 
     m_items.clear();
-    m_chatIdIndex.clear();
+    m_chanKeyIndex.clear();
 
     // ── 虚拟联系人（合成频道，置顶）──
     const QVector<VirtualContact>& vcs = virtualContacts();
@@ -363,7 +363,7 @@ void ChannelListWidget::populateData()
         item.chatType     = QStringLiteral("virtual");
         item.protocol     = QString::fromUtf8(vc.type);
         m_items.append(item);
-        m_chatIdIndex[item.chatId] = m_items.size() - 1;
+        m_chanKeyIndex[item.protocol + QLatin1Char('_') + item.chatId] = m_items.size() - 1;
     }
 
     // ── 真实频道（从 SQLite channels 表加载，last_active DESC）──
@@ -416,7 +416,7 @@ void ChannelListWidget::appendDbChannels()
         item.chatType     = rec.protocol;
         item.protocol     = rec.protocol;
         m_items.append(item);
-        m_chatIdIndex[item.chatId] = m_items.size() - 1;
+        m_chanKeyIndex[item.protocol + QLatin1Char('_') + item.chatId] = m_items.size() - 1;
     }
 }
 
@@ -461,8 +461,9 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
         return;
     }
 
-    if (m_chatIdIndex.contains(chatId)) {
-        int idx = m_chatIdIndex[chatId];
+    const QString key = item.protocol + QLatin1Char('_') + chatId;
+    if (m_chanKeyIndex.contains(key)) {
+        int idx = m_chanKeyIndex[key];
         m_items[idx].lastMessage = item.lastMessage;
         m_items[idx].time = item.time;
         m_items[idx].unreadCount++;
@@ -479,10 +480,10 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
             }
         }
         m_items.prepend(item);
-        m_chatIdIndex.clear();
+        m_chanKeyIndex.clear();
         for (int j = 0; j < m_items.size(); ++j) {
             if (!m_items[j].chatId.isEmpty()) {
-                m_chatIdIndex[m_items[j].chatId] = j;
+                m_chanKeyIndex[m_items[j].protocol + QLatin1Char('_') + m_items[j].chatId] = j;
             }
         }
     }

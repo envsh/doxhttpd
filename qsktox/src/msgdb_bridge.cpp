@@ -42,7 +42,7 @@ MessageRow rowFromItem(const QString& chanid, const MessageItem& it)
     row.avatar_url   = it.avatarUrl.toUtf8().constData();
     row.peer_number  = it.peerNumber;
     row.time_text    = it.time.toUtf8().constData();
-    row.category     = it.isSelf ? "self" : "";
+    row.category     = it.isSelf ? "self" : "other";
     row.media_url    = it.mediaUrl.toUtf8().constData();
     row.media_mime   = it.audioMime.toUtf8().constData();
     row.duration_sec = it.durationSec;
@@ -64,7 +64,7 @@ QString chanKey(const QString& protocol, const QString& chatId)
 
 static QString protocolOfChanid(const QString& chanid)
 {
-    const int sep = chanid.lastIndexOf(QLatin1Char('_'));
+    const int sep = chanid.indexOf(QLatin1Char('_'));
     if (sep <= 0) {
         return QString();
     }
@@ -73,7 +73,7 @@ static QString protocolOfChanid(const QString& chanid)
 
 static QString chatIdOfChanid(const QString& chanid)
 {
-    const int sep = chanid.lastIndexOf(QLatin1Char('_'));
+    const int sep = chanid.indexOf(QLatin1Char('_'));
     if (sep <= 0 || sep >= chanid.size() - 1) {
         return QString();
     }
