@@ -239,6 +239,7 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             if (username.isEmpty()) {
                 username = obj.value("username").toString();
             }
+            QString usericon = obj.value("usericon").toString();
             QString text = obj.value("text").toString();
             qint64 timestamp = obj.value("timestamp").toVariant().toLongLong();
 
@@ -262,6 +263,7 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             msgItem.content = text;
             msgItem.time = timeStr;
             msgItem.isSelf = false;
+            msgItem.avatarUrl = usericon;
             {
                 QString sname = username.isEmpty() ? chatName : username;
                 if (sname.isEmpty()) sname = chatId;

@@ -16,6 +16,8 @@ struct MessageItem {
     QString content;
     QString time;
     bool    isSelf;
+    QString avatarUrl;
+    int     peerNumber = -1;
     QString avatarLetter;
     QColor  avatarColor;
     SendState sendState = SendSending;

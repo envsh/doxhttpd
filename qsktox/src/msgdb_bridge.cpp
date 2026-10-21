@@ -14,6 +14,8 @@ MessageItem itemFromRow(const MessageRow& row)
 {
     MessageItem it;
     it.sender      = QString::fromUtf8(row.sender_name.c_str());
+    it.avatarUrl   = QString::fromUtf8(row.avatar_url.c_str());
+    it.peerNumber  = row.peer_number;
     it.content     = QString::fromUtf8(row.data.c_str());
     it.time        = QString::fromUtf8(row.time_text.c_str());
     it.isSelf      = (row.category == "self");
@@ -37,6 +39,8 @@ MessageRow rowFromItem(const QString& chanid, const MessageItem& it)
     row.data         = it.content.toUtf8().constData();
     row.etype        = it.isSelf ? 1 : 0;
     row.sender_name  = it.sender.toUtf8().constData();
+    row.avatar_url   = it.avatarUrl.toUtf8().constData();
+    row.peer_number  = it.peerNumber;
     row.time_text    = it.time.toUtf8().constData();
     row.category     = it.isSelf ? "self" : "";
     row.media_url    = it.mediaUrl.toUtf8().constData();

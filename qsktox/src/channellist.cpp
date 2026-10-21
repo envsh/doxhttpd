@@ -12,6 +12,7 @@
 #include <QskEvent.h>
 #include "virtualcontacts.h"
 #include "msgdb_bridge.h"
+#include "avatarutil.h"
 
 static constexpr qreal ROW_HEIGHT = 68;
 static constexpr int MAX_CHANNELS = 200;
@@ -167,17 +168,9 @@ void ChannelRowNode::paint(QPainter* painter, const QSize& size, const void*)
     const int avatarX = 12;
     const int avatarY = (h - avatarSize) / 2;
 
-    painter->setBrush(m_item.avatarColor);
-    painter->setPen(Qt::NoPen);
-    painter->drawEllipse(avatarX, avatarY, avatarSize, avatarSize);
-
-    painter->setPen(Qt::white);
-    QFont avatarFont;
-    avatarFont.setPixelSize(16);
-    avatarFont.setBold(true);
-    painter->setFont(avatarFont);
-    painter->drawText(QRect(avatarX, avatarY, avatarSize, avatarSize),
-        Qt::AlignCenter, m_item.avatarLetter);
+    drawLetterAvatar(painter,
+        QRectF(avatarX, avatarY, avatarSize, avatarSize),
+        m_item.avatarColor, m_item.avatarLetter);
 
     // ── 右侧时间 ──
     const int rightMargin = 12;

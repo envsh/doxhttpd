@@ -1,6 +1,9 @@
 #include "messagelist.h"
 #include "messagestore.h"
 #include "msgdb_bridge.h"
+#include "avatarhost.h"
+#include "avatar_manager.h"
+#include "avatarutil.h"
 #include <private/qquicktaphandler_p.h>
 #include <private/qquickpincharea_p.h>
 #include <QPainter>
@@ -395,18 +398,21 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
         if (avatarY < NAME_HEIGHT + 2) avatarY = NAME_HEIGHT + 2;
         qreal bubbleX = SIDE_MARGIN + AVATAR_SIZE + AVATAR_SPACING;
 
-        // 头像背景
-        QColor avatarBg = m_item.avatarColor.isValid() ? m_item.avatarColor : msgColorForName(m_item.sender);
-        QString avatarLet = m_item.avatarLetter.isEmpty() ? msgFirstLetter(m_item.sender) : m_item.avatarLetter;
-        painter->setBrush(avatarBg);
-        painter->setPen(Qt::NoPen);
-        painter->drawEllipse(QRectF(avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE));
-        painter->setPen(Qt::white);
-        QFont avatarFont;
-        avatarFont.setPixelSize(16);
-        avatarFont.setBold(true);
-        painter->setFont(avatarFont);
-        painter->drawText(QRectF(avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE), Qt::AlignCenter, avatarLet);
+        // 头像：usericon 有效 → 真实头像（mxc/https 下载后缓存），无效则
+        // AvatarManager 走 identicon；两者皆无 → 字母圆块兜底。
+        const QRectF avatarRect(avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE);
+        QPixmap av;
+        if (!m_item.avatarUrl.isEmpty()) {
+            av = AvatarManager::inst().get(
+                m_item.avatarUrl, m_item.sender, m_item.peerNumber, (int)AVATAR_SIZE);
+        }
+        if (!av.isNull()) {
+            painter->drawPixmap(QPointF(avatarX, avatarY), av);
+        } else {
+            const QColor avatarBg = m_item.avatarColor.isValid() ? m_item.avatarColor : msgColorForName(m_item.sender);
+            const QString avatarLet = m_item.avatarLetter.isEmpty() ? msgFirstLetter(m_item.sender) : m_item.avatarLetter;
+            drawLetterAvatar(painter, avatarRect, avatarBg, avatarLet);
+        }
 
         // 名字
         painter->setFont(nameFont);
@@ -461,6 +467,7 @@ QskHashValue MessageRowNode::hash(const void*) const
 {
     return qHash(m_item.sender) ^ qHash(m_item.content)
         ^ qHash(m_item.time) ^ qHash(m_item.isSelf)
+        ^ qHash(m_item.avatarUrl) ^ m_item.peerNumber
         ^ qHash(static_cast<int>(m_item.sendState))
         ^ qHash(m_item.mediaUrl) ^ qHash(m_item.audioMime)
         ^ qHash(m_item.isAudio) ^ m_item.durationSec;
@@ -583,6 +590,16 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
             }
             appendMessage(item);
         });
+
+    // 头像下载完成 → 刷新可见行（重绘）
+    connect(AvatarHost::instance(), &AvatarHost::avatarUpdated,
+        this, [this]() {
+            for (auto* row : std::as_const(m_visibleRows)) {
+                const int r = m_visibleRows.key(row);
+                row->setMessageData(m_items[r]);
+            }
+            update();
+        });
 }
 
 MessageListWidget::~MessageListWidget()
@@ -644,6 +661,7 @@ void MessageListWidget::stopFadeIn()
 void MessageListWidget::appendMessage(const MessageItem& item)
 {
     m_items.append(item);
+    AvatarHost::instance()->download(item.avatarUrl);
 
     qreal viewW = viewContentsRect().width();
     if (viewW <= 0) viewW = width();
@@ -806,6 +824,7 @@ void MessageListWidget::setChannel(const QString& protocol, const QString& chatI
     }
     for (const auto& msg : msgs) {
         m_items.append(msg);
+        AvatarHost::instance()->download(msg.avatarUrl);
     }
 
     rebuildLayout(this);

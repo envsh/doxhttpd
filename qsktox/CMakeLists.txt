@@ -56,6 +56,9 @@ qt_add_executable(qsktox
     src/virtualbothost.cpp
     src/ttsaudio.h
     src/ttsaudio.cpp
+    src/avatarutil.h
+    src/avatarhost.h
+    src/avatarhost.cpp
     src/msgdb_bridge.h
     src/msgdb_bridge.cpp
     src/messagelist.h
@@ -113,6 +116,8 @@ qt_add_executable(qsktox
     ${qlappcom_dir}/edgedrm.cpp
     ${qlappcom_dir}/ttsbot.cpp
     ${qlappcom_dir}/messageattribdefs.cpp
+    ${qlappcom_dir}/avatar_manager.cpp
+    ${qlcomp_dir}/identicon.cpp
 
    ${ql3rdparty_dir}/barrust_bloom/bloom.c
 
