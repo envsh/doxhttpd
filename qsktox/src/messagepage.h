@@ -18,6 +18,7 @@ protected:
     void onCreate(const QVariantMap& launchArgs,
                   const QVariantMap& savedState) override;
     void onNewIntent(const QVariantMap& launchArgs) override;
+    void onPause() override;
 
 private:
     void sendMessage();

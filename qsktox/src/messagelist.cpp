@@ -620,6 +620,16 @@ void MessageListWidget::populateMessages()
     });
 }
 
+void MessageListWidget::stopFadeIn()
+{
+    if (m_fadeAnimator) {
+        m_fadeAnimator->stop();
+        delete m_fadeAnimator;
+        m_fadeAnimator = nullptr;
+    }
+    setOpacity(1.0);
+}
+
 void MessageListWidget::appendMessage(const MessageItem& item)
 {
     m_items.append(item);
@@ -942,6 +952,12 @@ MessageListAnimator::MessageListAnimator(QQuickItem* target, QObject* parent)
 void MessageListAnimator::advance(qreal value)
 {
     if (!m_target) {
+        return;
+    }
+    // 目标已不可见则停止动画并复位，避免在隐藏页上反复 setOpacity
+    if (!m_target->isVisible()) {
+        stop();
+        m_target->setOpacity(1.0);
         return;
     }
     m_target->setOpacity(value);

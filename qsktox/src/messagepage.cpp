@@ -216,6 +216,15 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
         });
 }
 
+void MessagePage::onPause()
+{
+    // 页面即将被覆盖/关闭：停止消息列表淡入动画，避免隐藏页上的
+    // setOpacity 与场景图状态不一致导致白屏
+    if (m_messageList) {
+        m_messageList->stopFadeIn();
+    }
+}
+
 void MessagePage::onNewIntent(const QVariantMap& launchArgs)
 {
     QString channelName = launchArgs.value("channelName").toString();

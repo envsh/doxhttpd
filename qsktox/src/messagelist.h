@@ -70,6 +70,7 @@ public:
     void populateMessages();
     void appendMessage(const MessageItem& item);
     void setChannel(const QString& protocol, const QString& chatId);
+    void stopFadeIn();
     int messageCount() const { return m_items.size(); }
     const MessageItem& messageItem(int row) const { return m_items[row]; }
     void setSendStatus(quint64 reqseq, bool success, const QString& error);

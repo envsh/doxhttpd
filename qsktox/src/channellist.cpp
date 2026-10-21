@@ -441,12 +441,24 @@ void ChannelListWidget::startFadeIn()
     }
     setOpacity(1.0);
     QTimer::singleShot(100, this, [this]() {
-        if (window()) {
+        // 延时窗口内页面可能已切走：不可见则不启动动画，避免
+        // QskAnimator 在页面不可见后仍推进 setOpacity 导致白屏
+        if (window() && isVisible()) {
             m_fadeAnimator = new StaggerFadeAnimator(this);
             m_fadeAnimator->setWindow(window());
             m_fadeAnimator->start();
         }
     });
+}
+
+void ChannelListWidget::stopFadeIn()
+{
+    if (m_fadeAnimator) {
+        m_fadeAnimator->stop();
+        delete m_fadeAnimator;
+        m_fadeAnimator = nullptr;
+    }
+    setOpacity(1.0);
 }
 
 void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const ChannelItem& item)
@@ -588,6 +600,12 @@ StaggerFadeAnimator::StaggerFadeAnimator(QQuickItem* target, QObject* parent)
 void StaggerFadeAnimator::advance(qreal value)
 {
     if (!m_target) {
+        return;
+    }
+    // 目标已不可见则停止动画并复位，避免在隐藏页上反复 setOpacity
+    if (!m_target->isVisible()) {
+        stop();
+        m_target->setOpacity(1.0);
         return;
     }
     m_target->setOpacity(value);

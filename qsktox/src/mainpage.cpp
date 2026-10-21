@@ -351,6 +351,15 @@ void MainPage::onNewIntent(const QVariantMap& launchArgs)
     }
 }
 
+void MainPage::onPause()
+{
+    // 页面即将被覆盖：立即停止频道列表淡入动画，避免动画在不可见页
+    // 上继续推进 setOpacity 造成返回/切换时白屏
+    if (m_channelList) {
+        m_channelList->stopFadeIn();
+    }
+}
+
 void MainPage::setActiveTab(int index)
 {
     m_activeTab = index;

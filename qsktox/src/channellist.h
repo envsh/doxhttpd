@@ -62,6 +62,7 @@ public:
 
     void populateData();
     void reloadFromDb();
+    void stopFadeIn();
     void insertOrUpdateChannel(const QString& chatId, const ChannelItem& item);
     QString chatIdForRow(int row) const;
     QString chatTypeForRow(int row) const;
