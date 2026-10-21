@@ -572,6 +572,17 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
 
     connect(this, &QskScrollBox::scrollPosChanged,
         this, &MessageListWidget::updateVisibleRows);
+
+    // 当前打开的消息列表实时追加新收到的该频道消息：
+    // MessageStore 收到 push 后发 messageAdded，此处按 m_chatId 过滤（protocol 不参与），
+    // 命中即复用 appendMessage（追加、算行高、更新尺寸、滚到底）
+    connect(MessageStore::instance(), &MessageStore::messageAdded,
+        this, [this](const QString& chatId, const MessageItem& item) {
+            if (m_chatId.isEmpty() || chatId != m_chatId) {
+                return;
+            }
+            appendMessage(item);
+        });
 }
 
 MessageListWidget::~MessageListWidget()
