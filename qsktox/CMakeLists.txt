@@ -250,15 +250,5 @@ elseif(UNIX)
     target_link_libraries(qsktox PRIVATE SQLite::SQLite3)
 endif()
 
-# ── gumbo (HTML5 解析器，qlappcom/linkpreview.cpp 使用) ──
-if(ANDROID)
-#    add_library(gumbo SHARED IMPORTED GLOBAL)
-#    set_target_properties(gumbo PROPERTIES
-#        IMPORTED_LOCATION ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/lib/${ANDROID_ABI}/libgumbo.so
-#        IMPORTED_NO_SONAME TRUE
-#    )
-#    target_link_libraries(qsktox PRIVATE gumbo)
-else()
-    find_library(GUMBO_LIBRARY gumbo REQUIRED)
-    target_link_libraries(qsktox PRIVATE ${GUMBO_LIBRARY})
-endif()
+# ── gumbo (HTML5 解析器，qlappcom/linkpreview.cpp 使用；vendor 源码，全平台统一，不用系统 libgumbo) ──
+include(${CMAKE_CURRENT_SOURCE_DIR}/../vendor/gumbo.cmake)
