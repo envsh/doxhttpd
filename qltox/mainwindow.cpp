@@ -99,18 +99,6 @@
 #include <malloc.h>
 #endif
 
-// 虚拟联系人 ID（使用 <-100 的负数避免与服务器 ID 及 "未选择" 哨兵值 -1 冲突）
-static const int VIRTUAL_UNKNOWN_ID = -100;
-static const int VIRTUAL_SYSEVENT_ID = -101;
-static const int VIRTUAL_REDDIT_ID = -102;
-static const int VIRTUAL_BOOKMARK_ID  = -103;
-static const int VIRTUAL_AICHAT_ID    = -104;
-static const int VIRTUAL_PASTEBIN_ID  = -105;
-static const int VIRTUAL_TRANSLATE_ID = -106;
-static const int VIRTUAL_MOBPUSH_ID  = -121;
-static const int VIRTUAL_SNAP_ID     = -122;
-static const int VIRTUAL_WEBSEARCH_ID = -123;
-static const int VIRTUAL_TTSBOT_ID   = -124;
 
 // sticonShowStatusMessage 使用的托盘实例（MainWindow 创建/销毁时维护，不导出）
 static SystemTrayIcon* s_trayIcon = 0;

@@ -1,20 +1,18 @@
 #include "virtualcontacts.h"
+#include "pureconsts.hpp"
 
 const QVector<VirtualContact>& virtualContacts()
 {
-    static const QVector<VirtualContact> s_virtual = {
-        { -100, "unknown",   "Unknown",         "❓" },
-        { -101, "sysevent",  "Sysevent",        "🔔" },
-        { -102, "reddit",    "Reddit",          "👽" },
-        { -103, "bookmark",  "Bookmark·收藏夹",  "🔖" },
-        { -104, "aichat",    "AI·GPT Chat",     "🤖" },
-        { -105, "pastebin",  "Pastebin",        "📋" },
-        { -106, "translate", "Translate",       "🌐" },
-        { -121, "mobpush",   "MobPush",         "📨" },
-        { -122, "snap",      "Snap",            "📸" },
-        { -123, "websearch", "Search·网页搜索",  "🔍" },
-        { -124, "tts",       "TTS",             "🔊" },
-    };
+    static QVector<VirtualContact> s_virtual;
+    if (s_virtual.isEmpty()) {
+        const int n = (int)(sizeof(kVirtualContactDefs) / sizeof(kVirtualContactDefs[0]));
+        for (int i = 0; i < n; ++i) {
+            s_virtual.append({ kVirtualContactDefs[i].id,
+                               kVirtualContactDefs[i].type,
+                               kVirtualContactDefs[i].name,
+                               kVirtualContactDefs[i].emoji });
+        }
+    }
     return s_virtual;
 }
 
