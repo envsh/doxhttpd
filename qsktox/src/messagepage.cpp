@@ -14,6 +14,9 @@
 #include "pasteuploader.h"
 #include "ttsbot.h"
 #include "ttsaudio.h"
+#include "channellist.h"
+#include "mainpage.h"
+#include "pagemanager.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QClipboard>
@@ -37,6 +40,7 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     m_chatId = chatId;
     m_chatType = launchArgs.value("chatType").toString();
     m_protocol = launchArgs.value("protocol").toString();
+    m_chanId = launchArgs.value("chanId").toString();
 
     setAutoLayoutChildren(true);
     auto* layout = new QskLinearBox(Qt::Vertical, this);
@@ -62,7 +66,7 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     m_messageList = new MessageListWidget(layout);
     m_messageList->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
     MsgDbBridge::ensureChannel(m_protocol, m_chatId, channelName);
-    m_messageList->setChannel(m_protocol, chatId);
+    m_messageList->setChannel(m_protocol, chatId, m_chanId);
 
     // ── Avatar click menu ──
     connect(m_messageList, &MessageListWidget::avatarClicked,
@@ -232,14 +236,26 @@ void MessagePage::onNewIntent(const QVariantMap& launchArgs)
     m_chatId = chatId;
     m_chatType = launchArgs.value("chatType").toString();
     m_protocol = launchArgs.value("protocol").toString();
+    m_chanId = launchArgs.value("chanId").toString();
 
     if (m_titleLabel) {
         m_titleLabel->setText(channelName);
     }
     if (m_messageList) {
-        m_messageList->setChannel(m_protocol, chatId);
+        m_messageList->setChannel(m_protocol, chatId, m_chanId);
         if (!isVirtualProtocol(m_protocol)) {
-            MsgDbBridge::markRead(m_protocol, m_chatId, m_messageList->lastRowid());
+            // 切换频道时上报已读：用当前列表的最大 rowid（历史+刚加载的都已展示）
+            int64_t lr = m_messageList->lastRowid();
+            if (lr > 0) {
+                MsgDbBridge::markRead(m_protocol, m_chatId, lr);
+            }
+            if (auto* pm = pageManager()) {
+                if (auto* mp = qobject_cast<MainPage*>(pm->findPage("main"))) {
+                    if (mp->channelList()) {
+                        mp->channelList()->markLocallyRead(m_protocol, m_chatId, m_chanId);
+                    }
+                }
+            }
         }
     }
     if (m_attrBar) {
@@ -274,6 +290,7 @@ void MessagePage::sendMessage()
         MsgDbBridge::upsertChannel(m_protocol, m_chatId, m_chatId,
             QStringLiteral("online"), false, text, item.time,
             QDateTime::currentSecsSinceEpoch());
+        touchChannelInList();
         m_input->setText("");
         return;
     }
@@ -283,6 +300,7 @@ void MessagePage::sendMessage()
         m_messageList->appendMessage(item);
         MsgDbBridge::insertMessage(m_protocol, m_chatId, item,
                                    &MessagePage::onRowidBackfilled, this);
+        touchChannelInList();
         m_input->setText("");
         sendToVirtualBot(vk, item.localId, text);
         return;
@@ -303,6 +321,7 @@ void MessagePage::sendMessage()
 
     m_messageList->appendMessage(item);
     MsgDbBridge::insertMessage(m_protocol, m_chatId, item, nullptr, nullptr);
+    touchChannelInList();
     m_input->setText("");
 }
 
@@ -316,6 +335,24 @@ void MessagePage::onRowidBackfilled(void* ctx, const QString& protocol,
     if (self && self->m_messageList) {
         self->m_messageList->backfillRowid(localId, rowid);
     }
+}
+
+void MessagePage::touchChannelInList()
+{
+    // 走 pageManager 找 MainPage，不直接持有 ChannelListWidget（避免循环依赖）
+    auto* pm = pageManager();
+    if (!pm) {
+        return;
+    }
+    auto* mp = qobject_cast<MainPage*>(pm->findPage("main"));
+    if (!mp) {
+        return;
+    }
+    if (!mp->channelList()) {
+        return;
+    }
+    mp->channelList()->markChannelActive(m_protocol, m_chatId,
+        (qint64)QDateTime::currentSecsSinceEpoch());
 }
 
 void MessagePage::sendToVirtualBot(int kind, qint64 localId, const QString& text)
@@ -422,6 +459,7 @@ void MessagePage::onBotDone(int chatId, const QString& protocol, qint64 localId,
     MsgDbBridge::upsertChannel(m_protocol, m_chatId, m_chatId,
         QStringLiteral("online"), false, text, ack.time,
         QDateTime::currentSecsSinceEpoch());
+    touchChannelInList();
 }
 
 void MessagePage::onTtsDone(int chatId, qint64 localId, bool success,
@@ -475,4 +513,5 @@ void MessagePage::onTtsDone(int chatId, qint64 localId, bool success,
     MsgDbBridge::upsertChannel(m_protocol, m_chatId, m_chatId,
         QStringLiteral("online"), false, text, ack.time,
         QDateTime::currentSecsSinceEpoch());
+    touchChannelInList();
 }

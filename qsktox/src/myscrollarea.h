@@ -18,6 +18,9 @@ public:
     // 上一次触摸事件的场景坐标（供外部获取长按时的触摸位置）
     QPointF lastTouchScenePos() const { return m_touchScenePos; }
 
+    // 是否正在触摸滚动（供外部判断长按等场景）
+    bool isTouchScrolling() const { return m_scrolling; }
+
     // 双击 guard：检测到双击后返回 true，防止 QQuickTapHandler 的 longPressTimer
     // 在双击序列中误触发 longPressed（Android 上 setPassiveGrab 失败导致 timer 无法取消）
     bool isDoubleTapGuardActive() const;

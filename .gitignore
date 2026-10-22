@@ -29,3 +29,8 @@ Thumbs.db
 # Go
 *.exe
 go-toxhttpd/vendor/
+
+# qsktox
+qsktox/build-x64/
+qsktox/build-android/
+qsktox/src/davobfus.cpp

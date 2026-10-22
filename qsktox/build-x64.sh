@@ -19,11 +19,6 @@ $QTDIR/bin/qt-cmake .. \
     -DCMAKE_VERBOSE_MAKEFILE=on \
     -D CMAKE_CXX_FLAGS="-O1" -D CMAKE_C_FLAGS="-O1"
 
-# hotfix (Linux only: macOS doesn't have these libs, and BSD sed needs different -i syntax)
-if [ "$(uname)" != "Darwin" ]; then
-    sed -i 's/-lQt6Qml -lQt6Quick -lQt6OpenGL//g' CMakeFiles/qsktox.dir/link.txt
-fi
-
 #make -j$(nproc)
 make -j1
 echo "=== done: DYLD_LIBRARY_PATH=\$PWD/build-x64:/opt/qt/qskinny/lib/qskinny:$QTDIR/lib ./build-x64/qsktox ==="

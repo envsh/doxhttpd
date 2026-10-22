@@ -13,9 +13,24 @@
 #include "virtualcontacts.h"
 #include "msgdb_bridge.h"
 #include "avatarutil.h"
+#include <QDateTime>
+#include <algorithm>
 
 static constexpr qreal ROW_HEIGHT = 68;
 static constexpr int MAX_CHANNELS = 200;
+
+// ── 列表分组（排序用）──
+// 0 = 虚拟联系人（置顶）  1 = 真实会话（按 lastActive 倒序）  2 = mock 演示会话（垫底）
+static int channelGroup(const ChannelItem& it)
+{
+    if (it.chatType == QLatin1String("virtual")) {
+        return 0;
+    }
+    if (it.chatId.isEmpty()) {
+        return 2;
+    }
+    return 1;
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // Avatar 颜色调色板（hash 取色）
@@ -302,6 +317,25 @@ ChannelListWidget::ChannelListWidget(QQuickItem* parent)
     m_contentView = new QQuickItem(this);
     setScrolledItem(m_contentView);
 
+    // 滚动状态追踪：滚动中延迟可见行刷新，避开 QskScrollArea ClipItem ContentUpdateMask defer
+    m_scrollIdleTimer.setSingleShot(true);
+    m_scrollIdleTimer.setInterval(160);
+    connect(&m_scrollIdleTimer, &QTimer::timeout, this, &ChannelListWidget::flushPendingVisibleRefresh);
+    connect(this, &QskScrollBox::scrollPosChanged,
+        this, &ChannelListWidget::onScrollPosChangedForTracking);
+
+    // 淡入计时器：构造时连接一次（成员槽）。
+    // UniqueConnection 只支持成员函数槽（Qt 源码 qobject.h 有断言），
+    // lambda 每次 connect 都会新增连接 → 计时器触发多次 → 建多个动画器。
+    m_fadeTimer.setSingleShot(true);
+    connect(&m_fadeTimer, &QTimer::timeout, this, &ChannelListWidget::onFadeTimeout);
+
+    connect(&MsgDbBridge::UnreadNotifier::instance(),
+        &MsgDbBridge::UnreadNotifier::unreadChanged,
+        this, [this](const QString& chanid) {
+            syncUnreadFromDb(chanid);
+        });
+
     // ── QQuickTapHandler — 单击和长按检测 ──
     auto* tapHandler = new QQuickTapHandler(m_contentView);
     tapHandler->setGesturePolicy(QQuickTapHandler::DragThreshold);
@@ -322,9 +356,6 @@ ChannelListWidget::ChannelListWidget(QQuickItem* parent)
                 Q_EMIT rowLongPressed(row, pos);
             }
         });
-
-    connect(this, &QskScrollBox::scrollPosChanged,
-        this, &ChannelListWidget::updateVisibleRows);
 }
 
 ChannelListWidget::~ChannelListWidget()
@@ -334,10 +365,42 @@ ChannelListWidget::~ChannelListWidget()
         delete m_fadeAnimator;
         m_fadeAnimator = nullptr;
     }
+    m_scrollIdleTimer.stop();
+    m_pendingVisibleRefresh.clear();
+    m_isScrolling = false;
     for (auto* row : std::as_const(m_visibleRows)) {
         delete row;
     }
     m_visibleRows.clear();
+}
+
+void ChannelListWidget::onScrollPosChangedForTracking()
+{
+    m_isScrolling = true;
+    m_scrollIdleTimer.start();
+    updateVisibleRows();
+}
+
+void ChannelListWidget::flushPendingVisibleRefresh()
+{
+    m_isScrolling = false;
+    if (m_pendingVisibleRefresh.isEmpty()) {
+        return;
+    }
+    for (int idx : std::as_const(m_pendingVisibleRefresh)) {
+        if (idx < 0 || idx >= m_items.size()) {
+            continue;
+        }
+        auto it = m_visibleRows.find(idx);
+        if (it == m_visibleRows.end() || !it.value()) {
+            continue;
+        }
+        it.value()->setChannelData(m_items[idx]);
+    }
+    m_pendingVisibleRefresh.clear();
+    if (window()) {
+        window()->update();
+    }
 }
 
 void ChannelListWidget::populateData()
@@ -349,6 +412,7 @@ void ChannelListWidget::populateData()
 
     m_items.clear();
     m_chanKeyIndex.clear();
+    m_chatIdRows.clear();
 
     // ── 虚拟联系人（合成频道，置顶）──
     const QVector<VirtualContact>& vcs = virtualContacts();
@@ -363,7 +427,6 @@ void ChannelListWidget::populateData()
         item.chatType     = QStringLiteral("virtual");
         item.protocol     = QString::fromUtf8(vc.type);
         m_items.append(item);
-        m_chanKeyIndex[item.protocol + QLatin1Char('_') + item.chatId] = m_items.size() - 1;
     }
 
     // ── 真实频道（从 SQLite channels 表加载，last_active DESC）──
@@ -373,7 +436,14 @@ void ChannelListWidget::populateData()
     for (int i = 0; i < s_mockCount; ++i) {
         m_items.append(s_mockData[i]);
         m_items.last().chatType = QStringLiteral("group");
+        m_items.last().dbUnreadCount = m_items.last().unreadCount;
+        m_items.last().readWatermark = 0;
+        m_items.last().syncUnread();
     }
+
+    // 统一排序 + 重建索引（虚拟置顶 / lastActive 倒序 / mock 垫底）
+    sortChannels();
+    rebuildIndexes();
 
     qreal viewW = viewContentsRect().width();
     if (viewW <= 0) viewW = width();
@@ -393,9 +463,18 @@ void ChannelListWidget::appendDbChannels()
             if (m_items[i].chatType == QLatin1String("virtual")
                 && m_items[i].protocol == rec.protocol
                 && m_items[i].chatId == rec.chatId) {
-                m_items[i].unreadCount = rec.unreadCount;
+                m_items[i].dbUnreadCount = rec.unreadCount;
+                m_items[i].readWatermark = 0;
+                m_items[i].unreadDelta = 0;
+                if (!rec.chanId.isEmpty()) {
+                    m_items[i].chanId = rec.chanId;
+                } else if (m_items[i].chanId.isEmpty()) {
+                    m_items[i].chanId = rec.protocol + QLatin1Char('_') + rec.chatId;
+                }
+                m_items[i].syncUnread();
                 m_items[i].lastMessage = rec.lastMessageText;
                 m_items[i].time        = rec.lastMessageTime;
+                m_items[i].lastActive  = rec.lastActive;
                 merged = true;
                 break;
             }
@@ -411,12 +490,19 @@ void ChannelListWidget::appendDbChannels()
         item.avatarColor  = s_palette[qHash(rec.protocol + rec.chatId) % s_paletteSize];
         item.lastMessage  = rec.lastMessageText;
         item.time         = rec.lastMessageTime;
-        item.unreadCount  = rec.unreadCount;
+        item.dbUnreadCount = rec.unreadCount;
+        item.readWatermark = 0;
+        item.unreadDelta  = 0;
+        item.syncUnread();
         item.chatId       = rec.chatId;
         item.chatType     = rec.protocol;
         item.protocol     = rec.protocol;
+        item.chanId       = rec.chanId;
+        if (item.chanId.isEmpty()) {
+            item.chanId = rec.protocol + QLatin1Char('_') + rec.chatId;
+        }
+        item.lastActive = rec.lastActive;
         m_items.append(item);
-        m_chanKeyIndex[item.protocol + QLatin1Char('_') + item.chatId] = m_items.size() - 1;
     }
 }
 
@@ -433,19 +519,40 @@ void ChannelListWidget::startFadeIn()
         m_fadeAnimator = nullptr;
     }
     setOpacity(1.0);
-    QTimer::singleShot(100, this, [this]() {
-        // 延时窗口内页面可能已切走：不可见则不启动动画，避免
-        // QskAnimator 在页面不可见后仍推进 setOpacity 导致白屏
-        if (window() && isVisible()) {
-            m_fadeAnimator = new StaggerFadeAnimator(this);
-            m_fadeAnimator->setWindow(window());
-            m_fadeAnimator->start();
+
+    // 用成员计时器而非 singleShot：stopFadeIn() 才能真正取消，
+    // 否则页面切走/窗口隐藏后动画仍会启动（把列表压成全透明）。
+    m_fadeTimer.start(100);
+}
+
+void ChannelListWidget::onFadeTimeout()
+{
+    // 延时窗口内页面可能已切走：不可见则不启动动画，避免
+    // QskAnimator 在页面不可见后仍推进 setOpacity 导致白屏
+    if (!window() || !isVisible()) {
+        return;
+    }
+    m_fadeAnimator = new StaggerFadeAnimator(this);
+    m_fadeAnimator->setWindow(window());
+    m_fadeAnimator->start();
+
+    // 兜底：QskAnimator 的驱动挂在 QQuickWindow::afterAnimating 上；
+    // 窗口隐藏时 AnimatorDriver::removeWindow() 会把 animator 从驱动里
+    // 直接摘掉（不调用 done()），透明度永远停在 0 → 联系人列表白屏且不恢复。
+    // 动画时长 800ms，这里 1000ms 后强制复位透明度（与消息列表一致）。
+    QTimer::singleShot(1000, this, [this]() {
+        if (m_fadeAnimator) {
+            m_fadeAnimator->stop();
+            delete m_fadeAnimator;
+            m_fadeAnimator = nullptr;
         }
+        setOpacity(1.0);
     });
 }
 
 void ChannelListWidget::stopFadeIn()
 {
+    m_fadeTimer.stop();
     if (m_fadeAnimator) {
         m_fadeAnimator->stop();
         delete m_fadeAnimator;
@@ -461,36 +568,163 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
         return;
     }
 
+    // 更新已有项：更新元数据并按未读模型递增（收到新消息时调用）
     const QString key = item.protocol + QLatin1Char('_') + chatId;
     if (m_chanKeyIndex.contains(key)) {
         int idx = m_chanKeyIndex[key];
+        m_items[idx].title = item.title.isEmpty() ? m_items[idx].title : item.title;
+        m_items[idx].avatarLetter = item.avatarLetter.isEmpty() ? m_items[idx].avatarLetter : item.avatarLetter;
+        m_items[idx].avatarColor = item.avatarColor.isValid() ? item.avatarColor : m_items[idx].avatarColor;
         m_items[idx].lastMessage = item.lastMessage;
         m_items[idx].time = item.time;
-        m_items[idx].unreadCount++;
+        m_items[idx].chatType = item.chatType.isEmpty() ? m_items[idx].chatType : item.chatType;
+        m_items[idx].protocol = item.protocol.isEmpty() ? m_items[idx].protocol : item.protocol;
+        if (!item.chanId.isEmpty()) {
+            m_items[idx].chanId = item.chanId;
+        }
+        // 收到新消息 → 该会话按 last_active 上浮（与 DB ORDER BY last_active DESC 一致）
+        m_items[idx].lastActive = item.lastActive > 0
+            ? item.lastActive
+            : (qint64)QDateTime::currentSecsSinceEpoch();
+        m_items[idx].unreadDelta += item.unreadDelta;
+        m_items[idx].syncUnread();
         if (m_visibleRows.contains(idx)) {
             m_visibleRows[idx]->setChannelData(m_items[idx]);
         }
-    } else {
-        if (m_items.size() >= MAX_CHANNELS) {
-            for (int i = m_items.size() - 1; i >= 0; --i) {
-                if (m_items[i].chatId.isEmpty()) {
-                    m_items.removeAt(i);
-                    break;
-                }
+        qreal viewW = viewContentsRect().width();
+        if (viewW <= 0) viewW = width();
+        sortChannels();
+        rebuildIndexes();
+        m_contentView->setSize(QSizeF(viewW, m_items.size() * ROW_HEIGHT));
+        update();
+        updateVisibleRows();
+        return;
+    }
+    // 兜底：同 chatId 且 protocol 一致（protocol 为空时才允许跨协议匹配）
+    int foundIdx = -1;
+    auto itRows = m_chatIdRows.find(chatId);
+    if (itRows != m_chatIdRows.end()) {
+        for (int idxCand : itRows.value()) {
+            if (idxCand < 0 || idxCand >= m_items.size()) {
+                continue;
             }
-        }
-        m_items.prepend(item);
-        m_chanKeyIndex.clear();
-        for (int j = 0; j < m_items.size(); ++j) {
-            if (!m_items[j].chatId.isEmpty()) {
-                m_chanKeyIndex[m_items[j].protocol + QLatin1Char('_') + m_items[j].chatId] = j;
+            const QString& candProto = m_items[idxCand].protocol;
+            if (item.protocol.isEmpty() || candProto.isEmpty()
+                || candProto == item.protocol) {
+                foundIdx = idxCand;
+                break;
             }
         }
     }
+    if (foundIdx >= 0) {
+        int idx = foundIdx;
+        m_items[idx].title = item.title.isEmpty() ? m_items[idx].title : item.title;
+        m_items[idx].lastMessage = item.lastMessage;
+        m_items[idx].time = item.time;
+        if (!item.chanId.isEmpty()) {
+            m_items[idx].chanId = item.chanId;
+        }
+        m_items[idx].lastActive = item.lastActive > 0
+            ? item.lastActive
+            : (qint64)QDateTime::currentSecsSinceEpoch();
+        m_items[idx].unreadDelta += item.unreadDelta;
+        m_items[idx].syncUnread();
+        if (m_visibleRows.contains(idx)) {
+            m_visibleRows[idx]->setChannelData(m_items[idx]);
+        }
+        qreal viewW = viewContentsRect().width();
+        if (viewW <= 0) viewW = width();
+        sortChannels();
+        rebuildIndexes();
+        m_contentView->setSize(QSizeF(viewW, m_items.size() * ROW_HEIGHT));
+        update();
+        updateVisibleRows();
+        return;
+    }
+
+    // ── 新会话：交由统一排序定位（不再直接 prepend，会压过置顶的虚拟联系人）──
+    if (m_items.size() >= MAX_CHANNELS) {
+        for (int i = m_items.size() - 1; i >= 0; --i) {
+            if (m_items[i].chatId.isEmpty()) {
+                m_items.removeAt(i);
+                break;
+            }
+        }
+    }
+    ChannelItem newItem = item;
+    if (newItem.dbUnreadCount == 0 && newItem.unreadCount > 0
+        && newItem.readWatermark == 0 && newItem.unreadDelta == 0) {
+        newItem.dbUnreadCount = newItem.unreadCount;
+    }
+    newItem.lastActive = item.lastActive > 0
+        ? item.lastActive
+        : (qint64)QDateTime::currentSecsSinceEpoch();
+    newItem.syncUnread();
+    m_items.append(newItem);
+    sortChannels();
+    rebuildIndexes();
 
     qreal viewW = viewContentsRect().width();
     if (viewW <= 0) viewW = width();
     m_contentView->setSize(QSizeF(viewW, m_items.size() * ROW_HEIGHT));
+    update();
+    updateVisibleRows();
+}
+
+void ChannelListWidget::sortChannels()
+{
+    // 规则：虚拟联系人置顶 → 真实会话按 lastActive 倒序 → mock 演示会话垫底。
+    // stable_sort 保证 lastActive 相同的新会话保持插入顺序（T4 依赖此性质）。
+    std::stable_sort(m_items.begin(), m_items.end(),
+        [](const ChannelItem& a, const ChannelItem& b) {
+            const int ga = channelGroup(a);
+            const int gb = channelGroup(b);
+            if (ga != gb) {
+                return ga < gb;
+            }
+            if (ga == 1) {
+                return a.lastActive > b.lastActive;
+            }
+            return false;
+        });
+}
+
+void ChannelListWidget::rebuildIndexes()
+{
+    // 排序/插入后行号会变，索引必须同步重建，
+    // 否则 markLocallyRead / syncUnreadFromDb / indexOfChannel 会定位到错的行。
+    m_chanKeyIndex.clear();
+    m_chatIdRows.clear();
+    for (int j = 0; j < m_items.size(); ++j) {
+        if (m_items[j].chatId.isEmpty()) {
+            continue;
+        }
+        m_chanKeyIndex[m_items[j].protocol + QLatin1Char('_') + m_items[j].chatId] = j;
+        m_chatIdRows[m_items[j].chatId].append(j);
+    }
+}
+
+void ChannelListWidget::markChannelActive(const QString& protocol,
+                                          const QString& chatId,
+                                          qint64 lastActive)
+{
+    const int idx = indexOfChannel(protocol, chatId, QString());
+    if (idx < 0 || idx >= m_items.size()) {
+        return;
+    }
+    m_items[idx].lastActive = lastActive > 0
+        ? lastActive
+        : (qint64)QDateTime::currentSecsSinceEpoch();
+    sortChannels();
+    rebuildIndexes();
+
+    qreal viewW = viewContentsRect().width();
+    if (viewW <= 0) {
+        viewW = width();
+    }
+    if (m_contentView) {
+        m_contentView->setSize(QSizeF(viewW, m_items.size() * ROW_HEIGHT));
+    }
     update();
     updateVisibleRows();
 }
@@ -501,6 +735,156 @@ QString ChannelListWidget::chatIdForRow(int row) const
         return m_items[row].chatId;
     }
     return {};
+}
+
+int ChannelListWidget::indexOfChannel(const QString& protocol, const QString& chatId,
+                                      const QString& chanId) const
+{
+    if (!chanId.isEmpty()) {
+        for (int i = 0; i < m_items.size(); ++i) {
+            if (m_items[i].chanId == chanId) {
+                return i;
+            }
+        }
+    }
+    if (!protocol.isEmpty() && !chatId.isEmpty()) {
+        const QString key = protocol + QLatin1Char('_') + chatId;
+        auto itKey = m_chanKeyIndex.find(key);
+        if (itKey != m_chanKeyIndex.end()) {
+            int idx = itKey.value();
+            if (idx >= 0 && idx < m_items.size()) {
+                return idx;
+            }
+        }
+    }
+    if (!chatId.isEmpty()) {
+        auto itRows = m_chatIdRows.find(chatId);
+        if (itRows != m_chatIdRows.end() && !itRows.value().isEmpty()) {
+            QVector<int> rows = itRows.value();
+            if (!protocol.isEmpty()) {
+                for (int idxCand : rows) {
+                    if (idxCand >= 0 && idxCand < m_items.size()
+                        && m_items[idxCand].protocol == protocol) {
+                        return idxCand;
+                    }
+                }
+            }
+            // 只在唯一匹配时兜底，避免不同 protocol 同 chatId 串用
+            if (rows.size() == 1) {
+                int idxCand = rows.first();
+                if (idxCand >= 0 && idxCand < m_items.size()) {
+                    return idxCand;
+                }
+            }
+        }
+    }
+    return -1;
+}
+
+void ChannelListWidget::markLocallyRead(const QString& protocol, const QString& chatId,
+                                        const QString& chanId)
+{
+    int idx = indexOfChannel(protocol, chatId, chanId);
+    if (idx < 0 || idx >= m_items.size()) {
+        return;
+    }
+    m_items[idx].readWatermark = m_items[idx].dbUnreadCount;
+    m_items[idx].unreadDelta = 0;
+    m_items[idx].syncUnread();
+    refreshRow(idx);
+}
+
+void ChannelListWidget::reloadUnreadFromDb()
+{
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items[i].chatId.isEmpty()) {
+            continue;
+        }
+        if (m_items[i].chatType == QLatin1String("virtual")) {
+            continue;
+        }
+        QString targetChan = m_items[i].chanId;
+        if (targetChan.isEmpty()) {
+            targetChan = MsgDbBridge::resolveChanid(m_items[i].protocol, m_items[i].chatId);
+            if (!targetChan.isEmpty()) {
+                m_items[i].chanId = targetChan;
+            }
+        }
+        if (targetChan.isEmpty()) {
+            continue;
+        }
+        int dbCnt = MsgDbBridge::unreadCountOf(targetChan);
+        if (dbCnt >= 0) {
+            if (m_isScrolling && m_visibleRows.contains(i)) {
+                m_items[i].dbUnreadCount = dbCnt;
+                m_items[i].readWatermark = 0;
+                m_items[i].unreadDelta = 0;
+                m_items[i].syncUnread();
+                m_pendingVisibleRefresh.insert(i);
+                m_scrollIdleTimer.start();
+                continue;
+            }
+            m_items[i].dbUnreadCount = dbCnt;
+            m_items[i].readWatermark = 0;
+            m_items[i].unreadDelta = 0;
+            m_items[i].syncUnread();
+            refreshRow(i);
+        }
+    }
+}
+
+void ChannelListWidget::syncUnreadFromDb(const QString& chanid)
+{
+    if (chanid.isEmpty()) {
+        reloadUnreadFromDb();
+        return;
+    }
+    int idx = -1;
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items[i].chanId == chanid) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx < 0) {
+        return;
+    }
+    // 滚动中：只更新数据模型，不触发可见行 update，避免向上传播 ContentUpdateMask
+    if (m_isScrolling && m_visibleRows.contains(idx)) {
+        int dbCnt = MsgDbBridge::unreadCountOf(chanid);
+        if (dbCnt >= 0) {
+            m_items[idx].dbUnreadCount = dbCnt;
+            m_items[idx].readWatermark = 0;
+            m_items[idx].unreadDelta = 0;
+            m_items[idx].syncUnread();
+            m_pendingVisibleRefresh.insert(idx);
+            m_scrollIdleTimer.start();
+        }
+        return;
+    }
+    int dbCnt = MsgDbBridge::unreadCountOf(chanid);
+    if (dbCnt >= 0) {
+        m_items[idx].dbUnreadCount = dbCnt;
+        m_items[idx].readWatermark = 0;
+        m_items[idx].unreadDelta = 0;
+        m_items[idx].syncUnread();
+        refreshRow(idx);
+    }
+}
+
+void ChannelListWidget::refreshRow(int idx)
+{
+    if (idx < 0 || idx >= m_items.size()) {
+        return;
+    }
+    if (m_isScrolling && m_visibleRows.contains(idx)) {
+        m_pendingVisibleRefresh.insert(idx);
+        m_scrollIdleTimer.start();
+        return;
+    }
+    if (m_visibleRows.contains(idx)) {
+        m_visibleRows[idx]->setChannelData(m_items[idx]);
+    }
 }
 
 QString ChannelListWidget::chatTypeForRow(int row) const
@@ -559,6 +943,10 @@ void ChannelListWidget::updateVisibleRows()
             ChannelRowItem* row = m_visibleRows[i];
             row->setY(i * ROW_HEIGHT);
             row->setWidth(m_contentView->width());
+            // 滚动中：如有待刷新项由 flushPendingVisibleRefresh 统一处理，避免频繁 update
+            if (m_isScrolling) {
+                continue;
+            }
             row->setChannelData(m_items[i]);
         }
     }

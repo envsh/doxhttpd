@@ -69,7 +69,8 @@ bool MyScrollArea::childMouseEventFilter(QQuickItem* child, QEvent* event)
                 && (now - m_lastTapTimestamp) < (ulong)m_doubleTapInterval
                 && distSq < (qreal)m_doubleTapDistance * m_doubleTapDistance) {
                 m_lastTapTimestamp = 0;
-                m_doubleTapGuardUntil = QDateTime::currentMSecsSinceEpoch() + 999;
+                // 双击后短时间内抑制长按误触发（Android passiveGrab 失败）
+                m_doubleTapGuardUntil = QDateTime::currentMSecsSinceEpoch() + 650;
                 Q_EMIT doubleTapped(scenePos);
             }
         }
@@ -103,6 +104,11 @@ bool MyScrollArea::childMouseEventFilter(QQuickItem* child, QEvent* event)
             m_lastTapScene = m_touchStartScene;
             m_lastTapTimestamp = te->timestamp();
         }
+        m_touchActive = false;
+        m_scrolling = false;
+        return false;
+    }
+    case QEvent::TouchCancel: {
         m_touchActive = false;
         m_scrolling = false;
         return false;

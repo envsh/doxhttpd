@@ -10,12 +10,13 @@
 #include <QMap>
 #include <QPointer>
 #include <QPointF>
+#include <QTimer>
 struct MessageItem {
     enum SendState { SendSending, SendSent, SendFailed };
     QString sender;
     QString content;
     QString time;
-    bool    isSelf;
+    bool    isSelf = false;
     QString avatarUrl;
     int     peerNumber = -1;
     QString avatarLetter;
@@ -71,10 +72,23 @@ public:
 
     void populateMessages();
     void appendMessage(const MessageItem& item);
-    void setChannel(const QString& protocol, const QString& chatId);
+    void setChannel(const QString& protocol, const QString& chatId,
+                    const QString& chanId = QString());
+    // 强制滚动到底部（切换频道后用于对齐 X14）
+    void scrollToBottom();
     void stopFadeIn();
     int messageCount() const { return m_items.size(); }
-    const MessageItem& messageItem(int row) const { return m_items[row]; }
+    // 已创建的可见行数（回归测试用：换频道后必须 > 0，否则消息列表整表空白）
+    int visibleRowCount() const { return m_visibleRows.size(); }
+    // 越界安全：旧实现直接 m_items[row]，列表被清空/回填后调用方持有的
+    // 旧下标会越界崩溃。
+    const MessageItem& messageItem(int row) const {
+        static const MessageItem s_empty;
+        if (row < 0 || row >= m_items.size()) {
+            return s_empty;
+        }
+        return m_items[row];
+    }
     void setSendStatus(quint64 reqseq, bool success, const QString& error);
     void updateSendState(int row, MessageItem::SendState state,
                          quint64 reqseq, const QString& error);
@@ -101,15 +115,20 @@ private:
     int rowFromPosition(const QPointF& localPos) const;
     int rowFromContentY(qreal contentY) const;
     void updateVisibleRows();
+    // 淡入计时器超时槽（构造时连接一次，避免重复 connect 累积）
+    void onFadeTimeout();
 
     QQuickItem* m_contentView = nullptr;
     QString m_chatId;
     QString m_chanProtocol;
+    QString m_chanId;
     QVector<MessageItem> m_items;
     QVector<qreal> m_rowHeights;
     QVector<qreal> m_rowYOffsets;
     QMap<int, MessageRowItem*> m_visibleRows;
     MessageListAnimator* m_fadeAnimator = nullptr;
+    // 淡入延迟计时器：可被 stopFadeIn() 取消，避免页面切走后仍启动动画
+    QTimer m_fadeTimer;
     bool m_rebuildingLayout = false;
 };
 
@@ -121,7 +140,9 @@ public:
     MessageListAnimator(QQuickItem* target, QObject* parent = nullptr);
 
 protected:
+    void setup() override;
     void advance(qreal value) override;
+    void done() override;
 
 private:
     QPointer<QQuickItem> m_target;

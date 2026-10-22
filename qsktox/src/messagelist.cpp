@@ -9,6 +9,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QFontMetrics>
+#include <QSet>
 #include <QEasingCurve>
 #include <QQuickWindow>
 #include <QtMath>
@@ -499,9 +500,13 @@ QSGNode* MessageRowItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
     if (m_dirty) {
         node->setItem(m_item);
         m_dirty = false;
-        node->triggerUpdate(window(), QRectF(QPointF(0, 0), QSizeF(width(), height())),
-            QSizeF(width(), height()));
     }
+    // 必须无条件调用：QskPaintedNode::update() 是唯一创建/更新 QSGImageNode 的
+    // 入口，且 rect 为空（宽 0）时会直接删掉 imageNode → 整行不渲染。
+    // 只在 m_dirty 时调用 → 行尺寸变化（宽度变化导致重排）后不再重绘，
+    // 表现为消息列表空白/错位。ChannelRowItem 的写法就是对的。
+    node->triggerUpdate(window(), QRectF(QPointF(0, 0), QSizeF(width(), height())),
+        QSizeF(width(), height()));
     return node;
 }
 
@@ -580,12 +585,25 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
     connect(this, &QskScrollBox::scrollPosChanged,
         this, &MessageListWidget::updateVisibleRows);
 
+    // 淡入计时器：构造时连接一次（成员槽）。
+    // 不能在 populateMessages() 里反复 connect lambda + Qt::UniqueConnection ——
+    // UniqueConnection 只支持成员函数槽（Qt 源码 qobject.h 里有断言），
+    // lambda 每次 connect 都会新增一条连接 → 计时器触发多次 → 建多个动画器。
+    m_fadeTimer.setSingleShot(true);
+    connect(&m_fadeTimer, &QTimer::timeout, this, &MessageListWidget::onFadeTimeout);
+
     // 当前打开的消息列表实时追加新收到的该频道消息：
-    // MessageStore 收到 push 后发 messageAdded，此处按 m_chatId 过滤（protocol 不参与），
+    // MessageStore 收到 push 后发 messageAdded，此处按 protocol + m_chatId 过滤
+    // （protocol 必须参与：不同 protocol 的 chatId 可能相同），
     // 命中即复用 appendMessage（追加、算行高、更新尺寸、滚到底）
     connect(MessageStore::instance(), &MessageStore::messageAdded,
-        this, [this](const QString& chatId, const MessageItem& item) {
+        this, [this](const QString& protocol, const QString& chatId,
+                     const MessageItem& item) {
             if (m_chatId.isEmpty() || chatId != m_chatId) {
+                return;
+            }
+            if (!m_chanProtocol.isEmpty() && !protocol.isEmpty()
+                && protocol != m_chanProtocol) {
                 return;
             }
             appendMessage(item);
@@ -612,6 +630,7 @@ MessageListWidget::~MessageListWidget()
 
 void MessageListWidget::populateMessages()
 {
+    m_fadeTimer.stop();
     if (m_fadeAnimator) {
         m_fadeAnimator->stop();
         delete m_fadeAnimator;
@@ -638,18 +657,35 @@ void MessageListWidget::populateMessages()
     if (totalH > viewH) {
         setScrollPos(QPointF(0, totalH - viewH));
     }
+    // 淡入：用成员计时器而非 singleShot，stopFadeIn() 才能真正取消
+    // （页面已切走时启动动画会把列表置为全透明 → 白屏）
+    m_fadeTimer.stop();
+    m_fadeTimer.start(100);
+}
 
-    QTimer::singleShot(100, this, [this]() {
-        if (window()) {
-            m_fadeAnimator = new MessageListAnimator(this, this);
-            m_fadeAnimator->setWindow(window());
-            m_fadeAnimator->start();
+void MessageListWidget::onFadeTimeout()
+{
+    if (!window() || !isVisible()) {
+        return;
+    }
+    m_fadeAnimator = new MessageListAnimator(this, this);
+    m_fadeAnimator->setWindow(window());
+    m_fadeAnimator->start();
+
+    // 兜底：动画时长 800ms，若未被驱动推进则强制复位透明度
+    QTimer::singleShot(1000, this, [this]() {
+        if (m_fadeAnimator) {
+            m_fadeAnimator->stop();
+            delete m_fadeAnimator;
+            m_fadeAnimator = nullptr;
         }
+        setOpacity(1.0);
     });
 }
 
 void MessageListWidget::stopFadeIn()
 {
+    m_fadeTimer.stop();
     if (m_fadeAnimator) {
         m_fadeAnimator->stop();
         delete m_fadeAnimator;
@@ -790,7 +826,8 @@ void MessageListWidget::updateSendStateByRowid(int64_t rowid,
     }
 }
 
-void MessageListWidget::setChannel(const QString& protocol, const QString& chatId)
+void MessageListWidget::setChannel(const QString& protocol, const QString& chatId,
+                                   const QString& chanId)
 {
     if (m_fadeAnimator) {
         m_fadeAnimator->stop();
@@ -801,26 +838,70 @@ void MessageListWidget::setChannel(const QString& protocol, const QString& chatI
 
     m_chatId = chatId;
     m_chanProtocol = protocol;
+    m_chanId = chanId;
     m_items.clear();
     m_rowHeights.clear();
     m_rowYOffsets.clear();
     for (auto* row : std::as_const(m_visibleRows)) {
+        // 先隐藏再延迟删除：否则换频道瞬间旧行仍绘制在视口里（残影）
+        row->setVisible(false);
         row->deleteLater();
     }
     m_visibleRows.clear();
+    if (m_contentView) {
+        m_contentView->setSize(QSizeF(0, 0));
+    }
 
-    if (m_chatId.isEmpty()) {
+    if (m_chatId.isEmpty() && m_chanId.isEmpty()) {
         populateMessages();
         return;
     }
 
-    // 优先从 SQLite 加载历史（chanid 需 protocol）
+    // 优先从 SQLite 加载历史：
+    // 1) 有权威 chanid（channels 表主键）时直接按 chanid 读
+    // 2) 否则按 protocol + "_" + chatId 组装
+    // 3) 都为空时按 chatId 在 channels 表中反查 chanid 再读
     QVector<MessageItem> msgs;
-    if (!m_chanProtocol.isEmpty()) {
+    if (!m_chanId.isEmpty()) {
+        msgs = MsgDbBridge::loadMessagesByChanid(m_chanId, 50);
+    } else if (!m_chanProtocol.isEmpty()) {
         msgs = MsgDbBridge::loadMessages(m_chanProtocol, m_chatId, 50);
     }
-    if (msgs.isEmpty()) {
-        msgs = MessageStore::instance()->getMessages(m_chatId);
+    if (msgs.isEmpty() && !m_chatId.isEmpty()) {
+        // 兜底：protocol 缺失时从 chanid 前缀反推（与下方 store 合并同一口径），
+        // 避免把别的 protocol 的同 chatId 会话消息加载进来。
+        QString fallbackProto = m_chanProtocol;
+        if (fallbackProto.isEmpty() && !m_chanId.isEmpty()) {
+            fallbackProto = m_chanId.section(QLatin1Char('_'), 0, 0);
+        }
+        msgs = MsgDbBridge::loadMessagesByChatId(fallbackProto, m_chatId, 50);
+    }
+    {
+        // 合并 MessageStore（进程内实时消息）。
+        // 去重只按 DB rowid：旧的 sender|content|time 去重会把「同人同内容
+        // 同秒」的两条真实消息误删一条。
+        QString storeProto = m_chanProtocol;
+        if (storeProto.isEmpty() && !m_chanId.isEmpty()) {
+            // chanid 形如 "<proto>_<chatId>"
+            storeProto = m_chanId.section(QLatin1Char('_'), 0, 0);
+        }
+        const QList<MessageItem> storeMsgs =
+            MessageStore::instance()->getMessages(storeProto, m_chatId);
+        if (!storeMsgs.isEmpty()) {
+            QSet<qint64> seenRowid;
+            for (const auto& m : msgs) {
+                if (m.dbRowid > 0) {
+                    seenRowid.insert(m.dbRowid);
+                }
+            }
+            for (const auto& m : storeMsgs) {
+                // 无 rowid 的消息只存在于内存，没有可比较的身份，一律保留
+                if (m.dbRowid > 0 && seenRowid.contains(m.dbRowid)) {
+                    continue;
+                }
+                msgs.append(m);
+            }
+        }
     }
     for (const auto& msg : msgs) {
         m_items.append(msg);
@@ -839,12 +920,54 @@ void MessageListWidget::setChannel(const QString& protocol, const QString& chatI
     qreal viewH = viewContentsRect().height();
     if (totalH > viewH) {
         setScrollPos(QPointF(0, totalH - viewH));
+    } else {
+        setScrollPos(QPointF(0, 0));
     }
+
+    // 若异步落库（MsgDbBridge::onIncomingMessage）尚未完成导致列表仍为空，
+    // 短延迟后重试一次加载
+    if (m_items.isEmpty() && !m_chatId.isEmpty()) {
+        const QString p = m_chanProtocol;
+        const QString c = m_chatId;
+        const QString cid = m_chanId;
+        QTimer::singleShot(200, this, [this, p, c, cid]() {
+            if (p == m_chanProtocol && c == m_chatId && cid == m_chanId
+                && m_items.isEmpty()) {
+                setChannel(p, c, cid);
+            }
+        });
+    }
+}
+
+void MessageListWidget::scrollToBottom()
+{
+    if (!m_contentView) {
+        return;
+    }
+    qreal totalH = m_rowYOffsets.isEmpty() ? 0 : m_rowYOffsets.last();
+    qreal viewH = viewContentsRect().height();
+    if (viewH <= 0) {
+        viewH = height();
+    }
+    if (totalH > viewH) {
+        setScrollPos(QPointF(0, totalH - viewH));
+    } else {
+        setScrollPos(QPointF(0, 0));
+    }
+    updateVisibleRows();
 }
 
 void MessageListWidget::updateVisibleRows()
 {
     if (!m_contentView || m_items.isEmpty()) {
+        return;
+    }
+    // 布局缓存与数据必须一一对应，否则下面的下标访问会越界
+    // 注意：m_rowYOffsets 是「前缀和」表，长度 = 消息数 + 1（末位为总高），
+    // 不能直接跟 m_items.size() 比 —— 否则条件恒真，updateVisibleRows() 每次
+    // 都提前返回，一行都不渲染 → 消息列表整表空白。
+    if (m_rowYOffsets.size() != m_items.size() + 1
+        || m_rowHeights.size() != m_items.size()) {
         return;
     }
 
@@ -880,8 +1003,11 @@ void MessageListWidget::updateVisibleRows()
     auto it = m_visibleRows.begin();
     while (it != m_visibleRows.end()) {
         if (it.key() < rowMin || it.key() > rowMax) {
-            it.value()->deleteLater();
+            MessageRowItem* doomed = it.value();
             it = m_visibleRows.erase(it);
+            // 先隐藏再延迟删除：旧行在事件循环处理 deleteLater 前仍会绘制
+            doomed->setVisible(false);
+            doomed->deleteLater();
         } else {
             ++it;
         }
@@ -897,6 +1023,15 @@ void MessageListWidget::updateVisibleRows()
             row->setHeight(m_rowHeights[i]);
             row->setMessageData(m_items[i]);
             m_visibleRows[i] = row;
+        } else {
+            // 已存在的行也要同步：列表更新（重建布局 / 换频道 / 追加消息）后
+            // 行的 y/高度/宽度/数据都会变，不刷新就会错位或空白。
+            // ChannelListWidget::updateVisibleRows() 同一位置已有此分支。
+            MessageRowItem* row = m_visibleRows[i];
+            row->setY(m_rowYOffsets[i]);
+            row->setWidth(m_contentView->width());
+            row->setHeight(m_rowHeights[i]);
+            row->setMessageData(m_items[i]);
         }
     }
 }
@@ -973,8 +1108,14 @@ MessageListAnimator::MessageListAnimator(QQuickItem* target, QObject* parent)
     Q_UNUSED(parent)
     setDuration(800);
     setEasingCurve(QEasingCurve::OutCubic);
+}
 
-    if (m_target) {
+void MessageListAnimator::setup()
+{
+    // 动画真正开始时才把透明度降到 0：
+    // 若在构造函数里就置 0，一旦动画未被驱动推进（窗口隐藏等），
+    // 列表会一直保持全透明 —— 表现为白屏。
+    if (m_target && m_target->isVisible()) {
         m_target->setOpacity(0.0);
     }
 }
@@ -984,13 +1125,30 @@ void MessageListAnimator::advance(qreal value)
     if (!m_target) {
         return;
     }
-    // 目标已不可见则停止动画并复位，避免在隐藏页上反复 setOpacity
+    // 目标已不可见或无 window 则停止动画并复位，避免在隐藏页上反复 setOpacity
     if (!m_target->isVisible()) {
         stop();
         m_target->setOpacity(1.0);
         return;
     }
+    if (!m_target->window()) {
+        stop();
+        m_target->setOpacity(1.0);
+        return;
+    }
+    if (value >= 1.0) {
+        m_target->setOpacity(1.0);
+        stop();
+        return;
+    }
     m_target->setOpacity(value);
+}
+
+void MessageListAnimator::done()
+{
+    if (m_target) {
+        m_target->setOpacity(1.0);
+    }
 }
 
 #include "moc_messagelist.cpp"

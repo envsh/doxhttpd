@@ -16,6 +16,7 @@ public:
 
     QString chatId() const { return m_chatId; }
     QString protocol() const { return m_protocol; }
+    QString chanId() const { return m_chanId; }
 
 protected:
     void onCreate(const QVariantMap& launchArgs,
@@ -37,6 +38,8 @@ private:
     static void onRowidBackfilled(void* ctx, const QString& protocol,
                                   const QString& chatId, qint64 localId,
                                   int64_t rowid);
+    // 通知会话列表：本会话有新消息，需要上浮（排序键 last_active）
+    void touchChannelInList();
 
     MessageListWidget* m_messageList = nullptr;
     MessageAttribBar* m_attrBar = nullptr;
@@ -45,6 +48,7 @@ private:
     QString m_chatId;
     QString m_chatType;
     QString m_protocol;
+    QString m_chanId;
 };
 
 #endif

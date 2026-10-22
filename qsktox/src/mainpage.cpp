@@ -195,9 +195,11 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             QString chatId = m_channelList->chatIdForRow(row);
             QString chatType = m_channelList->chatTypeForRow(row);
             QString protocol = m_channelList->protocolForRow(row);
+            QString chanId = m_channelList->chanIdForRow(row);
+            m_channelList->markLocallyRead(protocol, chatId, chanId);
             pageManager()->open("message",
                 {{"channelIndex", row}, {"channelName", chatName}, {"chatId", chatId},
-                 {"chatType", chatType}, {"protocol", protocol}});
+                 {"chatType", chatType}, {"protocol", protocol}, {"chanId", chanId}});
         });
 
     connect(m_channelList, &ChannelListWidget::rowLongPressed,
@@ -271,7 +273,7 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
                 static const QColor mp[] = {QColor("#4CAF50"),QColor("#2196F3"),QColor("#FF9800"),QColor("#E91E63"),QColor("#9C27B0"),QColor("#00BCD4"),QColor("#FF5722"),QColor("#795548"),QColor("#607D8B")};
                 msgItem.avatarColor = mp[qHash(sname) % 9];
             }
-            MessageStore::instance()->addMessage(chatId, msgItem);
+            MessageStore::instance()->addMessage(protocol, chatId, msgItem);
 
             ChannelItem chItem;
             chItem.avatarLetter = avatarLetter;
@@ -279,10 +281,12 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             chItem.title = chatName.isEmpty() ? chatId : chatName;
             chItem.lastMessage = text;
             chItem.time = timeStr;
-            chItem.unreadCount = 1;
             chItem.chatId = chatId;
             chItem.chatType = chatType;
             chItem.protocol = protocol;
+            chItem.chanId = MsgDbBridge::resolveChanid(protocol, chatId);
+            // 排序键：与 DB 侧 updateChannelLastMessage 写入的 last_active 同源同值
+            chItem.lastActive = QDateTime::currentSecsSinceEpoch();
 
             bool isCurrent = false;
             if (auto* pm = pageManager()) {
@@ -295,7 +299,7 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             MsgDbBridge::onIncomingMessage(protocol, chatId, chItem.title,
                                            msgItem, isCurrent, nullptr, nullptr);
 
-            chItem.unreadCount = isCurrent ? 0 : 1;
+            chItem.unreadDelta = isCurrent ? 0 : 1;
             m_channelList->insertOrUpdateChannel(chatId, chItem);
         });
 
@@ -363,10 +367,16 @@ void MainPage::onNewIntent(const QVariantMap& launchArgs)
 
 void MainPage::onPause()
 {
-    // 页面即将被覆盖：立即停止频道列表淡入动画，避免动画在不可见页
-    // 上继续推进 setOpacity 造成返回/切换时白屏
     if (m_channelList) {
         m_channelList->stopFadeIn();
+    }
+}
+
+void MainPage::onResume()
+{
+    Page::onResume();
+    if (m_channelList) {
+        m_channelList->reloadUnreadFromDb();
     }
 }
 

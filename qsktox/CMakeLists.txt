@@ -8,17 +8,26 @@ set(CMAKE_AUTOMOC ON)
 find_package(Qt6 REQUIRED COMPONENTS Core Quick Network Multimedia)
 find_package(QSkinny REQUIRED)
 
+# 旧版 QSkinny 安装的 QS::QSkinny 目标引用未加命名空间的 Qt6Qml/Qt6Quick/
+# Qt6OpenGL（见 QSkinnyTargets.cmake）。Qt6 只导出 Qt6::* 目标，CMake 会把它
+# 们退化成裸 -lQt6Qml/-lQt6Quick/-lQt6OpenGL，在链接器搜索路径中可能命中系统
+# Qt（版本/ABI 不符）。这里把旧名字桥接到正确的 Qt6::* 目标。
+macro(_fix_qskinny_abi_target old_target new_target)
+    if(NOT TARGET "${old_target}" AND TARGET "${new_target}")
+        add_library("${old_target}" INTERFACE IMPORTED)
+        target_link_libraries("${old_target}" INTERFACE "${new_target}")
+    endif()
+endmacro()
+
 if(ANDROID)
-    macro(_fix_qskinny_abi_target old_target new_target)
-        if(NOT TARGET "${old_target}" AND TARGET "${new_target}")
-            add_library("${old_target}" INTERFACE IMPORTED)
-            target_link_libraries("${old_target}" INTERFACE "${new_target}")
-        endif()
-    endmacro()
     _fix_qskinny_abi_target(Qt6Gui_arm64-v8a   Qt6::Gui)
     _fix_qskinny_abi_target(Qt6Qml_arm64-v8a   Qt6::Qml)
     _fix_qskinny_abi_target(Qt6Quick_arm64-v8a Qt6::Quick)
     _fix_qskinny_abi_target(Qt6OpenGL_arm64-v8a Qt6::OpenGL)
+else()
+    _fix_qskinny_abi_target(Qt6Qml    Qt6::Qml)
+    _fix_qskinny_abi_target(Qt6Quick  Qt6::Quick)
+    _fix_qskinny_abi_target(Qt6OpenGL Qt6::OpenGL)
 endif()
 
 set(qlapp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qltox)
@@ -26,8 +35,7 @@ set(qlappcom_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qlappcom)
 set(qlcomp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qlcomp)
 set(ql3rdparty_dir ${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty)
 
-qt_add_executable(qsktox
-    src/main.cpp
+set(QSKTOX_SOURCES
     src/androidutils.h
     src/androidutils.cpp
     src/keepalive.h
@@ -135,8 +143,14 @@ qt_add_executable(qsktox
     ${qlcomp_dir}/qcrc64.cpp
 )
 
+qt_add_executable(qsktox
+    src/main.cpp
+    ${QSKTOX_SOURCES}
+)
+
 # ── vendor: cJSON header ──
-target_include_directories(qsktox PRIVATE
+set(QSKTOX_INCLUDE_DIRS
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/../vendor
     ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/include
     ${ql3rdparty_dir}/bloom
@@ -145,6 +159,7 @@ target_include_directories(qsktox PRIVATE
     ${qlappcom_dir}
     ${qlcomp_dir}
 )
+target_include_directories(qsktox PRIVATE ${QSKTOX_INCLUDE_DIRS})
 
 target_link_libraries(qsktox PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::Multimedia)
 
@@ -257,3 +272,21 @@ endif()
 
 # ── gumbo (HTML5 解析器，qlappcom/linkpreview.cpp 使用；vendor 源码，全平台统一，不用系统 libgumbo) ──
 include(${CMAKE_CURRENT_SOURCE_DIR}/../vendor/gumbo.cmake)
+
+# ── 回归测试目标 qsktox_test ──
+# 与主程序共用同一份源码（仅去掉 src/main.cpp），保证「被测代码 == 发布代码」。
+# src/main.cpp 承载 Android 前台服务、Go/C++ extras 线程与窗口装配，不进测试目标。
+# 仅桌面端：Android 交叉编译产物无法在宿主机执行测试。
+if(NOT ANDROID)
+    enable_testing()
+    qt_add_executable(qsktox_test
+        tests/tst_main.cpp
+        ${QSKTOX_SOURCES}
+    )
+    target_include_directories(qsktox_test PRIVATE ${QSKTOX_INCLUDE_DIRS})
+    target_link_libraries(qsktox_test PRIVATE
+        Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::Multimedia
+        SQLite::SQLite3 CURL::libcurl OpenSSL::SSL OpenSSL::Crypto
+        gumbo)
+    add_test(NAME qsktox_test COMMAND qsktox_test)
+endif()
