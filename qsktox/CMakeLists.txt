@@ -34,6 +34,7 @@ set(qlapp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qltox)
 set(qlappcom_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qlappcom)
 set(qlcomp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qlcomp)
 set(ql3rdparty_dir ${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty)
+set(qskcomp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qskcomp)
 
 set(QSKTOX_SOURCES
     src/androidutils.h
@@ -77,6 +78,12 @@ set(QSKTOX_SOURCES
     src/messageattribbar.cpp
     src/msgenlargeoverlay.h
     src/msgenlargeoverlay.cpp
+    src/rawdatautil.h
+    src/rawdatautil.cpp
+    src/rawdatapopup.h
+    src/rawdatapopup.cpp
+    ${qskcomp_dir}/multilinetextedit.h
+    ${qskcomp_dir}/multilinetextedit.cpp
     src/settingspage.h
     src/settingspage.cpp
     src/aboutpage.h
@@ -158,6 +165,7 @@ set(QSKTOX_INCLUDE_DIRS
     ${qlapp_dir}
     ${qlappcom_dir}
     ${qlcomp_dir}
+    ${qskcomp_dir}
 )
 target_include_directories(qsktox PRIVATE ${QSKTOX_INCLUDE_DIRS})
 

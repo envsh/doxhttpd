@@ -2,6 +2,7 @@
 #include "messageattribbar.h"
 #include "messagelist.h"
 #include "msgenlargeoverlay.h"
+#include "rawdatapopup.h"
 #include "androidutils.h"
 #include "menuoverlay.h"
 #include "mozpushsender.h"
@@ -130,7 +131,6 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     // ── Long press menu ──
     connect(m_messageList, &MessageListWidget::rowLongPressed,
         this, [this](int row, const QPointF& pos) {
-            Q_UNUSED(row)
             for (auto* old : findChildren<QskMenu*>())
                 old->deleteLater();
             for (auto* old : findChildren<MenuOverlay*>())
@@ -142,14 +142,21 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             menu->addOption(QskLabelData(QString::fromUtf8("转发")));
             menu->addOption(QskLabelData(QString::fromUtf8("回复")));
             menu->addSeparator();
+            const int rawDataOption = menu->addOption(
+                QskLabelData(QString::fromUtf8("查看原始数据")));
+            menu->addSeparator();
             menu->addOption(QskLabelData(QString::fromUtf8("删除")));
 
             menu->setOrigin(pos);
 
-            connect(menu, &QskMenu::triggered, this, [this](int index) {
-                Q_UNUSED(index)
-                if (auto* m = qobject_cast<QskMenu*>(QObject::sender()))
+            connect(menu, &QskMenu::triggered, this,
+                [this, row, rawDataOption](int index) {
+                if (index == rawDataOption) {
+                    RawDataPopup::show(this, m_messageList->messageItem(row));
+                }
+                if (auto* m = qobject_cast<QskMenu*>(QObject::sender())) {
                     m->close();
+                }
             });
 
             {
