@@ -289,6 +289,13 @@ void ChannelRowItem::setChannelData(const ChannelItem& item)
     update();
 }
 
+void ChannelRowItem::setChannelDataNoUpdate(const ChannelItem& item)
+{
+    m_item = item;
+    m_dirty = true;
+    // 合并刷新：不触发 update()，避免向上传播到 QskScrollArea
+}
+
 QSGNode* ChannelRowItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
 {
     auto* node = static_cast<ChannelRowNode*>(oldNode);
@@ -317,10 +324,15 @@ ChannelListWidget::ChannelListWidget(QQuickItem* parent)
     m_contentView = new QQuickItem(this);
     setScrolledItem(m_contentView);
 
-    // 滚动状态追踪：滚动中延迟可见行刷新，避开 QskScrollArea ClipItem ContentUpdateMask defer
+    // 滚动状态追踪：用滚动事件判断滚动波次
     m_scrollIdleTimer.setSingleShot(true);
     m_scrollIdleTimer.setInterval(160);
     connect(&m_scrollIdleTimer, &QTimer::timeout, this, &ChannelListWidget::flushPendingVisibleRefresh);
+
+    // 全量合并：当前事件循环内所有可见行视觉刷新合并到下一事件循环统一处理
+    m_coalesceTimer.setSingleShot(true);
+    connect(&m_coalesceTimer, &QTimer::timeout, this, &ChannelListWidget::flushCoalescedRefresh);
+
     connect(this, &QskScrollBox::scrollPosChanged,
         this, &ChannelListWidget::onScrollPosChangedForTracking);
 
@@ -366,12 +378,44 @@ ChannelListWidget::~ChannelListWidget()
         m_fadeAnimator = nullptr;
     }
     m_scrollIdleTimer.stop();
+    m_coalesceTimer.stop();
     m_pendingVisibleRefresh.clear();
+    m_coalescedRefresh.clear();
     m_isScrolling = false;
     for (auto* row : std::as_const(m_visibleRows)) {
         delete row;
     }
     m_visibleRows.clear();
+}
+
+void ChannelListWidget::forceClipRefresh()
+{
+    if (!isVisible() || !window() || !window()->isExposed()) {
+        return;
+    }
+    if (m_contentView) {
+        m_contentView->polish();
+        m_contentView->update();
+    }
+    this->polish();
+    this->update();
+    if (window()) {
+        window()->update();
+    }
+}
+
+void ChannelListWidget::queueVisibleRefresh(int idx)
+{
+    if (idx < 0 || idx >= m_items.size()) {
+        return;
+    }
+    if (!m_visibleRows.contains(idx)) {
+        return;
+    }
+    m_coalescedRefresh.insert(idx);
+    if (!m_coalesceTimer.isActive()) {
+        m_coalesceTimer.start(0);
+    }
 }
 
 void ChannelListWidget::onScrollPosChangedForTracking()
@@ -385,8 +429,13 @@ void ChannelListWidget::flushPendingVisibleRefresh()
 {
     m_isScrolling = false;
     if (m_pendingVisibleRefresh.isEmpty()) {
+        if (m_coalescedRefresh.isEmpty()) {
+            forceClipRefresh();
+        }
         return;
     }
+    QVector<ChannelRowItem*> toUpdate;
+    toUpdate.reserve(m_pendingVisibleRefresh.size());
     for (int idx : std::as_const(m_pendingVisibleRefresh)) {
         if (idx < 0 || idx >= m_items.size()) {
             continue;
@@ -395,12 +444,43 @@ void ChannelListWidget::flushPendingVisibleRefresh()
         if (it == m_visibleRows.end() || !it.value()) {
             continue;
         }
-        it.value()->setChannelData(m_items[idx]);
+        it.value()->setChannelDataNoUpdate(m_items[idx]);
+        toUpdate.append(it.value());
     }
     m_pendingVisibleRefresh.clear();
-    if (window()) {
-        window()->update();
+    for (auto* row : toUpdate) {
+        row->update();
     }
+    forceClipRefresh();
+}
+
+void ChannelListWidget::flushCoalescedRefresh()
+{
+    if (!isVisible() || !window() || !window()->isExposed()) {
+        m_coalescedRefresh.clear();
+        return;
+    }
+    if (m_coalescedRefresh.isEmpty()) {
+        return;
+    }
+    QVector<ChannelRowItem*> toUpdate;
+    toUpdate.reserve(m_coalescedRefresh.size());
+    for (int idx : std::as_const(m_coalescedRefresh)) {
+        if (idx < 0 || idx >= m_items.size()) {
+            continue;
+        }
+        auto it = m_visibleRows.find(idx);
+        if (it == m_visibleRows.end() || !it.value()) {
+            continue;
+        }
+        it.value()->setChannelDataNoUpdate(m_items[idx]);
+        toUpdate.append(it.value());
+    }
+    m_coalescedRefresh.clear();
+    for (auto* row : toUpdate) {
+        row->update();
+    }
+    forceClipRefresh();
 }
 
 void ChannelListWidget::populateData()
@@ -553,6 +633,11 @@ void ChannelListWidget::onFadeTimeout()
 void ChannelListWidget::stopFadeIn()
 {
     m_fadeTimer.stop();
+    m_scrollIdleTimer.stop();
+    m_coalesceTimer.stop();
+    m_pendingVisibleRefresh.clear();
+    m_coalescedRefresh.clear();
+    m_isScrolling = false;
     if (m_fadeAnimator) {
         m_fadeAnimator->stop();
         delete m_fadeAnimator;
@@ -589,7 +674,7 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
         m_items[idx].unreadDelta += item.unreadDelta;
         m_items[idx].syncUnread();
         if (m_visibleRows.contains(idx)) {
-            m_visibleRows[idx]->setChannelData(m_items[idx]);
+            queueVisibleRefresh(idx);
         }
         qreal viewW = viewContentsRect().width();
         if (viewW <= 0) viewW = width();
@@ -630,7 +715,7 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
         m_items[idx].unreadDelta += item.unreadDelta;
         m_items[idx].syncUnread();
         if (m_visibleRows.contains(idx)) {
-            m_visibleRows[idx]->setChannelData(m_items[idx]);
+            queueVisibleRefresh(idx);
         }
         qreal viewW = viewContentsRect().width();
         if (viewW <= 0) viewW = width();
@@ -727,6 +812,10 @@ void ChannelListWidget::markChannelActive(const QString& protocol,
     }
     update();
     updateVisibleRows();
+
+    if (m_visibleRows.contains(idx)) {
+        queueVisibleRefresh(idx);
+    }
 }
 
 QString ChannelListWidget::chatIdForRow(int row) const
@@ -815,20 +904,14 @@ void ChannelListWidget::reloadUnreadFromDb()
         }
         int dbCnt = MsgDbBridge::unreadCountOf(targetChan);
         if (dbCnt >= 0) {
-            if (m_isScrolling && m_visibleRows.contains(i)) {
-                m_items[i].dbUnreadCount = dbCnt;
-                m_items[i].readWatermark = 0;
-                m_items[i].unreadDelta = 0;
-                m_items[i].syncUnread();
-                m_pendingVisibleRefresh.insert(i);
-                m_scrollIdleTimer.start();
-                continue;
-            }
             m_items[i].dbUnreadCount = dbCnt;
             m_items[i].readWatermark = 0;
             m_items[i].unreadDelta = 0;
             m_items[i].syncUnread();
-            refreshRow(i);
+            queueVisibleRefresh(i);
+            if (m_isScrolling) {
+                m_scrollIdleTimer.start();
+            }
         }
     }
 }
@@ -849,26 +932,16 @@ void ChannelListWidget::syncUnreadFromDb(const QString& chanid)
     if (idx < 0) {
         return;
     }
-    // 滚动中：只更新数据模型，不触发可见行 update，避免向上传播 ContentUpdateMask
-    if (m_isScrolling && m_visibleRows.contains(idx)) {
-        int dbCnt = MsgDbBridge::unreadCountOf(chanid);
-        if (dbCnt >= 0) {
-            m_items[idx].dbUnreadCount = dbCnt;
-            m_items[idx].readWatermark = 0;
-            m_items[idx].unreadDelta = 0;
-            m_items[idx].syncUnread();
-            m_pendingVisibleRefresh.insert(idx);
-            m_scrollIdleTimer.start();
-        }
-        return;
-    }
     int dbCnt = MsgDbBridge::unreadCountOf(chanid);
     if (dbCnt >= 0) {
         m_items[idx].dbUnreadCount = dbCnt;
         m_items[idx].readWatermark = 0;
         m_items[idx].unreadDelta = 0;
         m_items[idx].syncUnread();
-        refreshRow(idx);
+        queueVisibleRefresh(idx);
+        if (m_isScrolling) {
+            m_scrollIdleTimer.start();
+        }
     }
 }
 
@@ -877,13 +950,9 @@ void ChannelListWidget::refreshRow(int idx)
     if (idx < 0 || idx >= m_items.size()) {
         return;
     }
-    if (m_isScrolling && m_visibleRows.contains(idx)) {
-        m_pendingVisibleRefresh.insert(idx);
+    queueVisibleRefresh(idx);
+    if (m_isScrolling) {
         m_scrollIdleTimer.start();
-        return;
-    }
-    if (m_visibleRows.contains(idx)) {
-        m_visibleRows[idx]->setChannelData(m_items[idx]);
     }
 }
 
@@ -943,11 +1012,16 @@ void ChannelListWidget::updateVisibleRows()
             ChannelRowItem* row = m_visibleRows[i];
             row->setY(i * ROW_HEIGHT);
             row->setWidth(m_contentView->width());
-            // 滚动中：如有待刷新项由 flushPendingVisibleRefresh 统一处理，避免频繁 update
+            // 滚动中不刷新视觉，交给合并队列，避免 update() 风暴
             if (m_isScrolling) {
                 continue;
             }
-            row->setChannelData(m_items[i]);
+            // 已在合并队列中的行交给 flushCoalescedRefresh 统一刷新
+            if (m_coalescedRefresh.contains(i) || m_pendingVisibleRefresh.contains(i)) {
+                continue;
+            }
+            row->setChannelDataNoUpdate(m_items[i]);
+            row->update();
         }
     }
 }

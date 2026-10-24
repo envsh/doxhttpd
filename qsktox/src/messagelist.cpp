@@ -491,6 +491,13 @@ void MessageRowItem::setMessageData(const MessageItem& item)
     update();
 }
 
+void MessageRowItem::setMessageDataNoUpdate(const MessageItem& item)
+{
+    m_item = item;
+    m_dirty = true;
+    // 合并刷新：不触发 update()，避免向上传播到 QskScrollArea
+}
+
 QSGNode* MessageRowItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
 {
     auto* node = static_cast<MessageRowNode*>(oldNode);
@@ -582,8 +589,15 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
             }
         });
 
+    m_scrollIdleTimer.setSingleShot(true);
+    m_scrollIdleTimer.setInterval(160);
+    connect(&m_scrollIdleTimer, &QTimer::timeout, this, &MessageListWidget::flushPendingVisibleRefresh);
+
+    m_coalesceTimer.setSingleShot(true);
+    connect(&m_coalesceTimer, &QTimer::timeout, this, &MessageListWidget::flushCoalescedRefresh);
+
     connect(this, &QskScrollBox::scrollPosChanged,
-        this, &MessageListWidget::updateVisibleRows);
+        this, &MessageListWidget::onScrollPosChangedForTracking);
 
     // 淡入计时器：构造时连接一次（成员槽）。
     // 不能在 populateMessages() 里反复 connect lambda + Qt::UniqueConnection ——
@@ -612,25 +626,137 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
     // 头像下载完成 → 刷新可见行（重绘）
     connect(AvatarHost::instance(), &AvatarHost::avatarUpdated,
         this, [this]() {
-            for (auto* row : std::as_const(m_visibleRows)) {
-                const int r = m_visibleRows.key(row);
-                row->setMessageData(m_items[r]);
+            for (auto it = m_visibleRows.begin(); it != m_visibleRows.end(); ++it) {
+                queueVisibleRefresh(it.key());
             }
-            update();
+            if (m_isScrolling) {
+                m_scrollIdleTimer.start();
+            }
         });
 }
 
 MessageListWidget::~MessageListWidget()
 {
+    m_scrollIdleTimer.stop();
+    m_coalesceTimer.stop();
+    m_pendingVisibleRefresh.clear();
+    m_coalescedRefresh.clear();
+    m_isScrolling = false;
+    m_flushPending = false;
     for (auto* row : std::as_const(m_visibleRows)) {
         delete row;
     }
     m_visibleRows.clear();
 }
 
+void MessageListWidget::queueVisibleRefresh(int idx)
+{
+    if (idx < 0 || idx >= m_items.size()) {
+        return;
+    }
+    if (!m_visibleRows.contains(idx)) {
+        return;
+    }
+    m_coalescedRefresh.insert(idx);
+    if (!m_coalesceTimer.isActive()) {
+        m_coalesceTimer.start(0);
+    }
+}
+
+void MessageListWidget::onScrollPosChangedForTracking()
+{
+    m_isScrolling = true;
+    m_scrollIdleTimer.start();
+    updateVisibleRows();
+}
+
+void MessageListWidget::forceClipRefresh()
+{
+    if (!isVisible() || !window() || !window()->isExposed()) {
+        return;
+    }
+    if (m_contentView) {
+        m_contentView->polish();
+        m_contentView->update();
+    }
+    this->polish();
+    this->update();
+    if (window()) {
+        window()->update();
+    }
+}
+
+void MessageListWidget::flushPendingVisibleRefresh()
+{
+    m_isScrolling = false;
+    if (!isVisible() || !window() || !window()->isExposed()) {
+        m_pendingVisibleRefresh.clear();
+        return;
+    }
+    if (m_pendingVisibleRefresh.isEmpty()) {
+        if (m_coalescedRefresh.isEmpty()) {
+            forceClipRefresh();
+        }
+        return;
+    }
+    QVector<MessageRowItem*> toUpdate;
+    toUpdate.reserve(m_pendingVisibleRefresh.size());
+    for (int idx : std::as_const(m_pendingVisibleRefresh)) {
+        if (idx < 0 || idx >= m_items.size()) {
+            continue;
+        }
+        auto it = m_visibleRows.find(idx);
+        if (it == m_visibleRows.end() || !it.value()) {
+            continue;
+        }
+        it.value()->setMessageDataNoUpdate(m_items[idx]);
+        toUpdate.append(it.value());
+    }
+    m_pendingVisibleRefresh.clear();
+    for (auto* row : toUpdate) {
+        row->update();
+    }
+    forceClipRefresh();
+}
+
+void MessageListWidget::flushCoalescedRefresh()
+{
+    if (!isVisible() || !window() || !window()->isExposed()) {
+        m_coalescedRefresh.clear();
+        return;
+    }
+    if (m_coalescedRefresh.isEmpty()) {
+        return;
+    }
+    QVector<MessageRowItem*> toUpdate;
+    toUpdate.reserve(m_coalescedRefresh.size());
+    for (int idx : std::as_const(m_coalescedRefresh)) {
+        if (idx < 0 || idx >= m_items.size()) {
+            continue;
+        }
+        auto it = m_visibleRows.find(idx);
+        if (it == m_visibleRows.end() || !it.value()) {
+            continue;
+        }
+        it.value()->setMessageDataNoUpdate(m_items[idx]);
+        toUpdate.append(it.value());
+    }
+    m_coalescedRefresh.clear();
+    for (auto* row : toUpdate) {
+        row->update();
+    }
+    forceClipRefresh();
+}
+
 void MessageListWidget::populateMessages()
 {
     m_fadeTimer.stop();
+    m_scrollIdleTimer.stop();
+    m_coalesceTimer.stop();
+    m_pendingVisibleRefresh.clear();
+    m_coalescedRefresh.clear();
+    m_isScrolling = false;
+    m_flushPending = false;
     if (m_fadeAnimator) {
         m_fadeAnimator->stop();
         delete m_fadeAnimator;
@@ -686,6 +812,12 @@ void MessageListWidget::onFadeTimeout()
 void MessageListWidget::stopFadeIn()
 {
     m_fadeTimer.stop();
+    m_scrollIdleTimer.stop();
+    m_coalesceTimer.stop();
+    m_pendingVisibleRefresh.clear();
+    m_coalescedRefresh.clear();
+    m_isScrolling = false;
+    m_flushPending = false;
     if (m_fadeAnimator) {
         m_fadeAnimator->stop();
         delete m_fadeAnimator;
@@ -727,7 +859,10 @@ void MessageListWidget::setSendStatus(quint64 reqseq, bool success, const QStrin
         m_items[i].sendError = success ? QString() : error;
         auto it = m_visibleRows.find(i);
         if (it != m_visibleRows.end()) {
-            (*it)->setMessageData(m_items[i]);
+            queueVisibleRefresh(i);
+            if (m_isScrolling) {
+                m_scrollIdleTimer.start();
+            }
         }
         return;
     }
@@ -744,7 +879,10 @@ void MessageListWidget::updateSendState(int row, MessageItem::SendState state,
     m_items[row].sendError = error;
     auto it = m_visibleRows.find(row);
     if (it != m_visibleRows.end()) {
-        (*it)->setMessageData(m_items[row]);
+        queueVisibleRefresh(row);
+        if (m_isScrolling) {
+            m_scrollIdleTimer.start();
+        }
     }
 }
 
@@ -763,7 +901,10 @@ bool MessageListWidget::updateSendStateByLocalId(qint64 localId,
         m_items[i].sendError = error;
         auto it = m_visibleRows.find(i);
         if (it != m_visibleRows.end()) {
-            (*it)->setMessageData(m_items[i]);
+            queueVisibleRefresh(i);
+            if (m_isScrolling) {
+                m_scrollIdleTimer.start();
+            }
         }
         return true;
     }
@@ -820,7 +961,10 @@ void MessageListWidget::updateSendStateByRowid(int64_t rowid,
         m_items[i].sendState = state;
         auto it = m_visibleRows.find(i);
         if (it != m_visibleRows.end()) {
-            (*it)->setMessageData(m_items[i]);
+            queueVisibleRefresh(i);
+            if (m_isScrolling) {
+                m_scrollIdleTimer.start();
+            }
         }
         return;
     }
@@ -829,6 +973,12 @@ void MessageListWidget::updateSendStateByRowid(int64_t rowid,
 void MessageListWidget::setChannel(const QString& protocol, const QString& chatId,
                                    const QString& chanId)
 {
+    m_scrollIdleTimer.stop();
+    m_coalesceTimer.stop();
+    m_pendingVisibleRefresh.clear();
+    m_coalescedRefresh.clear();
+    m_isScrolling = false;
+    m_flushPending = false;
     if (m_fadeAnimator) {
         m_fadeAnimator->stop();
         delete m_fadeAnimator;
@@ -1024,14 +1174,20 @@ void MessageListWidget::updateVisibleRows()
             row->setMessageData(m_items[i]);
             m_visibleRows[i] = row;
         } else {
-            // 已存在的行也要同步：列表更新（重建布局 / 换频道 / 追加消息）后
-            // 行的 y/高度/宽度/数据都会变，不刷新就会错位或空白。
-            // ChannelListWidget::updateVisibleRows() 同一位置已有此分支。
             MessageRowItem* row = m_visibleRows[i];
             row->setY(m_rowYOffsets[i]);
             row->setWidth(m_contentView->width());
             row->setHeight(m_rowHeights[i]);
-            row->setMessageData(m_items[i]);
+            if (m_isScrolling) {
+                // 滚动中延迟视觉刷新，避开 QskScrollArea ClipItem ContentUpdateMask defer
+                continue;
+            }
+            // 已在合并队列中的行交给 flushCoalescedRefresh 统一刷新
+            if (m_coalescedRefresh.contains(i) || m_pendingVisibleRefresh.contains(i)) {
+                continue;
+            }
+            row->setMessageDataNoUpdate(m_items[i]);
+            row->update();
         }
     }
 }

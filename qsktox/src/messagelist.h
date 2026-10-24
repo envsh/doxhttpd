@@ -10,6 +10,7 @@
 #include <QMap>
 #include <QPointer>
 #include <QPointF>
+#include <QSet>
 #include <QTimer>
 struct MessageItem {
     enum SendState { SendSending, SendSent, SendFailed };
@@ -51,6 +52,7 @@ public:
     MessageRowItem(QQuickItem* parent = nullptr);
 
     void setMessageData(const MessageItem& item);
+    void setMessageDataNoUpdate(const MessageItem& item);
 
 protected:
     QSGNode* updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) override;
@@ -115,6 +117,11 @@ private:
     int rowFromPosition(const QPointF& localPos) const;
     int rowFromContentY(qreal contentY) const;
     void updateVisibleRows();
+    void onScrollPosChangedForTracking();
+    void flushPendingVisibleRefresh();
+    void flushCoalescedRefresh();
+    void queueVisibleRefresh(int idx);
+    void forceClipRefresh();
     // 淡入计时器超时槽（构造时连接一次，避免重复 connect 累积）
     void onFadeTimeout();
 
@@ -130,6 +137,13 @@ private:
     // 淡入延迟计时器：可被 stopFadeIn() 取消，避免页面切走后仍启动动画
     QTimer m_fadeTimer;
     bool m_rebuildingLayout = false;
+    // 滚动中延迟可见行视觉刷新，避开 QskScrollArea ClipItem ContentUpdateMask defer
+    bool m_isScrolling = false;
+    bool m_flushPending = false;
+    QTimer m_scrollIdleTimer;
+    QTimer m_coalesceTimer;
+    QSet<int> m_pendingVisibleRefresh;
+    QSet<int> m_coalescedRefresh;
 };
 
 void rebuildLayout(MessageListWidget*);

@@ -59,6 +59,7 @@ public:
     ChannelRowItem(QQuickItem* parent = nullptr);
 
     void setChannelData(const ChannelItem& item);
+    void setChannelDataNoUpdate(const ChannelItem& item);
 
 protected:
     QSGNode* updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) override;
@@ -134,6 +135,9 @@ private:
     // 滚动状态追踪：滚动中延迟可见行刷新，避开 QskScrollArea ClipItem 竞态
     void onScrollPosChangedForTracking();
     void flushPendingVisibleRefresh();
+    void flushCoalescedRefresh();
+    void queueVisibleRefresh(int idx);
+    void forceClipRefresh();
 
     QQuickItem* m_contentView = nullptr;
     QVector<ChannelItem> m_items;
@@ -147,7 +151,10 @@ private:
     // 滚动中更新延迟
     bool m_isScrolling = false;
     QTimer m_scrollIdleTimer;
+    // 全量合并：不管是否滚动都合并可见行视觉刷新（应对高频更新）
+    QTimer m_coalesceTimer;
     QSet<int> m_pendingVisibleRefresh;
+    QSet<int> m_coalescedRefresh;
 };
 
 class StaggerFadeAnimator : public QskAnimator
