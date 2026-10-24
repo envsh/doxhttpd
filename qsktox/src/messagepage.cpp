@@ -62,6 +62,14 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     m_titleLabel->setAlignment(Qt::AlignCenter);
     m_titleLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
 
+    auto* optionsBtn = new QskPushButton(QString::fromUtf8("⋮"), topBar);
+    optionsBtn->setPreferredSize(44, 44);
+    optionsBtn->setBoxShapeHint(QskPushButton::Panel,
+        QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+    connect(optionsBtn, &QskAbstractButton::clicked, this, [this, optionsBtn]() {
+        openChatMenu(optionsBtn);
+    });
+
     // ── MessageList ──
     m_messageList = new MessageListWidget(layout);
     m_messageList->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
@@ -218,6 +226,57 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
                     row, MessageItem::SendSending, reqseq, QString());
             }
         });
+}
+
+void MessagePage::openChatMenu(QskPushButton* optionsBtn)
+{
+    for (auto* old : findChildren<QskMenu*>())
+        old->deleteLater();
+    for (auto* old : findChildren<MenuOverlay*>())
+        old->deleteLater();
+
+    auto* menu = new QskMenu(this);
+    menu->setModal(true);
+    menu->addOption(QskLabelData(QString::fromUtf8("查看资料")));
+    menu->addSeparator();
+    menu->addOption(QskLabelData(QString::fromUtf8("搜索聊天记录")));
+    menu->addSeparator();
+    menu->addOption(QskLabelData(QString::fromUtf8("静音")));
+    menu->addSeparator();
+    menu->addOption(QskLabelData(QString::fromUtf8("滚动到底部")));
+
+    // 右对齐按钮、悬于其下（仿 MainPage options 菜单）
+    QPointF btnPos = optionsBtn->mapToItem(this, QPointF(0, 0));
+    qreal menuW = menu->implicitWidth();
+    if (menuW <= 0) menuW = 200;
+    menu->setOrigin(QPointF(
+        btnPos.x() + optionsBtn->width() - menuW,
+        btnPos.y() + optionsBtn->height()));
+
+    connect(menu, &QskMenu::triggered, this, [this](int index) {
+        if (index == 0) {
+            showAndroidToast(QString::fromUtf8("名称: ") + m_titleLabel->text()
+                + QString::fromUtf8("\nID: ") + m_chatId
+                + QString::fromUtf8("\n协议: ") + m_protocol);
+        } else if (index == 2) {
+            showAndroidToast(QString::fromUtf8("搜索聊天记录 (coming soon)"));
+        } else if (index == 4) {
+            showAndroidToast(QString::fromUtf8("静音 (coming soon)"));
+        } else if (index == 6) {
+            if (m_messageList) {
+                m_messageList->scrollToBottom();
+            }
+        }
+        if (auto* m = qobject_cast<QskMenu*>(QObject::sender())) {
+            m->close();
+        }
+    });
+
+    {
+        auto* overlay = new MenuOverlay(menu);
+        connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
+    }
+    menu->open();
 }
 
 void MessagePage::onPause()

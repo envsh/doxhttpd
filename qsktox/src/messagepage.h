@@ -7,6 +7,7 @@ class MessageListWidget;
 class MessageAttribBar;
 class QskTextField;
 class QskTextLabel;
+class QskPushButton;
 
 class MessagePage : public Page
 {
@@ -25,6 +26,7 @@ protected:
     void onPause() override;
 
 private:
+    void openChatMenu(QskPushButton* optionsBtn);
     void sendMessage();
     void sendToVirtualBot(int kind, qint64 localId, const QString& text);
     void onBotDone(int chatId, const QString& protocol, qint64 localId,
