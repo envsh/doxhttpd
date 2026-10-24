@@ -27,23 +27,6 @@ static constexpr qreal SIDE_MARGIN = 12;
 static constexpr qreal AVATAR_SIZE = 36;
 static constexpr qreal AVATAR_SPACING = 8;
 
-static const QColor s_msgPalette[] = {
-    QColor("#4CAF50"), QColor("#2196F3"), QColor("#FF9800"), QColor("#E91E63"), QColor("#9C27B0"), QColor("#00BCD4"), QColor("#FF5722"), QColor("#795548"), QColor("#607D8B"),
-};
-static constexpr int s_msgPaletteSize = sizeof(s_msgPalette) / sizeof(s_msgPalette[0]);
-
-inline QString msgFirstLetter(const QString& s)
-{
-    if (s.isEmpty()) return QString(" ");
-    return QString(s.at(0)).toUpper();
-}
-
-inline QColor msgColorForName(const QString& s)
-{
-    if (s.isEmpty()) return QColor("#607D8B");
-    return s_msgPalette[qHash(s) % s_msgPaletteSize];
-}
-
 // ═══════════════════════════════════════════════════════════════════
 // 120 条共享模拟消息数据（长短不一）
 // ═══════════════════════════════════════════════════════════════════
@@ -269,9 +252,12 @@ void rebuildLayout(MessageListWidget* widget)
 // MessageRowNode — 绘制单条消息气泡
 // ═══════════════════════════════════════════════════════════════════
 
-void MessageRowNode::setItem(const MessageItem& item)
+void MessageRowNode::setItem(const MessageItem& item,
+                             const QImage& avatarImage, quint32 avatarTick)
 {
     m_item = item;
+    m_avatarImage = avatarImage;
+    m_avatarTick = avatarTick;
 }
 
 void MessageRowNode::triggerUpdate(QQuickWindow* window, const QRectF& rect, const QSizeF& size)
@@ -399,19 +385,18 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
         if (avatarY < NAME_HEIGHT + 2) avatarY = NAME_HEIGHT + 2;
         qreal bubbleX = SIDE_MARGIN + AVATAR_SIZE + AVATAR_SPACING;
 
-        // 头像：usericon 有效 → 真实头像（mxc/https 下载后缓存），无效则
-        // AvatarManager 走 identicon；两者皆无 → 字母圆块兜底。
+        // 头像：GUI 线程已预解析为 QImage（真实头像 / identicon 均在此）。
+        // paint() 运行在场景图渲染线程，禁止再访问 AvatarManager/QPixmap，
+        // 否则 Android 等无 ThreadedPixmaps 能力的平台会拿到 null QPixmap，
+        // 永远退化成字母圆块。无头像时才画字母圆块兜底。
         const QRectF avatarRect(avatarX, avatarY, AVATAR_SIZE, AVATAR_SIZE);
-        QPixmap av;
-        if (!m_item.avatarUrl.isEmpty()) {
-            av = AvatarManager::inst().get(
-                m_item.avatarUrl, m_item.sender, m_item.peerNumber, (int)AVATAR_SIZE);
-        }
-        if (!av.isNull()) {
-            painter->drawPixmap(QPointF(avatarX, avatarY), av);
+        if (!m_avatarImage.isNull()) {
+            painter->drawImage(avatarRect, m_avatarImage);
         } else {
-            const QColor avatarBg = m_item.avatarColor.isValid() ? m_item.avatarColor : msgColorForName(m_item.sender);
-            const QString avatarLet = m_item.avatarLetter.isEmpty() ? msgFirstLetter(m_item.sender) : m_item.avatarLetter;
+            const QColor avatarBg = m_item.avatarColor.isValid()
+                ? m_item.avatarColor : msgAvatarColorFor(m_item.sender);
+            const QString avatarLet = m_item.avatarLetter.isEmpty()
+                ? msgAvatarLetterFor(m_item.sender) : m_item.avatarLetter;
             drawLetterAvatar(painter, avatarRect, avatarBg, avatarLet);
         }
 
@@ -471,7 +456,10 @@ QskHashValue MessageRowNode::hash(const void*) const
         ^ qHash(m_item.avatarUrl) ^ m_item.peerNumber
         ^ qHash(static_cast<int>(m_item.sendState))
         ^ qHash(m_item.mediaUrl) ^ qHash(m_item.audioMime)
-        ^ qHash(m_item.isAudio) ^ m_item.durationSec;
+        ^ qHash(m_item.isAudio) ^ m_item.durationSec
+        ^ qHash(m_item.avatarLetter)
+        ^ qHash(static_cast<uint>(m_item.avatarColor.rgb()))
+        ^ m_avatarTick;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -484,16 +472,49 @@ MessageRowItem::MessageRowItem(QQuickItem* parent)
     setFlag(ItemHasContents, true);
 }
 
+void MessageRowItem::refreshAvatar()
+{
+    // 必须在 GUI 线程执行：AvatarManager::get() 返回 QPixmap，且无缓存时
+    // 会生成 identicon（内部构造 QPixmap）。Qt 仅在支持 ThreadedPixmaps 的
+    // 平台允许非 GUI 线程使用 QPixmap，Android/EGLFS 不支持 → null。
+    m_avatarImage = QImage();
+    if (!m_item.avatarUrl.isEmpty()) {
+        const QPixmap pm = AvatarManager::inst().get(
+            m_item.avatarUrl, m_item.sender, m_item.peerNumber, (int)AVATAR_SIZE);
+        if (!pm.isNull()) {
+            m_avatarImage = pm.toImage();
+        }
+    }
+    ++m_avatarTick;
+    m_dirty = true;
+}
+
 void MessageRowItem::setMessageData(const MessageItem& item)
 {
+    const bool avatarChanged = (item.avatarUrl != m_item.avatarUrl);
     m_item = item;
+    if (avatarChanged) {
+        m_avatarResolved = false;
+    }
+    if (!m_avatarResolved) {
+        refreshAvatar();
+        m_avatarResolved = true;
+    }
     m_dirty = true;
     update();
 }
 
 void MessageRowItem::setMessageDataNoUpdate(const MessageItem& item)
 {
+    const bool avatarChanged = (item.avatarUrl != m_item.avatarUrl);
     m_item = item;
+    if (avatarChanged) {
+        m_avatarResolved = false;
+    }
+    if (!m_avatarResolved) {
+        refreshAvatar();
+        m_avatarResolved = true;
+    }
     m_dirty = true;
     // 合并刷新：不触发 update()，避免向上传播到 QskScrollArea
 }
@@ -505,7 +526,7 @@ QSGNode* MessageRowItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
         node = new MessageRowNode();
     }
     if (m_dirty) {
-        node->setItem(m_item);
+        node->setItem(m_item, m_avatarImage, m_avatarTick);
         m_dirty = false;
     }
     // 必须无条件调用：QskPaintedNode::update() 是唯一创建/更新 QSGImageNode 的
@@ -546,7 +567,12 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
             if (!m_items[row].isSelf) {
                 const qreal avatarX = SIDE_MARGIN;
                 const qreal avatarSize = AVATAR_SIZE;
-                qreal avatarY = m_rowYOffsets[row] + NAME_HEIGHT + (m_rowHeights[row] - avatarSize) / 2.0;
+                // 与 paint() 同口径：头像在气泡区域内垂直居中，
+                // bubbleHeight = 行高 - NAME_HEIGHT - TIME_HEIGHT - 4
+                const qreal bubbleH =
+                    m_rowHeights[row] - NAME_HEIGHT - TIME_HEIGHT - 4;
+                qreal avatarY = m_rowYOffsets[row] + NAME_HEIGHT
+                    + (bubbleH - avatarSize) / 2.0;
                 if (avatarY < NAME_HEIGHT + 2) avatarY = NAME_HEIGHT + 2;
                 if (localPos.x() >= avatarX && localPos.x() <= avatarX + avatarSize &&
                     localPos.y() >= avatarY && localPos.y() <= avatarY + avatarSize) {
@@ -627,7 +653,14 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
     connect(AvatarHost::instance(), &AvatarHost::avatarUpdated,
         this, [this]() {
             for (auto it = m_visibleRows.begin(); it != m_visibleRows.end(); ++it) {
-                queueVisibleRefresh(it.key());
+                const int idx = it.key();
+                // 没有头像 url 的行不需要因下载完成而重绘
+                if (idx < 0 || idx >= m_items.size()
+                    || m_items[idx].avatarUrl.isEmpty()) {
+                    continue;
+                }
+                it.value()->refreshAvatar();
+                queueVisibleRefresh(idx);
             }
             if (m_isScrolling) {
                 m_scrollIdleTimer.start();

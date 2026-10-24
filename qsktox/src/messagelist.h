@@ -5,6 +5,7 @@
 #include <QskAnimator.h>
 #include <QskPaintedNode.h>
 #include <QQuickItem>
+#include <QImage>
 #include <QColor>
 #include <QVector>
 #include <QMap>
@@ -36,13 +37,17 @@ struct MessageItem {
 class MessageRowNode : public QskPaintedNode
 {
 public:
-    void setItem(const MessageItem& item);
+    // 头像由 GUI 线程预解析为 QImage（渲染线程禁止构造/使用 QPixmap）
+    void setItem(const MessageItem& item, const QImage& avatarImage,
+                 quint32 avatarTick);
     void triggerUpdate(QQuickWindow* window, const QRectF& rect, const QSizeF& size);
     void paint(QPainter*, const QSize&, const void*) override;
     QskHashValue hash(const void*) const override;
 
 private:
     MessageItem m_item;
+    QImage m_avatarImage;
+    quint32 m_avatarTick = 0;
     QRectF m_statusRect;
 };
 
@@ -53,12 +58,18 @@ public:
 
     void setMessageData(const MessageItem& item);
     void setMessageDataNoUpdate(const MessageItem& item);
+    // 只在 GUI 线程调用：把 AvatarManager 的 QPixmap 转成 QImage 缓存，
+    // 并递增 avatarTick 参与 hash，保证下载完成后精准重绘。
+    void refreshAvatar();
 
 protected:
     QSGNode* updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) override;
 
 private:
     MessageItem m_item;
+    QImage m_avatarImage;
+    quint32 m_avatarTick = 0;
+    bool m_avatarResolved = false;
     bool m_dirty = true;
 };
 

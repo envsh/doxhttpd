@@ -2,6 +2,7 @@
 #include "storage.h"
 #include "message_db.h"
 #include "channel_db.h"
+#include "avatarutil.h"
 #include <QDebug>
 #include <QCoreApplication>
 #include <QMetaObject>
@@ -31,9 +32,8 @@ MessageItem itemFromRow(const MessageRow& row)
     it.durationSec = row.duration_sec;
     it.isAudio     = !it.mediaUrl.isEmpty()
                      && row.media_mime.rfind("audio/", 0) == 0;
-    it.avatarLetter = it.sender.isEmpty() ? QChar(' ')
-                                          : it.sender.at(0).toUpper();
-    it.avatarColor = QColor("#1565C0");
+    it.avatarLetter = msgAvatarLetterFor(it.sender);
+    it.avatarColor  = msgAvatarColorFor(it.sender);
     it.dbRowid     = row.rowid;
     return it;
 }
