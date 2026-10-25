@@ -20,12 +20,10 @@ static constexpr qreal ROW_HEIGHT = 68;
 static constexpr int MAX_CHANNELS = 200;
 
 // ── 列表分组（排序用）──
-// 0 = 虚拟联系人（置顶）  1 = 真实会话（按 lastActive 倒序）  2 = mock 演示会话（垫底）
+// 1 = 会话（虚拟联系人与真实会话同级，全局按 lastActive 倒序竞争）
+// 2 = mock 演示会话（chatId 为空，垫底）
 static int channelGroup(const ChannelItem& it)
 {
-    if (it.chatType == QLatin1String("virtual")) {
-        return 0;
-    }
     if (it.chatId.isEmpty()) {
         return 2;
     }
@@ -767,8 +765,8 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
 
 void ChannelListWidget::sortChannels()
 {
-    // 规则：虚拟联系人置顶 → 真实会话按 lastActive 倒序 → mock 演示会话垫底。
-    // stable_sort 保证 lastActive 相同的新会话保持插入顺序（T4 依赖此性质）。
+    // 规则：会话（含虚拟联系人）全局按 lastActive 倒序 → mock 演示会话垫底。
+    // stable_sort 保证 lastActive 相同的会话保持插入顺序（T4 依赖此性质）。
     std::stable_sort(m_items.begin(), m_items.end(),
         [](const ChannelItem& a, const ChannelItem& b) {
             const int ga = channelGroup(a);
@@ -776,10 +774,7 @@ void ChannelListWidget::sortChannels()
             if (ga != gb) {
                 return ga < gb;
             }
-            if (ga == 1) {
-                return a.lastActive > b.lastActive;
-            }
-            return false;
+            return a.lastActive > b.lastActive;
         });
 }
 
