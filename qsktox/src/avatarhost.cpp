@@ -2,6 +2,7 @@
 
 #include "avatar_manager.h"
 #include "eventpoller.h"
+#include "limelog.h"
 
 #include <QDebug>
 #include <QImage>
@@ -47,6 +48,7 @@ AvatarHost* AvatarHost::instance()
 void AvatarHost::download(const QString& avatarUrl)
 {
     if (avatarUrl.isEmpty()) {
+        ALOG_WARN("avatar download skip: empty url");
         return;
     }
     if (m_pending.contains(avatarUrl)) {
@@ -54,6 +56,7 @@ void AvatarHost::download(const QString& avatarUrl)
     }
     const QString httpUrl = mxcToHttp(avatarUrl);
     if (httpUrl.isEmpty()) {
+        ALOG_WARN("avatar download skip: bad url", avatarUrl);
         return;
     }
     m_pending.insert(avatarUrl);
@@ -67,7 +70,17 @@ void AvatarHost::download(const QString& avatarUrl)
         // 泵线程只搬运字节，解码放在 customEvent 完成
         if (resp.httpCode != 200 || resp.body.empty()) {
             ev->success = false;
-            ev->errorInfo = "HTTP " + std::to_string(resp.httpCode);
+            std::string type;
+            auto itH = resp.headers.find("content-type");
+            if (itH != resp.headers.end()) {
+                type = itH->second;
+            }
+            ev->errorInfo = "HTTP " + std::to_string(resp.httpCode)
+                + " curl[" + resp.curlErrStr + "]"
+                + " size[" + std::to_string(resp.body.size()) + "]"
+                + " type[" + type + "]"
+                + " final[" + resp.finalUrl + "]"
+                + " time[" + std::to_string(resp.elapsedMs) + "ms]";
         } else {
             ev->body = resp.body;
             ev->success = true;
@@ -92,12 +105,18 @@ void AvatarHost::customEvent(QEvent* event)
                 AvatarManager::inst().store(key, QPixmap::fromImage(img),
                                             kAvatarSize);
                 stored = true;
+            } else {
+                ALOG_WARN("avatar decode failed", key,
+                          (int)evt->body.size());
             }
         }
         if (stored) {
             Q_EMIT avatarUpdated();
         } else {
             AvatarManager::inst().removePending(key);
+            if (!evt->success) {
+                ALOG_WARN("avatar fetch failed", key, evt->errorInfo);
+            }
         }
         return;
     }
