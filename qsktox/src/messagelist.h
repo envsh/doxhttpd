@@ -37,6 +37,7 @@ struct MessageItem {
 class MessageRowNode : public QskPaintedNode
 {
 public:
+    MessageRowNode();
     // 头像由 GUI 线程预解析为 QImage（渲染线程禁止构造/使用 QPixmap）
     void setItem(const MessageItem& item, const QImage& avatarImage,
                  quint32 avatarTick);

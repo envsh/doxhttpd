@@ -44,6 +44,7 @@ struct ChannelItem {
 class ChannelRowNode : public QskPaintedNode
 {
 public:
+    ChannelRowNode();
     void setItem(const ChannelItem& item);
     void triggerUpdate(QQuickWindow* window, const QRectF& rect, const QSizeF& size);
     void paint(QPainter*, const QSize&, const void*) override;

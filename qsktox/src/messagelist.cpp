@@ -252,6 +252,11 @@ void rebuildLayout(MessageListWidget* widget)
 // MessageRowNode — 绘制单条消息气泡
 // ═══════════════════════════════════════════════════════════════════
 
+MessageRowNode::MessageRowNode()
+{
+    setRenderHint( QskPaintedNode::Raster );
+}
+
 void MessageRowNode::setItem(const MessageItem& item,
                              const QImage& avatarImage, quint32 avatarTick)
 {

@@ -10,6 +10,7 @@
 class MsgEnlargeOverlayNode : public QskPaintedNode
 {
 public:
+    MsgEnlargeOverlayNode();
     void setData(const MessageItem& item, int fontSizeIndex, const QSizeF& size,
                  qreal scrollY, const QRectF& textAreaRect);
     void triggerUpdate(QQuickWindow* window, const QRectF& rect, const QSizeF& size);

@@ -158,6 +158,11 @@ static constexpr int s_mockCount = sizeof(s_mockData) / sizeof(s_mockData[0]);
 // ChannelRowNode — QskPaintedNode 子类，绘制单行
 // ═══════════════════════════════════════════════════════════════════
 
+ChannelRowNode::ChannelRowNode()
+{
+    setRenderHint( QskPaintedNode::Raster );
+}
+
 void ChannelRowNode::setItem(const ChannelItem& item)
 {
     m_item = item;

@@ -86,6 +86,11 @@ static int hitTestPos(const QPointF& pos, const QSizeF& size, const QRectF& text
 
 // ── MsgEnlargeOverlayNode ──
 
+MsgEnlargeOverlayNode::MsgEnlargeOverlayNode()
+{
+    setRenderHint( QskPaintedNode::Raster );
+}
+
 void MsgEnlargeOverlayNode::setData(const MessageItem& item, int fontSizeIndex,
                                      const QSizeF& size, qreal scrollY,
                                      const QRectF& textAreaRect)
