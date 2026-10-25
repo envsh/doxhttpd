@@ -4,6 +4,7 @@
 #include "eventpoller.h"
 
 #include <QDebug>
+#include <QImage>
 
 namespace {
 
@@ -62,14 +63,13 @@ void AvatarHost::download(const QString& avatarUrl)
         const QString* url = static_cast<const QString*>(udata);
         AvatarDownloadEvent* ev = new AvatarDownloadEvent();
         ev->mxcUrl = std::string(url->toUtf8().constData());
+        // QPixmap 仅限 GUI 线程（Android 无 ThreadedPixmaps），
+        // 泵线程只搬运字节，解码放在 customEvent 完成
         if (resp.httpCode != 200 || resp.body.empty()) {
             ev->success = false;
             ev->errorInfo = "HTTP " + std::to_string(resp.httpCode);
-        } else if (!ev->pixmap.loadFromData(
-                       (const uchar*)resp.body.data(), resp.body.size())) {
-            ev->success = false;
-            ev->errorInfo = "pixmap load failed";
         } else {
+            ev->body = resp.body;
             ev->success = true;
         }
         delete url;
@@ -83,8 +83,18 @@ void AvatarHost::customEvent(QEvent* event)
         AvatarDownloadEvent* evt = static_cast<AvatarDownloadEvent*>(event);
         const QString key = QString::fromUtf8(evt->mxcUrl.c_str());
         m_pending.remove(key);
-        if (evt->success && !evt->pixmap.isNull()) {
-            AvatarManager::inst().store(key, evt->pixmap, kAvatarSize);
+        bool stored = false;
+        if (evt->success && !evt->body.empty()) {
+            QImage img;
+            if (img.loadFromData(
+                    reinterpret_cast<const uchar*>(evt->body.data()),
+                    (int)evt->body.size())) {
+                AvatarManager::inst().store(key, QPixmap::fromImage(img),
+                                            kAvatarSize);
+                stored = true;
+            }
+        }
+        if (stored) {
             Q_EMIT avatarUpdated();
         } else {
             AvatarManager::inst().removePending(key);

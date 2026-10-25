@@ -211,7 +211,7 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     connect(PushHandler::instance(), &PushHandler::pushMessage,
         this, [this](const QByteArray& message, const QString& instance) {
             qDebug() << "[MainPage] push message received, size:" << message.size()
-                     << "content:" << QString::fromUtf8(message).left(600);
+                     << "content:" << QString::fromUtf8(message).left(1500);
 
             QJsonDocument doc = QJsonDocument::fromJson(message);
             if (!doc.isObject()) {
@@ -241,7 +241,7 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             if (username.isEmpty()) {
                 username = obj.value("username").toString();
             }
-            QString usericon = obj.value("usericon").toString();
+            QString usericon = obj.value("user_icon").toString();
             QString text = obj.value("text").toString();
             qint64 timestamp = obj.value("timestamp").toVariant().toLongLong();
 
