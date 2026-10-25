@@ -269,11 +269,12 @@ void ChannelRowNode::paint(QPainter* painter, const QSize& size, const void*)
 
 QskHashValue ChannelRowNode::hash(const void*) const
 {
-    return qHash(m_item.chatId) ^ qHash(m_item.title)
-        ^ qHash(m_item.lastMessage) ^ qHash(m_item.time)
-        ^ qHash(m_item.unreadCount) ^ qHash(m_item.avatarLetter)
-        ^ qHash(static_cast<uint>(m_item.avatarColor.rgb()))
-        ^ qHash(m_item.chatType) ^ qHash(m_item.protocol);
+    // qHashMulti 序贯混合：各项变化不可交换抵消，
+    // 避免 XOR 差分湮灭后 QskPaintedNode 以“hash 相等”跳过重绘
+    return qHashMulti(0, m_item.chatId, m_item.title,
+        m_item.lastMessage, m_item.time, m_item.unreadCount,
+        m_item.avatarLetter, uint(m_item.avatarColor.rgb()),
+        m_item.chatType, m_item.protocol);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -462,7 +463,6 @@ void ChannelListWidget::flushPendingVisibleRefresh()
 void ChannelListWidget::flushCoalescedRefresh()
 {
     if (!isVisible() || !window() || !window()->isExposed()) {
-        m_coalescedRefresh.clear();
         return;
     }
     if (m_coalescedRefresh.isEmpty()) {
@@ -678,9 +678,6 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
             : (qint64)QDateTime::currentSecsSinceEpoch();
         m_items[idx].unreadDelta += item.unreadDelta;
         m_items[idx].syncUnread();
-        if (m_visibleRows.contains(idx)) {
-            queueVisibleRefresh(idx);
-        }
         qreal viewW = viewContentsRect().width();
         if (viewW <= 0) viewW = width();
         sortChannels();
@@ -688,6 +685,11 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
         m_contentView->setSize(QSizeF(viewW, m_items.size() * ROW_HEIGHT));
         update();
         updateVisibleRows();
+        // 排序位移后按身份重取新下标，排队刷的是“新排序后的行”
+        const int newIdx = indexOfChannel(item.protocol, chatId, item.chanId);
+        if (newIdx >= 0 && m_visibleRows.contains(newIdx)) {
+            queueVisibleRefresh(newIdx);
+        }
         return;
     }
     // 兜底：同 chatId 且 protocol 一致（protocol 为空时才允许跨协议匹配）
@@ -719,9 +721,6 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
             : (qint64)QDateTime::currentSecsSinceEpoch();
         m_items[idx].unreadDelta += item.unreadDelta;
         m_items[idx].syncUnread();
-        if (m_visibleRows.contains(idx)) {
-            queueVisibleRefresh(idx);
-        }
         qreal viewW = viewContentsRect().width();
         if (viewW <= 0) viewW = width();
         sortChannels();
@@ -729,6 +728,11 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
         m_contentView->setSize(QSizeF(viewW, m_items.size() * ROW_HEIGHT));
         update();
         updateVisibleRows();
+        // 排序位移后按身份重取新下标，排队刷的是“新排序后的行”
+        const int newIdx = indexOfChannel(item.protocol, chatId, item.chanId);
+        if (newIdx >= 0 && m_visibleRows.contains(newIdx)) {
+            queueVisibleRefresh(newIdx);
+        }
         return;
     }
 
@@ -818,8 +822,10 @@ void ChannelListWidget::markChannelActive(const QString& protocol,
     update();
     updateVisibleRows();
 
-    if (m_visibleRows.contains(idx)) {
-        queueVisibleRefresh(idx);
+    // 排序位移后按身份重取新下标，排队刷的是“新排序后的行”
+    const int newIdx = indexOfChannel(protocol, chatId, QString());
+    if (newIdx >= 0 && m_visibleRows.contains(newIdx)) {
+        queueVisibleRefresh(newIdx);
     }
 }
 
