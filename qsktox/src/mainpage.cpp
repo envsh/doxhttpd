@@ -214,7 +214,7 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     connect(PushHandler::instance(), &PushHandler::pushMessage,
         this, [this](const QByteArray& message, const QString& instance) {
             qDebug() << "[MainPage] push message received, size:" << message.size()
-                     << "content:" << QString::fromUtf8(message).left(1500);
+                     << "content:" << QString::fromUtf8(message).left(1900);
 
             QJsonDocument doc = QJsonDocument::fromJson(message);
             if (!doc.isObject()) {

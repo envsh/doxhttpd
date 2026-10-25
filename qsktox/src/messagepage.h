@@ -51,6 +51,7 @@ private:
     QString m_chatType;
     QString m_protocol;
     QString m_chanId;
+   QString m_channelName;
 };
 
 #endif

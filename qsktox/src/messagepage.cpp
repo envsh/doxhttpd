@@ -42,6 +42,7 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     m_chatType = launchArgs.value("chatType").toString();
     m_protocol = launchArgs.value("protocol").toString();
     m_chanId = launchArgs.value("chanId").toString();
+    m_channelName = channelName;
 
     setAutoLayoutChildren(true);
     auto* layout = new QskLinearBox(Qt::Vertical, this);
@@ -303,6 +304,7 @@ void MessagePage::onNewIntent(const QVariantMap& launchArgs)
     m_chatType = launchArgs.value("chatType").toString();
     m_protocol = launchArgs.value("protocol").toString();
     m_chanId = launchArgs.value("chanId").toString();
+    m_channelName = channelName;
 
     if (m_titleLabel) {
         m_titleLabel->setText(channelName);
@@ -353,7 +355,7 @@ void MessagePage::sendMessage()
         item.sendState = MessageItem::SendSent;
         m_messageList->appendMessage(item);
         MsgDbBridge::insertMessage(m_protocol, m_chatId, item, nullptr, nullptr);
-        MsgDbBridge::upsertChannel(m_protocol, m_chatId, m_chatId,
+        MsgDbBridge::upsertChannel(m_protocol, m_chatId, m_channelName,
             QStringLiteral("online"), false, text, item.time,
             QDateTime::currentSecsSinceEpoch());
         touchChannelInList();
@@ -522,7 +524,7 @@ void MessagePage::onBotDone(int chatId, const QString& protocol, qint64 localId,
     ack.sendState = MessageItem::SendSent;
     m_messageList->appendMessage(ack);
     MsgDbBridge::insertMessage(m_protocol, m_chatId, ack, nullptr, nullptr);
-    MsgDbBridge::upsertChannel(m_protocol, m_chatId, m_chatId,
+    MsgDbBridge::upsertChannel(m_protocol, m_chatId, m_channelName,
         QStringLiteral("online"), false, text, ack.time,
         QDateTime::currentSecsSinceEpoch());
     touchChannelInList();
@@ -576,7 +578,7 @@ void MessagePage::onTtsDone(int chatId, qint64 localId, bool success,
     ack.durationSec = durationSec;
     m_messageList->appendMessage(ack);
     MsgDbBridge::insertMessage(m_protocol, m_chatId, ack, nullptr, nullptr);
-    MsgDbBridge::upsertChannel(m_protocol, m_chatId, m_chatId,
+    MsgDbBridge::upsertChannel(m_protocol, m_chatId, m_channelName,
         QStringLiteral("online"), false, text, ack.time,
         QDateTime::currentSecsSinceEpoch());
     touchChannelInList();
