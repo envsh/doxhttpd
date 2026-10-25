@@ -285,9 +285,9 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/../vendor/gumbo.cmake)
 # 与主程序共用同一份源码（仅去掉 src/main.cpp），保证「被测代码 == 发布代码」。
 # src/main.cpp 承载 Android 前台服务、Go/C++ extras 线程与窗口装配，不进测试目标。
 # 仅桌面端：Android 交叉编译产物无法在宿主机执行测试。
+# 默认构建（make all / cmake --build）不编译测试；仅 `make test` 时才编译并运行。
 if(NOT ANDROID)
-    enable_testing()
-    qt_add_executable(qsktox_test
+    add_executable(qsktox_test EXCLUDE_FROM_ALL
         tests/tst_main.cpp
         ${QSKTOX_SOURCES}
     )
@@ -296,5 +296,10 @@ if(NOT ANDROID)
         Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::Multimedia
         SQLite::SQLite3 CURL::libcurl OpenSSL::SSL OpenSSL::Crypto
         gumbo)
-    add_test(NAME qsktox_test COMMAND qsktox_test)
+    add_custom_target(test
+        DEPENDS qsktox_test
+        COMMAND ${CMAKE_CURRENT_BINARY_DIR}/qsktox_test
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Build qsktox_test and run regressions"
+    )
 endif()

@@ -49,10 +49,13 @@ static void jniKeepScreenOn(bool on) {
 
 namespace {
 
-// timestamp 单位自适应：按数值位数判断 秒 / 毫秒 / 微秒
+// timestamp 单位自适应：按数值位数判断 秒 / 毫秒 / 微秒 / 纳秒
 qint64 epochSeconds(qint64 v)
 {
     const qint64 a = (v < 0) ? -v : v;
+    if (a >= 100000000000000000LL) {    // ≥1e17（约18-19位）：纳秒
+        return v / 1000000000;
+    }
     if (a >= 100000000000000LL) {   // ≥1e14（约16位）：微秒
         return v / 1000000;
     }
