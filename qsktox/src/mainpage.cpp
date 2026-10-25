@@ -245,6 +245,20 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
                 username = obj.value("username").toString();
             }
             QString usericon = obj.value("user_icon").toString();
+            QStringList replyTos;
+            {
+                const QJsonArray rt = obj.value("reply_tos").toArray();
+                for (const auto& v : rt) {
+                    replyTos.append(v.toString());
+                }
+            }
+            QStringList mentions;
+            {
+                const QJsonArray mv = obj.value("mentions").toArray();
+                for (const auto& v : mv) {
+                    mentions.append(v.toString());
+                }
+            }
             QString text = obj.value("text").toString();
             qint64 timestamp = obj.value("timestamp").toVariant().toLongLong();
 
@@ -267,6 +281,8 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             msgItem.sender = username;
             msgItem.content = text;
             msgItem.time = timeStr;
+            msgItem.replyTos = replyTos;
+            msgItem.mentions = mentions;
             msgItem.isSelf = false;
             msgItem.avatarUrl = usericon;
             {

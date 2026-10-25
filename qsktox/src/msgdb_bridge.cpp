@@ -35,6 +35,10 @@ MessageItem itemFromRow(const MessageRow& row)
     it.avatarLetter = msgAvatarLetterFor(it.sender);
     it.avatarColor  = msgAvatarColorFor(it.sender);
     it.dbRowid     = row.rowid;
+    it.replyTos = QString::fromUtf8(row.relates_to_ids.c_str())
+        .split(QLatin1Char(','), Qt::SkipEmptyParts);
+    it.mentions = QString::fromUtf8(row.mentions_text.c_str())
+        .split(QLatin1Char(','), Qt::SkipEmptyParts);
     return it;
 }
 
@@ -53,6 +57,8 @@ MessageRow rowFromItem(const QString& chanid, const MessageItem& it)
     row.media_mime   = it.audioMime.toUtf8().constData();
     row.duration_sec = it.durationSec;
     row.send_state   = (int)it.sendState;
+    row.relates_to_ids = it.replyTos.join(QLatin1Char(',')).toUtf8().constData();
+    row.mentions_text  = it.mentions.join(QLatin1Char(',')).toUtf8().constData();
     if (it.localId != 0) {
         // localId 是进程内自增，跨进程会重复（都从 local_1 开始），
         // 撞上 messages.event_id 的 UNIQUE 约束 → 消息不落库。

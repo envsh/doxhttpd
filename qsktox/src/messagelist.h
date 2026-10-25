@@ -32,6 +32,10 @@ struct MessageItem {
     QString mediaUrl;
     QString audioMime;
     int     durationSec = 0;
+    // 引用/提及：push 载荷字段回程解析（reply_tos=matrix event id 列表，
+    // mentions=@user 列表，元素原文照存；DB 侧逗号 join 存既有 TEXT 列）
+    QStringList replyTos;
+    QStringList mentions;
 };
 
 class MessageRowNode : public QskPaintedNode
