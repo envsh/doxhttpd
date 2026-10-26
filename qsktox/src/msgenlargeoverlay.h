@@ -48,6 +48,7 @@ Q_SIGNALS:
 protected:
     void touchEvent(QTouchEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
+    void wheelEvent(QWheelEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void hoverMoveEvent(QHoverEvent* event) override;
     QSGNode* updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) override;

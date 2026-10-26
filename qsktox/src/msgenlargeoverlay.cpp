@@ -11,6 +11,7 @@
 #include <QEvent>
 #include <QTouchEvent>
 #include <QMouseEvent>
+#include <QWheelEvent>
 #include <QCursor>
 #include <QSGSimpleRectNode>
 
@@ -194,7 +195,9 @@ void MsgEnlargeOverlayNode::paint(QPainter* painter, const QSize& size, const vo
 
 QskHashValue MsgEnlargeOverlayNode::hash(const void*) const
 {
-    return qHash(m_item.content) ^ qHash(m_fontSizeIndex) ^ qHash(int(m_size.width())) ^ qHash(int(m_size.height()));
+    return qHash(m_item.content) ^ qHash(m_fontSizeIndex)
+        ^ qHash(int(m_size.width())) ^ qHash(int(m_size.height()))
+        ^ qHash(int(m_scrollY));
 }
 
 // ── MsgEnlargeOverlay ──
@@ -255,7 +258,17 @@ void MsgEnlargeOverlay::show(const MessageItem& item)
         QTextLayout textLayout(m_item.content, msgFont);
         textLayout.setTextOption(textOption);
         textLayout.beginLayout();
-        while (textLayout.createLine().isValid()) {}
+        {
+            const qreal wrapW = contentW - 20;   // 与 paint 绘制区同宽
+            qreal y = 0;
+            QTextLine line = textLayout.createLine();
+            while (line.isValid()) {
+                line.setLineWidth(wrapW);
+                line.setPosition(QPointF(0, y));
+                y += line.height();
+                line = textLayout.createLine();
+            }
+        }
         textLayout.endLayout();
         qreal textHeight = textLayout.boundingRect().height();
         qreal textAreaH = qMin(textHeight, availableH);
@@ -279,7 +292,17 @@ void MsgEnlargeOverlay::recalcMaxScroll()
     QTextLayout layout(m_item.content, msgFont);
     layout.setTextOption(textOption);
     layout.beginLayout();
-    while (layout.createLine().isValid()) {}
+    {
+        const qreal wrapW = m_textAreaRect.width();
+        qreal y = 0;
+        QTextLine line = layout.createLine();
+        while (line.isValid()) {
+            line.setLineWidth(wrapW);
+            line.setPosition(QPointF(0, y));
+            y += line.height();
+            line = layout.createLine();
+        }
+    }
     layout.endLayout();
 
     auto rect = m_textAreaRect;
@@ -353,6 +376,21 @@ void MsgEnlargeOverlay::mousePressEvent(QMouseEvent* event)
         return;
     }
     handlePress(event->scenePosition());
+    event->accept();
+}
+
+void MsgEnlargeOverlay::wheelEvent(QWheelEvent* event)
+{
+    const qreal dy = event->angleDelta().y() / 2.0;   // 每 notch ≈ 60px
+    if (dy == 0) {
+        event->accept();
+        return;
+    }
+    const qreal newY = qBound(0.0, m_scrollY - dy, m_maxScrollY);
+    if (newY != m_scrollY) {
+        m_scrollY = newY;
+        triggerRepaint();
+    }
     event->accept();
 }
 
