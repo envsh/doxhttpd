@@ -62,8 +62,14 @@ cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcrypto_3.so "$LIB_DIR/"
     --input "$BUILD_DIR/android-qsktox-deployment-settings.json" \
     --output "$APK_DIR" \
     --deployment bundled \
-    --builddir "$BUILD_DIR" \
-    --aux-mode
+     --builddir "$BUILD_DIR" \
+     --aux-mode
+
+# 兜底：libc++_shared.so 只靠 androiddeployqt 的"缺了才补"复制，
+# 构建被中止后残留缺失增量状态时会打出残缺 APK → 显式强制覆盖
+# （NDK 官方：libc++ 非系统库，"libc++_shared.so must be included in the APK"）
+STDCPP="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
+cp -f "$STDCPP" "$LIB_DIR/"
 
 # 复制自定义 Java 源码到 Android 构建目录
 mkdir -p "$APK_DIR/src/main/java"
@@ -143,6 +149,12 @@ APK=$(find "$APK_DIR/build/outputs" -name "*.apk" 2>/dev/null | head -1)
 if [ -n "$APK" ]; then
     echo "=== APK built: $APK ==="
     ls -lh "$APK"
+fi
+
+# 打包完整性校验：libc++_shared.so 必须在 APK 内（缺了装到设备才会炸）
+if [ -n "$APK" ] && ! unzip -l "$APK" | grep -q "lib/arm64-v8a/libc++_shared.so"; then
+    echo "=== ERROR: libc++_shared.so missing from APK (stale gradle output?) ===" >&2
+    exit 1
 fi
 
 find build-android -name *qsktox*.so | xargs ls -lh
