@@ -35,6 +35,7 @@
 #include "phonemonitor.h"
 #include "androidutils.h"
 #include "mozpushsender.h"
+#include "eventpoller.h"
 #include "pagemanager.h"
 #include "msgenlargeoverlay.h"
 #include "rawdatapopup.h"
@@ -485,6 +486,11 @@ int main(int argc, char* argv[]) {
 #endif
 
     MozpushSender::start();
+
+    // curl 泵线程（EventPoller）：头像下载走 EventPoller::addRequest，
+    // 老 qltox 在 mainwindow 构造里启动（mainwindow.cpp:492），qsktox 漏掉
+    // → 头像下载在 guard 处秒败("EventPoller not ready")，永远 identicon。
+    EventPoller::start();
 
     std::thread(gosoMainLoop).detach();
     std::thread(csoMainLoop).detach();
