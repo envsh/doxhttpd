@@ -195,19 +195,23 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
 
     connect(m_channelList, &ChannelListWidget::rowClicked,
         this, [this](int row, const QString& chatName) {
-            QString chatId = m_channelList->chatIdForRow(row);
-            QString chatType = m_channelList->chatTypeForRow(row);
-            QString protocol = m_channelList->protocolForRow(row);
-            QString chanId = m_channelList->chanIdForRow(row);
-            m_channelList->markLocallyRead(protocol, chatId, chanId);
-            pageManager()->open("message",
-                {{"channelIndex", row}, {"channelName", chatName}, {"chatId", chatId},
-                 {"chatType", chatType}, {"protocol", protocol}, {"chanId", chanId}});
+            Q_UNUSED(chatName)
+            openChatForRow(row);
         });
 
     connect(m_channelList, &ChannelListWidget::rowLongPressed,
         this, [this](int row, const QPointF& pos) {
             showChannelMenu(row, pos);
+        });
+
+    // ── 头像单击/长按菜单（长按与单击同菜单，区别于联系人行手势）──
+    connect(m_channelList, &ChannelListWidget::avatarClicked,
+        this, [this](int row, const QPointF& pos) {
+            showContactAvatarMenu(row, pos);
+        });
+    connect(m_channelList, &ChannelListWidget::avatarLongPressed,
+        this, [this](int row, const QPointF& pos) {
+            showContactAvatarMenu(row, pos);
         });
 
     // ── Push message handler ──
@@ -427,6 +431,70 @@ void MainPage::showToast(const QString& msg, int durationMs) {
     m_toastLabel->setText(msg);
     m_toastLabel->setVisible(true);
     m_toastTimer->start(durationMs);
+}
+
+void MainPage::openChatForRow(int row)
+{
+    if (row < 0 || !m_channelList || row >= m_channelList->count()) {
+        return;
+    }
+    QString chatId = m_channelList->chatIdForRow(row);
+    QString chatType = m_channelList->chatTypeForRow(row);
+    QString protocol = m_channelList->protocolForRow(row);
+    QString chanId = m_channelList->chanIdForRow(row);
+    m_channelList->markLocallyRead(protocol, chatId, chanId);
+    pageManager()->open("message",
+        {{"channelIndex", row},
+         {"channelName", m_channelList->channelItem(row).title},
+         {"chatId", chatId}, {"chatType", chatType},
+         {"protocol", protocol}, {"chanId", chanId}});
+}
+
+void MainPage::showContactAvatarMenu(int row, const QPointF& pos)
+{
+    for (auto* old : findChildren<QskMenu*>()) {
+        old->deleteLater();
+    }
+    for (auto* old : findChildren<MenuOverlay*>()) {
+        old->deleteLater();
+    }
+
+    auto* menu = new QskMenu(this);
+    menu->setModal(true);
+    menu->addOption(QskLabelData(QString::fromUtf8("查看资料")));
+    menu->addOption(QskLabelData(QString::fromUtf8("发消息")));
+    menu->addOption(QskLabelData(QString::fromUtf8("置顶")));
+    menu->addOption(QskLabelData(QString::fromUtf8("静音")));
+
+    menu->setOrigin(pos);
+
+    connect(menu, &QskMenu::triggered, this, [this, row](int index) {
+        if (index == 0) {
+            if (row >= 0 && m_channelList && row < m_channelList->count()) {
+                const auto& ch = m_channelList->channelItem(row);
+                QString info = QString::fromUtf8("标题: ") + ch.title +
+                               QString::fromUtf8("\nID: ") + ch.chatId +
+                               QString::fromUtf8("\n最后消息: ") + ch.lastMessage +
+                               QString::fromUtf8("\n时间: ") + ch.time +
+                               QString::fromUtf8("\n未读: ") + QString::number(ch.unreadCount);
+                showToast(info, 4000);
+            } else {
+                showToast(QString::fromUtf8("暂无详细信息"));
+            }
+        } else if (index == 1) {
+            openChatForRow(row);
+        }
+        // index 2/3（置顶/静音）：占位，与行菜单现状一致待做实
+        if (auto* m = qobject_cast<QskMenu*>(QObject::sender())) {
+            m->close();
+        }
+    });
+
+    {
+        auto* overlay = new MenuOverlay(menu);
+        connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
+    }
+    menu->open();
 }
 
 void MainPage::showChannelMenu(int row, const QPointF& pos) {

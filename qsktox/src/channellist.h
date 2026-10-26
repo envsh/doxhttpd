@@ -115,12 +115,15 @@ public:
 Q_SIGNALS:
     void rowClicked(int row, const QString& chatName);
     void rowLongPressed(int row, const QPointF& scenePos);
+    void avatarClicked(int row, const QPointF& scenePos);
+    void avatarLongPressed(int row, const QPointF& scenePos);
 
 protected:
     void geometryChangeEvent(QskGeometryChangeEvent*) override;
 
 private:
     void updateVisibleRows();
+    bool isAvatarHit(int row, const QPointF& contentViewPos) const;
     void startFadeIn();
     // 淡入计时器超时槽（构造时连接一次）
     void onFadeTimeout();

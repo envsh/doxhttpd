@@ -33,6 +33,8 @@ protected:
 
 private:
     void showChannelMenu(int row, const QPointF& pos);
+    void showContactAvatarMenu(int row, const QPointF& pos);
+    void openChatForRow(int row);
     void setActiveTab(int index);
 
     QskTextLabel* m_toastLabel = nullptr;

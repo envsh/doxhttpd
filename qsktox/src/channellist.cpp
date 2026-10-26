@@ -360,6 +360,11 @@ ChannelListWidget::ChannelListWidget(QQuickItem* parent)
             QPointF pos = point.position();
             int row = qFloor(pos.y() / ROW_HEIGHT);
             if (row >= 0 && row < m_items.size()) {
+                // 头像单击：弹头像菜单（与联系人行单击区分）
+                if (isAvatarHit(row, pos)) {
+                    Q_EMIT avatarClicked(row, this->mapToScene(pos));
+                    return;
+                }
                 Q_EMIT rowClicked(row, m_items[row].title);
             }
         });
@@ -369,6 +374,11 @@ ChannelListWidget::ChannelListWidget(QQuickItem* parent)
             QPointF localPos = m_contentView->mapFromScene(pos);
             int row = qFloor(localPos.y() / ROW_HEIGHT);
             if (row >= 0 && row < m_items.size()) {
+                // 头像长按：弹头像菜单（与联系人行长按区分）
+                if (isAvatarHit(row, localPos)) {
+                    Q_EMIT avatarLongPressed(row, pos);
+                    return;
+                }
                 Q_EMIT rowLongPressed(row, pos);
             }
         });
@@ -390,6 +400,17 @@ ChannelListWidget::~ChannelListWidget()
         delete row;
     }
     m_visibleRows.clear();
+}
+
+bool ChannelListWidget::isAvatarHit(int row, const QPointF& contentViewPos) const
+{
+    if (row < 0 || row >= m_items.size()) {
+        return false;
+    }
+    // 与 paint() 同口径：行高 68，avatarX=12，avatarSize=40，avatarY=(68-40)/2
+    const qreal localY = contentViewPos.y() - row * ROW_HEIGHT;
+    return contentViewPos.x() >= 12 && contentViewPos.x() <= 12 + 40
+        && localY >= 14 && localY <= 14 + 40;
 }
 
 void ChannelListWidget::forceClipRefresh()
