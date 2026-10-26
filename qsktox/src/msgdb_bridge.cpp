@@ -224,6 +224,7 @@ QVector<ChannelRecord> loadChannels()
         }
         rec.name            = QString::fromUtf8(r.name.c_str());
         rec.status          = QString::fromUtf8(r.status.c_str());
+        rec.icon            = QString::fromUtf8(r.icon_url.c_str());
         rec.lastMessageText = QString::fromUtf8(r.last_message_text.c_str());
         rec.lastMessageTime = QString::fromUtf8(r.last_message_time.c_str());
         rec.unreadCount     = r.unread_count;
@@ -275,6 +276,26 @@ void upsertChannel(const QString& protocol, const QString& chatId,
     if (!known) {
         list.append(ChanidEntry{ protocol, chanid });
     }
+}
+
+void upsertChannelIcon(const QString& protocol, const QString& chatId,
+                       const QString& icon)
+{
+    if (protocol.isEmpty() || chatId.isEmpty() || icon.isEmpty()) {
+        return;
+    }
+    auto* async = Storage::instance().channelDbAsync();
+    if (!async) {
+        return;
+    }
+    ChannelRow row;
+    // 空串/0/-1 全部受 update_contact_channel 的 CASE 保护 → 冲突时只写 icon_url
+    const QString chanid = resolveChanid(protocol, chatId);
+    row.chanid       = chanid.toUtf8().constData();
+    row.proto_type   = protocol.toUtf8().constData();
+    row.icon_url     = icon.toUtf8().constData();
+    row.is_connected = -1;               // 冲突分支保留旧值（CASE is_connected!=-1）
+    async->update_contact_channel(std::move(row), nullptr);
 }
 
 void incrementUnread(const QString& protocol, const QString& chatId,
@@ -347,6 +368,12 @@ void onIncomingMessage(const QString& protocol, const QString& chatId,
         return;
     }
     ensureChannel(protocol, chatId, name);
+
+    // chan_icon URL 落库（push payload 已带；逐条同值 UPDATE 幂等无害，
+    // 走写队列不阻塞 UI；icon 空值函数自身跳过）
+    if (!item.chanIcon.isEmpty()) {
+        upsertChannelIcon(protocol, chatId, item.chanIcon);
+    }
 
     auto* db = Storage::instance().messageDbAsync();
     if (!db) {

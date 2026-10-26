@@ -6,6 +6,7 @@
 #include <QskPaintedNode.h>
 #include <QQuickItem>
 #include <QColor>
+#include <QImage>
 #include <QVector>
 #include <QMap>
 #include <QPointer>
@@ -30,6 +31,7 @@ struct ChannelItem {
     int     readWatermark = 0;  // 本地已读、DB 尚未确认清零的条数
     int     unreadDelta = 0;    // 本次事件新增的未读条数（推送到达 +1）
     qint64  lastActive = 0;     // 排序键：最后活跃时间（epoch 秒），与 DB last_active 同源
+    QString chanIcon;           // push chan_icon（mxc/直链；进程内缓存 m_iconByKey，重启丢失）
 
     // 徽标 = DB 未读 - 本地已读水位 + 尚未落库的本地增量。
     // DB 是唯一真源：UI 只做乐观显示（点开会话时先隐藏徽标），
@@ -45,13 +47,17 @@ class ChannelRowNode : public QskPaintedNode
 {
 public:
     ChannelRowNode();
-    void setItem(const ChannelItem& item);
+    // 头像由 GUI 线程预解析为 QImage（渲染线程禁止构造/使用 QPixmap）
+    void setItem(const ChannelItem& item, const QImage& avatarImage,
+                 quint32 avatarTick);
     void triggerUpdate(QQuickWindow* window, const QRectF& rect, const QSizeF& size);
     void paint(QPainter*, const QSize&, const void*) override;
     QskHashValue hash(const void*) const override;
 
 private:
     ChannelItem m_item;
+    QImage    m_avatarImage;
+    quint32   m_avatarTick = 0;
 };
 
 class ChannelRowItem : public QQuickItem
@@ -61,13 +67,18 @@ public:
 
     void setChannelData(const ChannelItem& item);
     void setChannelDataNoUpdate(const ChannelItem& item);
+    // 只在 GUI 线程调用：AvatarManager QPixmap→QImage，并递增 avatarTick 参与 hash
+    void refreshAvatar();
 
 protected:
     QSGNode* updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) override;
 
 private:
     ChannelItem m_item;
-    bool m_dirty = true;
+    QImage    m_avatarImage;
+    quint32   m_avatarTick = 0;
+    bool      m_avatarResolved = false;
+    bool      m_dirty = true;
 };
 
 class StaggerFadeAnimator;
@@ -145,6 +156,9 @@ private:
 
     QQuickItem* m_contentView = nullptr;
     QVector<ChannelItem> m_items;
+    // chan_icon 进程内缓存（protocol_chatId → mxc/直链）：populateData 会清空
+    // 重建 m_items，离开列表期间收到的图标靠它回填（选 A 纯内存方案）
+    QHash<QString, QString> m_iconByKey;
     QHash<QString, int> m_chanKeyIndex;
     // chatId → 行号列表（同一 chatId 可能出现在多个 protocol 下）
     QHash<QString, QVector<int>> m_chatIdRows;

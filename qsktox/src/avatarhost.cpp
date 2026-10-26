@@ -51,6 +51,19 @@ void AvatarHost::download(const QString& avatarUrl)
         ALOG_WARN("avatar download skip: empty url");
         return;
     }
+    // 下载门槛（对齐 qltox requestDownload 调用约定，mainwindow.cpp:1472/1671/
+    // 2574/2684/2882 同款）：AvatarManager 内存缓存/在途命中即不再发起请求。
+    // 背景：message 页 Transient（main.cpp:354），每次进会话页面销毁重建 →
+    // populate 逐条 download（messagelist.cpp:1094/868），AvatarHost 只挡在途
+    // （m_pending 完成即清，customEvent:96）→ 此前每次进会话重复 GET 该会话
+    // 全部头像。磁盘 CacheDb 命中依赖会话首次绘制的 get() 把图装回内存后
+    // 生效（与 qltox 相同的顺序语义）。user icon / chan icon 同 mxc 键，
+    // 天然同时生效。成功/失败收尾无需配套改动：
+    //   成功 → store() 已 erase manager 侧 pending（avatar_manager.cpp:96）
+    //   失败 → customEvent 已 removePending（avatarhost.cpp:109-112）
+    if (!AvatarManager::inst().requestDownload(avatarUrl)) {
+        return;
+    }
     if (m_pending.contains(avatarUrl)) {
         return;
     }

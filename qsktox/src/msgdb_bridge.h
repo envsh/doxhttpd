@@ -27,6 +27,7 @@ struct ChannelRecord {
     QString chanId;          // channels 表主键（权威会话标识）
     QString name;
     QString status;
+    QString icon;            // channels.icon_url（chan_icon 持久化；空=无/沿用旧值）
     QString lastMessageText;
     QString lastMessageTime;
     int     unreadCount = 0;
@@ -55,6 +56,12 @@ void ensureChannel(const QString& protocol, const QString& chatId,
                    const QString& name);
 
 QVector<ChannelRecord> loadChannels();
+
+// chan_icon URL 落库（push 随消息送达时调用；空 icon 由函数自身跳过）。
+// 复用 update_contact_channel 列级空值保护：仅 icon_url 非空时覆盖，
+// 其余字段保持旧值（SQL CASE，channel_db.cpp:364）；新会话 insert 首建即带入。
+void upsertChannelIcon(const QString& protocol, const QString& chatId,
+                       const QString& icon);
 
 void upsertChannel(const QString& protocol, const QString& chatId,
                    const QString& name, const QString& status,

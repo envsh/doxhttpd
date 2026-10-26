@@ -323,6 +323,7 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             chItem.chatType = chatType;
             chItem.protocol = protocol;
             chItem.chanId = MsgDbBridge::resolveChanid(protocol, chatId);
+            chItem.chanIcon = msgItem.chanIcon;
             // 排序键：与 DB 侧 updateChannelLastMessage 写入的 last_active 同源同值
             chItem.lastActive = QDateTime::currentSecsSinceEpoch();
 

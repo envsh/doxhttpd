@@ -13,6 +13,8 @@
 #include "virtualcontacts.h"
 #include "msgdb_bridge.h"
 #include "avatarutil.h"
+#include "avatarhost.h"
+#include "avatar_manager.h"
 #include <QDateTime>
 #include <algorithm>
 
@@ -161,9 +163,12 @@ ChannelRowNode::ChannelRowNode()
     setRenderHint( QskPaintedNode::Raster );
 }
 
-void ChannelRowNode::setItem(const ChannelItem& item)
+void ChannelRowNode::setItem(const ChannelItem& item, const QImage& avatarImage,
+                             quint32 avatarTick)
 {
     m_item = item;
+    m_avatarImage = avatarImage;
+    m_avatarTick = avatarTick;
 }
 
 void ChannelRowNode::triggerUpdate(QQuickWindow* window, const QRectF& rect, const QSizeF& size)
@@ -186,9 +191,15 @@ void ChannelRowNode::paint(QPainter* painter, const QSize& size, const void*)
     const int avatarX = 12;
     const int avatarY = (h - avatarSize) / 2;
 
-    drawLetterAvatar(painter,
-        QRectF(avatarX, avatarY, avatarSize, avatarSize),
-        m_item.avatarColor, m_item.avatarLetter);
+    if (!m_item.chanIcon.isEmpty() && !m_avatarImage.isNull()) {
+        // chan_icon 有效：直接绘制 makeThumbnail 生成的圆形图（含透明背景）
+        painter->drawImage(QRectF(avatarX, avatarY, avatarSize, avatarSize),
+                           m_avatarImage);
+    } else {
+        drawLetterAvatar(painter,
+            QRectF(avatarX, avatarY, avatarSize, avatarSize),
+            m_item.avatarColor, m_item.avatarLetter);
+    }
 
     // ── 右侧时间 ──
     const int rightMargin = 12;
@@ -272,7 +283,7 @@ QskHashValue ChannelRowNode::hash(const void*) const
     return qHashMulti(0, m_item.chatId, m_item.title,
         m_item.lastMessage, m_item.time, m_item.unreadCount,
         m_item.avatarLetter, uint(m_item.avatarColor.rgb()),
-        m_item.chatType, m_item.protocol);
+        m_item.chatType, m_item.protocol, m_avatarTick);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -288,14 +299,30 @@ ChannelRowItem::ChannelRowItem(QQuickItem* parent)
 
 void ChannelRowItem::setChannelData(const ChannelItem& item)
 {
+    const bool avatarChanged = (item.chanIcon != m_item.chanIcon);
     m_item = item;
+    if (avatarChanged) {
+        m_avatarResolved = false;
+    }
+    if (!m_avatarResolved) {
+        refreshAvatar();
+        m_avatarResolved = true;
+    }
     m_dirty = true;
     update();
 }
 
 void ChannelRowItem::setChannelDataNoUpdate(const ChannelItem& item)
 {
+    const bool avatarChanged = (item.chanIcon != m_item.chanIcon);
     m_item = item;
+    if (avatarChanged) {
+        m_avatarResolved = false;
+    }
+    if (!m_avatarResolved) {
+        refreshAvatar();
+        m_avatarResolved = true;
+    }
     m_dirty = true;
     // 合并刷新：不触发 update()，避免向上传播到 QskScrollArea
 }
@@ -307,12 +334,29 @@ QSGNode* ChannelRowItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
         node = new ChannelRowNode();
     }
     if (m_dirty) {
-        node->setItem(m_item);
+        node->setItem(m_item, m_avatarImage, m_avatarTick);
         m_dirty = false;
     }
     node->triggerUpdate(window(), QRectF(QPointF(0, 0), QSizeF(width(), height())),
         QSizeF(width(), height()));
     return node;
+}
+
+void ChannelRowItem::refreshAvatar()
+{
+    // 必须在 GUI 线程执行：AvatarManager::get() 返回 QPixmap，且无缓存时
+    // 会生成 identicon（内部构造 QPixmap）。Qt 仅在支持 ThreadedPixmaps 的
+    // 平台允许非 GUI 线程使用 QPixmap，Android/EGLFS 不支持 → null。
+    m_avatarImage = QImage();
+    if (!m_item.chanIcon.isEmpty()) {
+        const QPixmap pm = AvatarManager::inst().get(
+            m_item.chanIcon, m_item.title, -1, 40);
+        if (!pm.isNull()) {
+            m_avatarImage = pm.toImage();
+        }
+    }
+    ++m_avatarTick;
+    m_dirty = true;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -339,6 +383,19 @@ ChannelListWidget::ChannelListWidget(QQuickItem* parent)
 
     connect(this, &QskScrollBox::scrollPosChanged,
         this, &ChannelListWidget::onScrollPosChangedForTracking);
+
+    // chan_icon 下载完成 → 刷新可见行（照 messagelist.cpp 的 user icon 范式）
+    connect(AvatarHost::instance(), &AvatarHost::avatarUpdated, this, [this]() {
+        for (auto it = m_visibleRows.begin(); it != m_visibleRows.end(); ++it) {
+            const int idx = it.key();
+            if (idx < 0 || idx >= m_items.size()
+                || m_items[idx].chanIcon.isEmpty()) {
+                continue;
+            }
+            it.value()->refreshAvatar();
+            queueVisibleRefresh(idx);
+        }
+    });
 
     // 淡入计时器：构造时连接一次（成员槽）。
     // UniqueConnection 只支持成员函数槽（Qt 源码 qobject.h 有断言），
@@ -549,6 +606,19 @@ void ChannelListWidget::populateData()
     sortChannels();
     rebuildIndexes();
 
+    // 回填进程内 chan_icon 缓存（populate 清空 m_items 会丢图标）
+    for (int i = 0; i < m_items.size(); ++i) {
+        const QString key = m_items[i].protocol + QLatin1Char('_') + m_items[i].chatId;
+        if (!m_items[i].chanIcon.isEmpty()) {
+            m_iconByKey[key] = m_items[i].chanIcon;
+        } else if (m_iconByKey.contains(key)) {
+            m_items[i].chanIcon = m_iconByKey[key];
+        }
+        if (!m_items[i].chanIcon.isEmpty()) {
+            AvatarHost::instance()->download(m_items[i].chanIcon);
+        }
+    }
+
     qreal viewW = viewContentsRect().width();
     if (viewW <= 0) viewW = width();
     m_contentView->setSize(QSizeF(viewW, m_items.size() * ROW_HEIGHT));
@@ -592,6 +662,7 @@ void ChannelListWidget::appendDbChannels()
         item.title        = seed;
         item.avatarLetter = QString(seed.isEmpty() ? QChar(' ') : seed.at(0)).toUpper();
         item.avatarColor  = s_palette[qHash(rec.protocol + rec.chatId) % s_paletteSize];
+        item.chanIcon     = rec.icon;    // channels.icon_url → 重启恢复
         item.lastMessage  = rec.lastMessageText;
         item.time         = rec.lastMessageTime;
         item.dbUnreadCount = rec.unreadCount;
@@ -684,6 +755,11 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
         m_items[idx].title = item.title.isEmpty() ? m_items[idx].title : item.title;
         m_items[idx].avatarLetter = item.avatarLetter.isEmpty() ? m_items[idx].avatarLetter : item.avatarLetter;
         m_items[idx].avatarColor = item.avatarColor.isValid() ? item.avatarColor : m_items[idx].avatarColor;
+        if (!item.chanIcon.isEmpty() && item.chanIcon != m_items[idx].chanIcon) {
+            m_items[idx].chanIcon = item.chanIcon;
+            m_iconByKey[key] = item.chanIcon;
+            AvatarHost::instance()->download(item.chanIcon);
+        }
         m_items[idx].lastMessage = item.lastMessage;
         m_items[idx].time = item.time;
         m_items[idx].chatType = item.chatType.isEmpty() ? m_items[idx].chatType : item.chatType;
@@ -735,6 +811,11 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
         if (!item.chanId.isEmpty()) {
             m_items[idx].chanId = item.chanId;
         }
+        if (!item.chanIcon.isEmpty() && item.chanIcon != m_items[idx].chanIcon) {
+            m_items[idx].chanIcon = item.chanIcon;
+            m_iconByKey[m_items[idx].protocol + QLatin1Char('_') + chatId] = item.chanIcon;
+            AvatarHost::instance()->download(item.chanIcon);
+        }
         m_items[idx].lastActive = item.lastActive > 0
             ? item.lastActive
             : (qint64)QDateTime::currentSecsSinceEpoch();
@@ -765,6 +846,10 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
         }
     }
     ChannelItem newItem = item;
+    if (!newItem.chanIcon.isEmpty()) {
+        m_iconByKey[newItem.protocol + QLatin1Char('_') + newItem.chatId] = newItem.chanIcon;
+        AvatarHost::instance()->download(newItem.chanIcon);
+    }
     if (newItem.dbUnreadCount == 0 && newItem.unreadCount > 0
         && newItem.readWatermark == 0 && newItem.unreadDelta == 0) {
         newItem.dbUnreadCount = newItem.unreadCount;
