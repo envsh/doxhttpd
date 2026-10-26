@@ -36,6 +36,22 @@ struct MessageItem {
     // mentions=@user 列表，元素原文照存；DB 侧逗号 join 存既有 TEXT 列）
     QStringList replyTos;
     QStringList mentions;
+    // == 接收字段（纯内存，push 原始载荷保真记录；重启/翻历史重载后不保留
+    //    → 查看原始数据显示 "—"。不加 DB 列，data 列语义保留给正文/FTS） ==
+    QString protocol;
+    QString chatId;
+    QString chatName;
+    QString chatType;
+    QString accountId;
+    QString accountName;
+    QString username;    // push username 原文（sender 为 usernick 为空时的折叠值）
+    QString userId;      // push userid（发送者 id）
+    QString usernick;    // push usernick 原文
+    QString chanIcon;
+    QString msgType;     // push msgtype
+    QString msgFormat;   // push msgformat
+    QString msgId;       // push msgid（Matrix $id 原文）
+    qint64  timestampMs = 0;  // push timestamp 原值（含纳秒档）
 };
 
 class MessageRowNode : public QskPaintedNode

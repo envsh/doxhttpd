@@ -282,6 +282,21 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
                 : QString(chatName.at(0));
 
             MessageItem msgItem;
+            // 接收字段保真（详见 messagelist.h 注释：纯内存，不持久化）
+            msgItem.protocol    = protocol;
+            msgItem.chatId      = chatId;
+            msgItem.chatName    = chatName;
+            msgItem.chatType    = chatType;
+            msgItem.accountId   = accountId;
+            msgItem.accountName = obj.value("account_name").toString();
+            msgItem.username    = obj.value("username").toString();
+            msgItem.userId      = userId;
+            msgItem.usernick    = obj.value("usernick").toString();
+            msgItem.chanIcon    = obj.value("chan_icon").toString();
+            msgItem.msgType     = obj.value("msgtype").toString();
+            msgItem.msgFormat   = obj.value("msgformat").toString();
+            msgItem.msgId       = obj.value("msgid").toString();
+            msgItem.timestampMs = timestamp;
             msgItem.sender = username;
             msgItem.content = text;
             msgItem.time = timeStr;

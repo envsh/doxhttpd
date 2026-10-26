@@ -37,6 +37,7 @@
 #include "mozpushsender.h"
 #include "pagemanager.h"
 #include "msgenlargeoverlay.h"
+#include "rawdatapopup.h"
 #include "messagepage.h"
 #include "storage.h"
 
@@ -62,7 +63,8 @@ protected:
             if (ke->key() == Qt::Key_Back) {
                 event->accept();
 
-                // 先检查是否有可见的 MsgEnlargeOverlay
+                // 先检查是否有可见的 MsgEnlargeOverlay / RawDataPopup：
+                // back 键应关闭弹出层，而不是回退页面
                 if (auto* page = qobject_cast<MessagePage*>(
                         m_pageManager->currentPage())) {
                     auto overlays = page->findChildren<MsgEnlargeOverlay*>();
@@ -70,6 +72,14 @@ protected:
                         if (o->isVisible()) {
                             Q_EMIT o->closed();
                             o->deleteLater();
+                            return true;
+                        }
+                    }
+                    // 原始数据弹窗：back = 关闭弹窗（同消息放大层惯例）
+                    auto popups = page->findChildren<RawDataPopup*>();
+                    for (auto* p : popups) {
+                        if (p->isVisible()) {
+                            p->close();
                             return true;
                         }
                     }

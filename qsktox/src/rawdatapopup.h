@@ -21,6 +21,7 @@ public:
 
 protected:
     void updateLayout() override;
+    void keyPressEvent(QKeyEvent* event) override;
 
 private:
     RawDataPopup(const MessageItem& item, QQuickItem* parent);

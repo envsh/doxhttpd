@@ -16,6 +16,7 @@
 
 #include <QClipboard>
 #include <QGuiApplication>
+#include <QKeyEvent>
 #include <QQuickItem>
 #include <QQuickWindow>
 #include <QTimer>
@@ -150,6 +151,18 @@ void RawDataPopup::updateLayout()
 {
     updateGeometry();
     m_layout->setGeometry(layoutRect());
+}
+
+void RawDataPopup::keyPressEvent(QKeyEvent* event)
+{
+    // Esc（桌面）自关闭，防止沿焦点链冒泡触发页面回退。
+    // Android back 键在 main.cpp BackButtonFilter（应用级前置 filter）处理。
+    if (event->key() == Qt::Key_Escape) {
+        close();
+        event->accept();
+        return;
+    }
+    QskPopup::keyPressEvent(event);
 }
 
 void RawDataPopup::updateGeometry()

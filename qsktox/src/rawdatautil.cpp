@@ -71,6 +71,24 @@ QString buildItemSection(const MessageItem& item)
     text += line("mediaUrl", item.mediaUrl);
     text += line("audioMime", item.audioMime);
     text += numberLine("durationSec", item.durationSec);
+
+    // == 接收字段：push 载荷保真记录（纯内存，重启/翻历史后为空显示 "—"） ==
+    text += QString::fromUtf8("\n== 接收字段 ==\n");
+    text += line("protocol", item.protocol);
+    text += line("chat_id", item.chatId);
+    text += line("chat_name", item.chatName);
+    text += line("chat_type", item.chatType);
+    text += line("account_id", item.accountId);
+    text += line("account_name", item.accountName);
+    text += line("username", item.username);
+    text += line("userid", item.userId);
+    text += line("usernick", item.usernick);
+    text += line("user_icon", item.avatarUrl);
+    text += line("chan_icon", item.chanIcon);
+    text += line("msgtype", item.msgType);
+    text += line("msgformat", item.msgFormat);
+    text += line("msgid", item.msgId);
+    text += numberLine("timestamp", item.timestampMs);
     return text;
 }
 
