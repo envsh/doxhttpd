@@ -111,6 +111,33 @@ void androidRequestBluetoothNamePermission()
     });
 }
 
+void shareText(const QString& text)
+{
+    QNativeInterface::QAndroidApplication::runOnAndroidMainThread([text]() {
+        QJniObject ctx = QNativeInterface::QAndroidApplication::context();
+        if (!ctx.isValid()) {
+            return;
+        }
+        QJniObject intent("android/content/Intent");
+        intent.callObjectMethod("setAction",
+            "(Ljava/lang/String;)Landroid/content/Intent;",
+            QJniObject::fromString("android.intent.action.SEND").object());
+        intent.callObjectMethod("setType",
+            "(Ljava/lang/String;)Landroid/content/Intent;",
+            QJniObject::fromString("text/plain").object());
+        intent.callObjectMethod("putExtra",
+            "(Ljava/lang/String;Ljava/lang/CharSequence;)Landroid/content/Intent;",
+            QJniObject::fromString("android.intent.extra.TEXT").object(),
+            QJniObject::fromString(text).object());
+        QJniObject chooser = QJniObject::callStaticObjectMethod(
+            "android/content/Intent", "createChooser",
+            "(Landroid/content/Intent;Ljava/lang/CharSequence;)Landroid/content/Intent;",
+            intent.object(), QJniObject::fromString("分享").object());
+        ctx.callMethod<void>("startActivity",
+            "(Landroid/content/Intent;)V", chooser.object());
+    });
+}
+
 #else
 
 QString androidDeviceName()
@@ -120,6 +147,11 @@ QString androidDeviceName()
 
 void androidRequestBluetoothNamePermission()
 {
+}
+
+void shareText(const QString& text)
+{
+    Q_UNUSED(text)
 }
 
 #endif

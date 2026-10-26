@@ -7,5 +7,6 @@ void showAndroidToast(const QString& message);
 void installLogHandler();
 QString androidDeviceName();
 void androidRequestBluetoothNamePermission();
+void shareText(const QString& text);
 
 #endif

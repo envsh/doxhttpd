@@ -98,8 +98,14 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
 
             auto* menu = new QskMenu(this);
             menu->setModal(true);
-            menu->addOption(QskLabelData(QString::fromUtf8("复制")));
-            menu->addOption(QskLabelData(QString::fromUtf8("转发")));
+            const int copyOption = menu->addOption(
+                QskLabelData(QString::fromUtf8("复制")));
+#ifdef Q_OS_ANDROID
+            const int shareOption = menu->addOption(
+                QskLabelData(QString::fromUtf8("分享")));
+#endif
+            const int forwardOption = menu->addOption(
+                QskLabelData(QString::fromUtf8("转发")));
             menu->addOption(QskLabelData(QString::fromUtf8("回复")));
             menu->addSeparator();
             const int rawDataOption = menu->addOption(
@@ -110,7 +116,30 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             menu->setOrigin(pos);
 
             connect(menu, &QskMenu::triggered, this,
-                [this, row, rawDataOption](int index) {
+                [this, row, rawDataOption, copyOption, forwardOption
+#ifdef Q_OS_ANDROID
+                    , shareOption
+#endif
+                ](int index) {
+                if (index == copyOption) {
+                    // 全平台：Qt6 剪贴板在 Linux 桌面和 Android 均有效
+                    QGuiApplication::clipboard()->setText(
+                        m_messageList->messageItem(row).content);
+                    showAndroidToast(QString::fromUtf8("已复制"));
+                }
+#ifdef Q_OS_ANDROID
+                if (index == shareOption) {
+                    // Android only：ACTION_SEND 系统分享面板
+                    shareText(m_messageList->messageItem(row).content);
+                }
+#endif
+                if (index == forwardOption) {
+                    // 全平台：内容放进输入框，聚焦键盘后由用户编辑发送
+                    if (m_input) {
+                        m_input->setText(m_messageList->messageItem(row).content);
+                        m_input->setFocus(true);
+                    }
+                }
                 if (index == rawDataOption) {
                     RawDataPopup::show(this, m_messageList->messageItem(row));
                 }
