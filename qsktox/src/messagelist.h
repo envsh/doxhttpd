@@ -122,6 +122,7 @@ Q_SIGNALS:
     void rowLongPressed(int row, const QPointF& scenePos);
     void rowDoubleClicked(int row);
     void avatarClicked(int row, const QPointF& pos);
+    void avatarLongPressed(int row, const QPointF& scenePos);
     void retryRequested(int row);
 
 protected:
@@ -132,6 +133,7 @@ private:
 
     int rowFromPosition(const QPointF& localPos) const;
     int rowFromContentY(qreal contentY) const;
+    bool isAvatarHit(int row, qreal contentX, qreal contentY) const;
     void updateVisibleRows();
     void onScrollPosChangedForTracking();
     void flushPendingVisibleRefresh();

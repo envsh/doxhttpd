@@ -27,6 +27,7 @@ protected:
 
 private:
     void openChatMenu(QskPushButton* optionsBtn);
+    void openAvatarMenu(int row, const QPointF& pos);
     void sendMessage();
     void sendToVirtualBot(int kind, qint64 localId, const QString& text);
     void onBotDone(int chatId, const QString& protocol, qint64 localId,

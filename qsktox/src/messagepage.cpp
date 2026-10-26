@@ -78,55 +78,14 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     MsgDbBridge::ensureChannel(m_protocol, m_chatId, channelName);
     m_messageList->setChannel(m_protocol, chatId, m_chanId);
 
-    // ── Avatar click menu ──
+    // ── Avatar click/long-press menu（长按与单击同菜单）──
     connect(m_messageList, &MessageListWidget::avatarClicked,
         this, [this](int row, const QPointF& pos) {
-            for (auto* old : findChildren<QskMenu*>())
-                old->deleteLater();
-            for (auto* old : findChildren<MenuOverlay*>())
-                old->deleteLater();
-
-            auto* menu = new QskMenu(this);
-            menu->setModal(true);
-            menu->addOption(QskLabelData(QString::fromUtf8("@提及")));
-            menu->addOption(QskLabelData(QString::fromUtf8("发消息")));
-            menu->addOption(QskLabelData(QString::fromUtf8("复制用户名")));
-            menu->addSeparator();
-            menu->addOption(QskLabelData(QString::fromUtf8("查看资料")));
-
-            menu->setOrigin(pos);
-
-            connect(menu, &QskMenu::triggered, this, [this, row](int index) {
-                const MessageItem& mi = m_messageList->messageItem(row);
-                const QString sender = mi.sender;
-                if (index == 0) {
-                    if (m_input && !sender.isEmpty()) {
-                        m_input->setText(m_input->text() + "@" + sender + " ");
-                        m_input->setFocus(true);
-                    }
-                } else if (index == 1) {
-                    if (m_input && !sender.isEmpty()) {
-                        m_input->setText("@" + sender + " ");
-                        m_input->setFocus(true);
-                    } else {
-                        showAndroidToast(QString::fromUtf8("发消息功能暂未实现"));
-                    }
-                } else if (index == 2) {
-                    QGuiApplication::clipboard()->setText(sender);
-                    showAndroidToast(QString::fromUtf8("已复制"));
-                } else if (index == 3) {
-                    showAndroidToast(QString::fromUtf8("用户资料 - ") + sender);
-                }
-                if (auto* m = qobject_cast<QskMenu*>(QObject::sender()))
-                    m->close();
-            });
-
-            {
-                auto* overlay = new MenuOverlay(menu);
-                connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
-            }
-
-            menu->open();
+            openAvatarMenu(row, pos);
+        });
+    connect(m_messageList, &MessageListWidget::avatarLongPressed,
+        this, [this](int row, const QPointF& pos) {
+            openAvatarMenu(row, pos);
         });
 
     // ── Long press menu ──
@@ -234,6 +193,56 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
                     row, MessageItem::SendSending, reqseq, QString());
             }
         });
+}
+
+void MessagePage::openAvatarMenu(int row, const QPointF& pos)
+{
+    for (auto* old : findChildren<QskMenu*>())
+        old->deleteLater();
+    for (auto* old : findChildren<MenuOverlay*>())
+        old->deleteLater();
+
+    auto* menu = new QskMenu(this);
+    menu->setModal(true);
+    menu->addOption(QskLabelData(QString::fromUtf8("@提及")));
+    menu->addOption(QskLabelData(QString::fromUtf8("发消息")));
+    menu->addOption(QskLabelData(QString::fromUtf8("复制用户名")));
+    menu->addSeparator();
+    menu->addOption(QskLabelData(QString::fromUtf8("查看资料")));
+
+    menu->setOrigin(pos);
+
+    connect(menu, &QskMenu::triggered, this, [this, row](int index) {
+        const MessageItem& mi = m_messageList->messageItem(row);
+        const QString sender = mi.sender;
+        if (index == 0) {
+            if (m_input && !sender.isEmpty()) {
+                m_input->setText(m_input->text() + "@" + sender + " ");
+                m_input->setFocus(true);
+            }
+        } else if (index == 1) {
+            if (m_input && !sender.isEmpty()) {
+                m_input->setText("@" + sender + " ");
+                m_input->setFocus(true);
+            } else {
+                showAndroidToast(QString::fromUtf8("发消息功能暂未实现"));
+            }
+        } else if (index == 2) {
+            QGuiApplication::clipboard()->setText(sender);
+            showAndroidToast(QString::fromUtf8("已复制"));
+        } else if (index == 3) {
+            showAndroidToast(QString::fromUtf8("用户资料 - ") + sender);
+        }
+        if (auto* m = qobject_cast<QskMenu*>(QObject::sender()))
+            m->close();
+    });
+
+    {
+        auto* overlay = new MenuOverlay(menu);
+        connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
+    }
+
+    menu->open();
 }
 
 void MessagePage::openChatMenu(QskPushButton* optionsBtn)

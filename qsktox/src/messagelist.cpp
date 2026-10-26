@@ -569,21 +569,10 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
                 Q_EMIT retryRequested(row);
                 return;
             }
-            if (!m_items[row].isSelf) {
-                const qreal avatarX = SIDE_MARGIN;
-                const qreal avatarSize = AVATAR_SIZE;
-                // 与 paint() 同口径：头像在气泡区域内垂直居中，
-                // bubbleHeight = 行高 - NAME_HEIGHT - TIME_HEIGHT - 4
-                const qreal bubbleH =
-                    m_rowHeights[row] - NAME_HEIGHT - TIME_HEIGHT - 4;
-                qreal avatarY = m_rowYOffsets[row] + NAME_HEIGHT
-                    + (bubbleH - avatarSize) / 2.0;
-                if (avatarY < NAME_HEIGHT + 2) avatarY = NAME_HEIGHT + 2;
-                if (localPos.x() >= avatarX && localPos.x() <= avatarX + avatarSize &&
-                    localPos.y() >= avatarY && localPos.y() <= avatarY + avatarSize) {
-                    Q_EMIT avatarClicked(row, mapToScene(localPos));
-                    return;
-                }
+            if (!m_items[row].isSelf
+                && isAvatarHit(row, localPos.x(), localPos.y())) {
+                Q_EMIT avatarClicked(row, mapToScene(localPos));
+                return;
             }
             Q_EMIT rowClicked(row);
         });
@@ -606,6 +595,15 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
             QPointF localPos = mapFromScene(pos);
             int row = rowFromPosition(localPos);
             if (row >= 0 && row < m_items.size()) {
+                const auto vr = viewContentsRect();
+                const qreal contentX = localPos.x() - vr.left() + 0.0;
+                const qreal contentY = localPos.y() - vr.top()
+                    + scrollPos().y();
+                // 长按头像：弹头像菜单（与单击头像同款行为）
+                if (isAvatarHit(row, contentX, contentY)) {
+                    Q_EMIT avatarLongPressed(row, pos);
+                    return;
+                }
                 Q_EMIT rowLongPressed(row, pos);
             }
         });
@@ -1250,6 +1248,21 @@ void MessageListWidget::geometryChangeEvent(QskGeometryChangeEvent* event)
         }
         m_rebuildingLayout = false;
     }
+}
+
+bool MessageListWidget::isAvatarHit(int row, qreal contentX, qreal contentY) const
+{
+    if (row < 0 || row >= m_items.size() || m_items[row].isSelf) {
+        return false;
+    }
+    // 与 paint() 同口径：头像在气泡区域内垂直居中
+    const qreal bubbleH = m_rowHeights[row] - NAME_HEIGHT - TIME_HEIGHT - 4;
+    const qreal avatarX = SIDE_MARGIN;
+    const qreal avatarSize = AVATAR_SIZE;
+    qreal avatarY = m_rowYOffsets[row] + NAME_HEIGHT + (bubbleH - avatarSize) / 2.0;
+    if (avatarY < NAME_HEIGHT + 2) avatarY = NAME_HEIGHT + 2;
+    return contentX >= avatarX && contentX <= avatarX + avatarSize
+        && contentY >= avatarY && contentY <= avatarY + avatarSize;
 }
 
 int MessageListWidget::rowFromPosition(const QPointF& localPos) const
