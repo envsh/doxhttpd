@@ -52,15 +52,25 @@ struct MessageItem {
     QString msgFormat;   // push msgformat
     QString msgId;       // push msgid（Matrix $id 原文）
     qint64  timestampMs = 0;  // push timestamp 原值（含纳秒档）
+
+    // == 媒体展示字段（纯内存，重启退化占位，与接收字段同口径）==
+    // 对位 qltox ChatElement（chatview.h:93 mediaWidth 等），不落 DB。
+    QString mediaMime;                // image/gif 识别、file 型 mimetype
+    QString fileName;                 // file 型文件名
+    QString fileSizeStr;              // 人工可读大小（qltox formatFileSize 口径）
+    qint64  mediaWidth = 0;           // 图片/视频原始宽
+    qint64  mediaHeight = 0;          // 原始高
+    QString localPath;                // 本地可读源（P2 真绘唯一前提）
 };
 
 class MessageRowNode : public QskPaintedNode
 {
 public:
     MessageRowNode();
-    // 头像由 GUI 线程预解析为 QImage（渲染线程禁止构造/使用 QPixmap）
+    // 头像与媒体本地源均由 GUI 线程预解码为 QImage（渲染线程禁 QPixmap）
     void setItem(const MessageItem& item, const QImage& avatarImage,
-                 quint32 avatarTick);
+                 quint32 avatarTick, const QImage& mediaImage,
+                 quint32 mediaTick);
     void triggerUpdate(QQuickWindow* window, const QRectF& rect, const QSizeF& size);
     void paint(QPainter*, const QSize&, const void*) override;
     QskHashValue hash(const void*) const override;
@@ -69,6 +79,8 @@ private:
     MessageItem m_item;
     QImage m_avatarImage;
     quint32 m_avatarTick = 0;
+    QImage m_mediaImage;     // P2 本地媒体源预解码（GUI 线程已就绪的 QImage）
+    quint32 m_mediaTick = 0;
     QRectF m_statusRect;
 public:
     // header 右上角三钮锚点（空操作，本次仅绘制；后续补点击时直接消费）
@@ -88,6 +100,10 @@ public:
     // 并递增 avatarTick 参与 hash，保证下载完成后精准重绘。
     void refreshAvatar();
 
+    // P2 本地媒体源解码：localPath 在 GUI 线程 QImageReader 解码（有变化时调用），
+    // 递增 mediaTick 参与 hash；无本地源时 mediaImage 置空 → paint 走占位。
+    void refreshMedia();
+
 protected:
     QSGNode* updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) override;
 
@@ -95,6 +111,9 @@ private:
     MessageItem m_item;
     QImage m_avatarImage;
     quint32 m_avatarTick = 0;
+    QImage m_mediaImage;
+    QString m_mediaSrc;
+    quint32 m_mediaTick = 0;
     bool m_avatarResolved = false;
     bool m_dirty = true;
 };

@@ -17,6 +17,7 @@
 #include <QTimer>
 #include <QTextLayout>
 #include <QTextOption>
+#include <QImageReader>
 
 static constexpr qreal MIN_ROW_HEIGHT = 60;
 static constexpr qreal NAME_HEIGHT = 20;
@@ -34,6 +35,104 @@ static constexpr qreal HDR_BTN_GAP = 4;
 // 显示条件镜像 qltox chatview（chatview.cpp:1203-1214/1295-1306）：
 // audio 类卡片整组不画；🔊 仅正文非空时画（m_speakRect 置空 Rect）。
 // 左→右依 qltox 口径：source | translate | speak（speak 最贴行右缘）。
+
+// ── 媒体消息分类（镜像 qltox etype 派发，chatview.cpp:4074/:2986 口径）──
+enum class MsgMediaType { Unknown, Text, Image, Gif, Video, Audio, File };
+
+static MsgMediaType msgMediaTypeOf(const MessageItem& item) {
+    if (item.isAudio) {
+        return MsgMediaType::Audio;
+    }
+    // push msgtype 兼容 "m.image"（Matrix CS）与 "image"（简化键）两形
+    QString t = item.msgType;
+    if (t.startsWith(QString::fromUtf8("m."))) {
+        t = t.mid(2);
+    }
+    if (t == QString::fromUtf8("image")) {
+        const bool gif = item.mediaMime.contains(QString::fromUtf8("image/gif"),
+            Qt::CaseInsensitive)
+            || item.mediaUrl.contains(QString::fromUtf8(".gif"), Qt::CaseInsensitive);
+        return gif ? MsgMediaType::Gif : MsgMediaType::Image;
+    }
+    if (t == QString::fromUtf8("video")) {
+        return MsgMediaType::Video;
+    }
+    if (t == QString::fromUtf8("file")) {
+        return MsgMediaType::File;
+    }
+    return MsgMediaType::Text;
+}
+
+struct MediaDisplayMetrics {
+    MsgMediaType type = MsgMediaType::Unknown;
+    qreal bubbleW = 0.0;   // 媒体主体框宽（真绘图区 或 占位框）
+    qreal bubbleH = 0.0;   // 主体框高
+    bool  hasLocal = false;// localPath 预解码可用 → paint drawImage
+    QString label;         // 占位标签：图片/GIF/视频/语音消息/文件
+    QString subLabel;      // 视频/语音=时长 mm:ss；文件=大小
+};
+
+static QString mediaDurationLabel(int durationSec) {
+    return QString::asprintf("%d:%02d", durationSec / 60, durationSec % 60);
+}
+
+static MediaDisplayMetrics measureMedia(const MessageItem& item, qreal availW) {
+    MediaDisplayMetrics m;
+    m.type = msgMediaTypeOf(item);
+    if (m.type == MsgMediaType::Unknown || m.type == MsgMediaType::Text) {
+        return m;
+    }
+    const qreal maxW = availW * 70.0 / 100.0;   // qltox width()*70/100 口径
+    switch (m.type) {
+    case MsgMediaType::Image:
+    case MsgMediaType::Gif: {
+        // Image/Gif：等比主体框（有原始宽高按比例，无则默认 4:3）
+        qreal w = maxW;
+        qreal h;
+        if (item.mediaWidth > 0 && item.mediaHeight > 0) {
+            h = w * qreal(item.mediaHeight) / qreal(item.mediaWidth);
+        } else {
+            h = w * 3.0 / 4.0;
+        }
+        if (h < 60.0) { h = 60.0; }
+        if (h > 240.0) { h = 240.0; }
+        m.bubbleW = w;
+        m.bubbleH = h;
+        m.label = (m.type == MsgMediaType::Gif)
+            ? QString::fromUtf8("GIF 🖼") : QString::fromUtf8("图片 🖼");
+        break;
+    }
+    case MsgMediaType::Video: {
+        m.bubbleW = (maxW < 220.0) ? maxW : 220.0;
+        m.bubbleH = 56.0;
+        m.label = QString::fromUtf8("视频 ▶");
+        if (item.durationSec > 0) {
+            m.subLabel = mediaDurationLabel(item.durationSec);
+        }
+        break;
+    }
+    case MsgMediaType::Audio: {
+        m.bubbleW = (maxW < 200.0) ? maxW : 200.0;
+        m.bubbleH = 56.0;
+        m.label = QString::fromUtf8("语音消息 🔊");
+        m.subLabel = mediaDurationLabel(item.durationSec);
+        break;
+    }
+    case MsgMediaType::File: {
+        m.bubbleW = (maxW < 240.0) ? maxW : 240.0;
+        m.bubbleH = 64.0;
+        m.label = QString::fromUtf8("文件 📄");
+        if (!item.fileName.isEmpty()) {
+            m.label = item.fileName + QString::fromUtf8(" 📄");
+        }
+        m.subLabel = item.fileSizeStr;
+        break;
+    }
+    default:
+        break;
+    }
+    return m;
+}
 static void msgDrawHeaderButtons(QPainter* painter, MessageRowNode* node,
                                  qreal rightEdge, const MessageItem& item) {
     node->m_sourceRect = QRectF();
@@ -268,9 +367,21 @@ static qreal calcRowHeight(const MessageItem& item, qreal availableWidth)
     const qreal maxBubbleWidth = availableWidth * 85.0 / 100.0;
     const qreal textWidth = maxBubbleWidth - BUBBLE_PADDING_H * 2;
 
-    const MessageTextMetrics tm = measureMessageText(item.content, msgFont, textWidth);
-    const qreal textHeight = tm.height;
-    qreal bubbleHeight = textHeight + BUBBLE_PADDING_V * 2;
+    const MediaDisplayMetrics mm = measureMedia(item, availableWidth);
+    qreal bubbleHeight;
+    if (mm.type != MsgMediaType::Unknown && mm.type != MsgMediaType::Text) {
+        bubbleHeight = mm.bubbleH + BUBBLE_PADDING_V * 2;
+        // caption（=content 非空时）作媒体下正文行，计入行高
+        if (!item.content.isEmpty()) {
+            const MessageTextMetrics cm =
+                measureMessageText(item.content, msgFont, mm.bubbleW);
+            bubbleHeight += cm.height + BUBBLE_PADDING_V;
+        }
+    } else {
+        const MessageTextMetrics tm =
+            measureMessageText(item.content, msgFont, textWidth);
+        bubbleHeight = tm.height + BUBBLE_PADDING_V * 2;
+    }
     if (bubbleHeight < 36) {
         bubbleHeight = 36;
     }
@@ -304,16 +415,45 @@ MessageRowNode::MessageRowNode()
 }
 
 void MessageRowNode::setItem(const MessageItem& item,
-                             const QImage& avatarImage, quint32 avatarTick)
+                             const QImage& avatarImage, quint32 avatarTick,
+                             const QImage& mediaImage, quint32 mediaTick)
 {
     m_item = item;
     m_avatarImage = avatarImage;
     m_avatarTick = avatarTick;
+    m_mediaImage = mediaImage;
+    m_mediaTick = mediaTick;
 }
 
 void MessageRowNode::triggerUpdate(QQuickWindow* window, const QRectF& rect, const QSizeF& size)
 {
     update(window, rect, size, nullptr);
+}
+
+// caption/正文统一换行绘制助手（paint 内两处媒体 caption 复用；
+// 渲染线程安全，仅 QTextLayout/drawText，无 QPixmap）
+static void drawWrappedText(QPainter* painter, const QString& text, const QFont& font,
+                            const QRectF& rect)
+{
+    QTextOption option;
+    option.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    QTextLayout layout(text, font);
+    layout.setTextOption(option);
+    layout.beginLayout();
+    {
+        qreal ty = 0.0;
+        while (true) {
+            QTextLine line = layout.createLine();
+            if (!line.isValid()) {
+                break;
+            }
+            line.setLineWidth(rect.width());
+            line.setPosition(QPointF(0.0, ty));
+            ty += line.height();
+        }
+    }
+    layout.endLayout();
+    layout.draw(painter, rect.topLeft());
 }
 
 void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
@@ -353,17 +493,36 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
         bubbleWidth = 40;
     }
 
-    // 行数和高度: 与布局端一致(measureMessageText)
+    const MediaDisplayMetrics mm = measureMedia(m_item, w);
+    const bool isMedia = (mm.type != MsgMediaType::Unknown
+                          && mm.type != MsgMediaType::Text);
+
+    // 行数和高度: 与布局端一致(calcRowHeight 同款双口径)
     const qreal textHeight = tm.height;
-    qreal bubbleHeight = textHeight + BUBBLE_PADDING_V * 2;
+    qreal bubbleHeight;
+    if (isMedia) {
+        bubbleHeight = mm.bubbleH + BUBBLE_PADDING_V * 2;
+        if (!displayContent.isEmpty()) {
+            const MessageTextMetrics cm =
+                measureMessageText(displayContent, msgFont, mm.bubbleW);
+            bubbleHeight += cm.height + BUBBLE_PADDING_V;
+        }
+    } else {
+        bubbleHeight = textHeight + BUBBLE_PADDING_V * 2;
+    }
     if (bubbleHeight < 36) {
         bubbleHeight = 36;
     }
 
     if (m_item.isSelf) {
         // ── 自己的消息：右侧对齐，蓝色气泡 ──
-        qreal bubbleX = w - bubbleWidth - SIDE_MARGIN;
+        qreal bubbleX;
         qreal bubbleY = NAME_HEIGHT;
+        if (isMedia) {
+            bubbleX = w - (mm.bubbleW + BUBBLE_PADDING_H * 2) - SIDE_MARGIN;
+        } else {
+            bubbleX = w - bubbleWidth - SIDE_MARGIN;
+        }
 
         // 名字（右上角让出三钮区域，超宽省略）
         painter->setPen(QColor("#888"));
@@ -386,32 +545,62 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
         painter->setBrush(QColor("#1565C0"));
         painter->setPen(Qt::NoPen);
         QPainterPath bubblePath;
-        bubblePath.addRoundedRect(bubbleX, bubbleY, bubbleWidth, bubbleHeight, 10, 10);
+        bubblePath.addRoundedRect(bubbleX, bubbleY,
+            isMedia ? (mm.bubbleW + BUBBLE_PADDING_H * 2) : bubbleWidth,
+            bubbleHeight, 10, 10);
         painter->drawPath(bubblePath);
 
-        // 消息文字（支持多行）
-        painter->setPen(Qt::white);
-        const QRectF textRect(bubbleX + BUBBLE_PADDING_H, bubbleY + BUBBLE_PADDING_V,
-            contentWidth, textHeight);
-        QTextOption textOption;
-        textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
-        QTextLayout textLayout(displayContent, msgFont);
-        textLayout.setTextOption(textOption);
-        textLayout.beginLayout();
-        {
-            qreal ty = 0.0;
-            while (true) {
-                QTextLine line = textLayout.createLine();
-                if (!line.isValid()) {
-                    break;
+        if (isMedia) {
+            // 媒体主体框：P2 本地真绘 else 占位（label/subLabel）
+            const QRectF mediaRect(bubbleX + BUBBLE_PADDING_H,
+                bubbleY + BUBBLE_PADDING_V, mm.bubbleW, mm.bubbleH);
+            if (!m_mediaImage.isNull()) {
+                painter->drawImage(mediaRect, m_mediaImage);
+            } else {
+                painter->setPen(Qt::white);
+                painter->setFont(msgFont);
+                painter->drawText(mediaRect, Qt::AlignCenter, mm.label);
+                if (!mm.subLabel.isEmpty()) {
+                    painter->setPen(QColor(0xff, 0xff, 0xff, 0x99));
+                    painter->drawText(QRectF(mediaRect.x(),
+                            mediaRect.bottom() - 18, mediaRect.width(), 18),
+                        Qt::AlignCenter, mm.subLabel);
                 }
-                line.setLineWidth(contentWidth);
-                line.setPosition(QPointF(0.0, ty));
-                ty += line.height();
             }
+            // caption 正文行（content 非空），同款换行绘制
+            if (!displayContent.isEmpty()) {
+                painter->setPen(Qt::white);
+                painter->setFont(msgFont);
+                drawWrappedText(painter, displayContent, msgFont,
+                    QRectF(bubbleX + BUBBLE_PADDING_H,
+                        mediaRect.bottom() + BUBBLE_PADDING_V,
+                        mm.bubbleW, bubbleHeight - mm.bubbleH - BUBBLE_PADDING_V * 2));
+            }
+        } else {
+            // 消息文字（支持多行）
+            painter->setPen(Qt::white);
+            const QRectF textRect(bubbleX + BUBBLE_PADDING_H, bubbleY + BUBBLE_PADDING_V,
+                contentWidth, textHeight);
+            QTextOption textOption;
+            textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+            QTextLayout textLayout(displayContent, msgFont);
+            textLayout.setTextOption(textOption);
+            textLayout.beginLayout();
+            {
+                qreal ty = 0.0;
+                while (true) {
+                    QTextLine line = textLayout.createLine();
+                    if (!line.isValid()) {
+                        break;
+                    }
+                    line.setLineWidth(contentWidth);
+                    line.setPosition(QPointF(0.0, ty));
+                    ty += line.height();
+                }
+            }
+            textLayout.endLayout();
+            textLayout.draw(painter, textRect.topLeft());
         }
-        textLayout.endLayout();
-        textLayout.draw(painter, textRect.topLeft());
 
         // 时间
         QFont timeFont;
@@ -474,32 +663,62 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
         painter->setBrush(QColor("#2a2a3e"));
         painter->setPen(Qt::NoPen);
         QPainterPath bubblePath2;
-        bubblePath2.addRoundedRect(bubbleX, bubbleY, bubbleWidth, bubbleHeight, 10, 10);
+        bubblePath2.addRoundedRect(bubbleX, bubbleY,
+            isMedia ? (mm.bubbleW + BUBBLE_PADDING_H * 2) : bubbleWidth,
+            bubbleHeight, 10, 10);
         painter->drawPath(bubblePath2);
 
-        // 消息文字（支持多行）
-        painter->setPen(QColor("#ddd"));
-        const QRectF textRect(bubbleX + BUBBLE_PADDING_H, bubbleY + BUBBLE_PADDING_V,
-            contentWidth, textHeight);
-        QTextOption textOption2;
-        textOption2.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
-        QTextLayout textLayout2(displayContent, msgFont);
-        textLayout2.setTextOption(textOption2);
-        textLayout2.beginLayout();
-        {
-            qreal ty = 0.0;
-            while (true) {
-                QTextLine line = textLayout2.createLine();
-                if (!line.isValid()) {
-                    break;
+        if (isMedia) {
+            // 媒体主体框：P2 本地真绘 else 占位（label/subLabel）
+            const QRectF mediaRect(bubbleX + BUBBLE_PADDING_H,
+                bubbleY + BUBBLE_PADDING_V, mm.bubbleW, mm.bubbleH);
+            if (!m_mediaImage.isNull()) {
+                painter->drawImage(mediaRect, m_mediaImage);
+            } else {
+                painter->setPen(QColor("#ddd"));
+                painter->setFont(msgFont);
+                painter->drawText(mediaRect, Qt::AlignCenter, mm.label);
+                if (!mm.subLabel.isEmpty()) {
+                    painter->setPen(QColor(0x8f, 0xa0, 0xc0));
+                    painter->drawText(QRectF(mediaRect.x(),
+                            mediaRect.bottom() - 18, mediaRect.width(), 18),
+                        Qt::AlignCenter, mm.subLabel);
                 }
-                line.setLineWidth(contentWidth);
-                line.setPosition(QPointF(0.0, ty));
-                ty += line.height();
             }
+            // caption 正文行（content 非空），同款换行绘制
+            if (!displayContent.isEmpty()) {
+                painter->setPen(QColor("#ddd"));
+                painter->setFont(msgFont);
+                drawWrappedText(painter, displayContent, msgFont,
+                    QRectF(bubbleX + BUBBLE_PADDING_H,
+                        mediaRect.bottom() + BUBBLE_PADDING_V,
+                        mm.bubbleW, bubbleHeight - mm.bubbleH - BUBBLE_PADDING_V * 2));
+            }
+        } else {
+            // 消息文字（支持多行）
+            painter->setPen(QColor("#ddd"));
+            const QRectF textRect(bubbleX + BUBBLE_PADDING_H, bubbleY + BUBBLE_PADDING_V,
+                contentWidth, textHeight);
+            QTextOption textOption2;
+            textOption2.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+            QTextLayout textLayout2(displayContent, msgFont);
+            textLayout2.setTextOption(textOption2);
+            textLayout2.beginLayout();
+            {
+                qreal ty = 0.0;
+                while (true) {
+                    QTextLine line = textLayout2.createLine();
+                    if (!line.isValid()) {
+                        break;
+                    }
+                    line.setLineWidth(contentWidth);
+                    line.setPosition(QPointF(0.0, ty));
+                    ty += line.height();
+                }
+            }
+            textLayout2.endLayout();
+            textLayout2.draw(painter, textRect.topLeft());
         }
-        textLayout2.endLayout();
-        textLayout2.draw(painter, textRect.topLeft());
 
         // 时间
         QFont timeFont;
@@ -507,8 +726,9 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
         painter->setFont(timeFont);
         painter->setPen(QColor("#666"));
         int timeW = QFontMetrics(timeFont).horizontalAdvance(m_item.time);
-        painter->drawText(QRectF(bubbleX + bubbleWidth - timeW, bubbleY + bubbleHeight + 1,
-            timeW, TIME_HEIGHT),
+        painter->drawText(QRectF(bubbleX + (isMedia
+                ? (mm.bubbleW + BUBBLE_PADDING_H * 2) : bubbleWidth) - timeW,
+            bubbleY + bubbleHeight + 1, timeW, TIME_HEIGHT),
             Qt::AlignRight | Qt::AlignVCenter, m_item.time);
     }
 }
@@ -523,7 +743,14 @@ QskHashValue MessageRowNode::hash(const void*) const
         ^ qHash(m_item.isAudio) ^ m_item.durationSec
         ^ qHash(m_item.avatarLetter)
         ^ qHash(static_cast<uint>(m_item.avatarColor.rgb()))
-        ^ m_avatarTick;
+        ^ m_avatarTick
+        ^ qHash(m_item.msgType)
+        ^ qHash(m_item.mediaMime)
+        ^ qHash(m_item.fileName)
+        ^ qHash(m_item.fileSizeStr)
+        ^ static_cast<uint>(m_item.mediaWidth)
+        ^ static_cast<uint>(m_item.mediaHeight)
+        ^ m_mediaTick;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -553,9 +780,26 @@ void MessageRowItem::refreshAvatar()
     m_dirty = true;
 }
 
+void MessageRowItem::refreshMedia()
+{
+    // P2 本地媒体源解码：localPath 在 GUI 线程 QImageReader 解码
+    //（渲染线程禁 QImage 解码读盘重活），与 avatar 的 QImage+tick 体系同构。
+    m_mediaSrc = m_item.localPath;
+    m_mediaImage = QImage();
+    ++m_mediaTick;
+    if (m_item.localPath.isEmpty()) {
+        return;
+    }
+    QImageReader reader(m_item.localPath);
+    reader.setAutoTransform(true);
+    m_mediaImage = reader.read();
+    m_dirty = true;
+}
+
 void MessageRowItem::setMessageData(const MessageItem& item)
 {
     const bool avatarChanged = (item.avatarUrl != m_item.avatarUrl);
+    const bool mediaChanged = (item.localPath != m_item.localPath);
     m_item = item;
     if (avatarChanged) {
         m_avatarResolved = false;
@@ -563,6 +807,9 @@ void MessageRowItem::setMessageData(const MessageItem& item)
     if (!m_avatarResolved) {
         refreshAvatar();
         m_avatarResolved = true;
+    }
+    if (mediaChanged) {
+        refreshMedia();
     }
     m_dirty = true;
     update();
@@ -571,6 +818,7 @@ void MessageRowItem::setMessageData(const MessageItem& item)
 void MessageRowItem::setMessageDataNoUpdate(const MessageItem& item)
 {
     const bool avatarChanged = (item.avatarUrl != m_item.avatarUrl);
+    const bool mediaChanged = (item.localPath != m_item.localPath);
     m_item = item;
     if (avatarChanged) {
         m_avatarResolved = false;
@@ -578,6 +826,9 @@ void MessageRowItem::setMessageDataNoUpdate(const MessageItem& item)
     if (!m_avatarResolved) {
         refreshAvatar();
         m_avatarResolved = true;
+    }
+    if (mediaChanged) {
+        refreshMedia();
     }
     m_dirty = true;
     // 合并刷新：不触发 update()，避免向上传播到 QskScrollArea
@@ -590,7 +841,8 @@ QSGNode* MessageRowItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
         node = new MessageRowNode();
     }
     if (m_dirty) {
-        node->setItem(m_item, m_avatarImage, m_avatarTick);
+        node->setItem(m_item, m_avatarImage, m_avatarTick,
+            m_mediaImage, m_mediaTick);
         m_dirty = false;
     }
     // 必须无条件调用：QskPaintedNode::update() 是唯一创建/更新 QSGImageNode 的

@@ -29,6 +29,22 @@
 
 static constexpr int FLAG_KEEP_SCREEN_ON = 0x80;
 
+// 人工可读大小（qltox messageinput.cpp:36 formatFileSize 口径）
+static QString fmtMediaSize(qint64 bytes) {
+    if (bytes < 1024) {
+        return QString("%1 B").arg(bytes);
+    }
+    const double kb = bytes / 1024.0;
+    if (kb < 1024.0) {
+        return QString("%1 KB").arg(kb, 0, 'f', 1);
+    }
+    const double mb = kb / 1024.0;
+    if (mb < 1024.0) {
+        return QString("%1 MB").arg(mb, 0, 'f', 1);
+    }
+    return QString("%1 GB").arg(mb / 1024.0, 0, 'f', 2);
+}
+
 static void jniKeepScreenOn(bool on) {
 #ifdef Q_OS_ANDROID
     QNativeInterface::QAndroidApplication::runOnAndroidMainThread([on]() {
@@ -297,6 +313,45 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             msgItem.msgFormat   = obj.value("msgformat").toString();
             msgItem.msgId       = obj.value("msgid").toString();
             msgItem.timestampMs = timestamp;
+            // 媒体字段防御性填充（qltox unknownparser.cpp:208 content.info.*
+            // 口径）：push 若带 info 子对象优先，扁平键兜底；缺键退化占位。
+            // 服务端实际键名未验证，缺则全部留空 → measureMedia 自行退化
+            // 为默认占位尺寸，不阻断文本链。
+            msgItem.mediaUrl = obj.value("media_url").toString(
+                obj.value("url").toString());
+            msgItem.mediaMime = obj.value("media_mime").toString(
+                obj.value("mediamime").toString());
+            {
+                const QJsonObject info = obj.value("info").toObject();
+                msgItem.mediaWidth = info.value("w").toInt(
+                    obj.value("mediawidth").toInt());
+                msgItem.mediaHeight = info.value("h").toInt(
+                    obj.value("mediaheight").toInt());
+                // duration Matrix CS 单位为 ms（qltox msg.duration/1000 口径）
+                const int durationMs = info.value("duration").toInt(
+                    obj.value("mediaduration").toInt());
+                if (durationMs > 0) {
+                    msgItem.durationSec = durationMs / 1000;
+                }
+                const QString mime = info.value("mimetype").toString(msgItem.mediaMime);
+                if (!mime.isEmpty()) {
+                    msgItem.mediaMime = mime;
+                }
+                const qint64 fsize = obj.value("filesize").toVariant().toLongLong();
+                if (fsize > 0) {
+                    msgItem.fileSizeStr = fmtMediaSize(fsize);
+                }
+                const QString fcName = info.value("filename").toString(
+                    obj.value("filename").toString());
+                if (!fcName.isEmpty()) {
+                    msgItem.fileName = fcName;
+                }
+                // 内存侧 isAudio（与 msgdb_bridge.cpp:34 DB 侧同判据）
+                if (msgItem.mediaMime.startsWith(QString::fromUtf8("audio/"))
+                    || msgItem.msgType.endsWith(QString::fromUtf8("audio"))) {
+                    msgItem.isAudio = true;
+                }
+            }
             msgItem.sender = username;
             msgItem.content = text;
             msgItem.time = timeStr;
