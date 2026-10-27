@@ -7,6 +7,7 @@
 #include <QDebug>
 
 const EventType34 MediaHostReadyType = toEventType34(QEvent::User + 130);
+const EventType34 MediaHostProgressType = toEventType34(QEvent::User + 131);
 
 namespace {
 
@@ -31,6 +32,11 @@ QString mxcToHttp(const QString& url)
 
 constexpr int kMediaMaxDim = 720;   // 内存缩略缓存窄边上限
 constexpr int kMediaCacheCap = 64;  // 入口数上限（FIFO 淘汰）
+
+// HTTP 回调共享 udata：url 供 progress/done 双回调取数
+struct MediaFetchCtx {
+    QString url;
+};
 
 } // namespace
 
@@ -68,22 +74,41 @@ void MediaHost::download(const QString& url)
         ALOG_WARN("media download skip: empty url");
         return;
     }
-    if (m_cache.contains(url) || m_pending.contains(url)) {
+    if (m_cache.contains(url) || m_files.contains(url)) {
+        // 已缓存（图片类）/已落盘（video/file 非图片）→ 向调用方重同步状态
+        Q_EMIT mediaStateChanged(url, MediaDlCompleted);
+        return;
+    }
+    if (m_pending.contains(url)) {
         return;
     }
     const QString httpUrl = mxcToHttp(url);
     if (httpUrl.isEmpty()) {
         ALOG_WARN("media download skip: bad url", url);
+        Q_EMIT mediaStateChanged(url, MediaDlFailed);
         return;
     }
     m_pending.insert(url);
-    // 泵线程回调只搬字节（avatarhost.cpp:82 同款注释口径：QPixmap/解码禁泵线程）
+    Q_EMIT mediaStateChanged(url, MediaDlInProgress);
     HttpRequest req(std::string(httpUrl.toUtf8().constData()), "GET");
     req.followRedirects = true;
+    // 泵线程回调只搬数字/字节（解码/落盘一律在 GUI customEvent）
+    MediaFetchCtx* ctx = new MediaFetchCtx();
+    ctx->url = url;
+    req.progress = [](long long received, long long total,
+                      long long speedBps, void* udata) {
+        auto* pumpCtx = static_cast<MediaFetchCtx*>(udata);
+        MediaHostProgressEvent* ev = new MediaHostProgressEvent();
+        ev->mxcUrl = std::string(pumpCtx->url.toUtf8().constData());
+        ev->received = received;
+        ev->total = total;
+        ev->speedBps = speedBps;
+        qAppPostEvent(MediaHost::instance(), ev);
+    };
     EventPoller::addRequest(req, [](const HttpResponse& resp, void* udata) {
-        const QString* url = static_cast<const QString*>(udata);
+        MediaFetchCtx* pumpCtx = static_cast<MediaFetchCtx*>(udata);
         MediaReadyEvent* ev = new MediaReadyEvent();
-        ev->mxcUrl = std::string(url->toUtf8().constData());
+        ev->mxcUrl = std::string(pumpCtx->url.toUtf8().constData());
         if (resp.httpCode != 200 || resp.body.empty()) {
             ev->success = false;
             std::string type;
@@ -106,8 +131,25 @@ void MediaHost::download(const QString& url)
             }
         }
         qAppPostEvent(MediaHost::instance(), ev);
-        delete url;
-    }, new QString(url));
+        delete pumpCtx;
+    }, ctx);
+}
+
+QString MediaHost::thumbnailUrl(const QString& url, int width, int height)
+{
+    if (!url.startsWith(QStringLiteral("mxc://"))
+        || width <= 0 || height <= 0) {
+        return QString();
+    }
+    const QString rest = url.mid(6);
+    const int slash = rest.indexOf(QLatin1Char('/'));
+    if (slash <= 0 || slash >= rest.size() - 1) {
+        return QString();
+    }
+    return QStringLiteral(
+        "https://%1/_matrix/media/v3/thumbnail/%1/%2?width=%3&height=%4&method=scale")
+        .arg(rest.left(slash), rest.mid(slash + 1))
+        .arg(width).arg(height);
 }
 
 QImage MediaHost::get(const QString& url)
@@ -150,8 +192,27 @@ void MediaHost::insertCache(const QString& key, const QImage& img)
     }
 }
 
+void MediaHost::msgDbStore(const QString& key, const std::string& body,
+                           const std::string& mime)
+{
+    std::string dbKey = mediaCacheKey("msg", key);
+    const auto* raw = reinterpret_cast<const uint8_t*>(body.data());
+    std::vector<uint8_t> data(raw, raw + body.size());
+    Storage::instance().cacheDbAsync()->storeMedia(
+        std::move(dbKey), std::move(data), mime, 2, nullptr);
+}
+
 void MediaHost::customEvent(QEvent* event)
 {
+    if (event->type() == MediaHostProgressType) {
+        MediaHostProgressEvent* evt =
+            static_cast<MediaHostProgressEvent*>(event);
+        const QString key = QString::fromUtf8(evt->mxcUrl.c_str());
+        const int pct = (evt->total > 0)
+            ? (int)(evt->received * 100 / evt->total) : -1;
+        Q_EMIT mediaProgress(key, pct, (int)evt->speedBps);
+        return;
+    }
     if (event->type() == MediaHostReadyType) {
         MediaReadyEvent* evt = static_cast<MediaReadyEvent*>(event);
         const QString key = QString::fromUtf8(evt->mxcUrl.c_str());
@@ -162,28 +223,32 @@ void MediaHost::customEvent(QEvent* event)
             if (img.loadFromData(
                     reinterpret_cast<const uchar*>(evt->body.data()),
                     (int)evt->body.size())) {
-                // 原字节落盘（qltox storeMedia 同口径，不做 PNG 转码）；
-                // mime 缺省用 image/png 占位（仅 CacheDb 记录，不参与 decode）
+                // 图片类：原字节落盘（不做 PNG 转码，qltox storeMedia 口径）+
+                // 内存缩略缓存
                 std::string mime = "image/png";
                 if (!evt->mimeType.empty()) {
                     mime = evt->mimeType;
                 }
-                std::string dbKey = mediaCacheKey("msg", key);
-                const auto* raw =
-                    reinterpret_cast<const uint8_t*>(evt->body.data());
-                std::vector<uint8_t> data(raw, raw + evt->body.size());
-                Storage::instance().cacheDbAsync()->storeMedia(
-                    std::move(dbKey), std::move(data), mime, 2, nullptr);
+                msgDbStore(key, evt->body, mime);
                 insertCache(key, img);
                 stored = true;
             } else {
-                ALOG_WARN("media decode failed", key, (int)evt->body.size());
+                // 非图片字节（video/file/audio）：原字节落盘，内存缓存不参与；
+                // 不算失败（qltox Completed 档同义：字节到手，供后续消费）
+                ALOG_WARN("media non-image stored", key, (int)evt->body.size());
+                std::string mime = !evt->mimeType.empty()
+                    ? evt->mimeType : "application/octet-stream";
+                msgDbStore(key, evt->body, mime);
+                m_files.insert(key);
+                stored = true;
             }
         }
         if (stored) {
             Q_EMIT mediaUpdated(key);
-        } else if (!evt->success) {
+            Q_EMIT mediaStateChanged(key, MediaDlCompleted);
+        } else {
             ALOG_WARN("media fetch failed", key, evt->errorInfo);
+            Q_EMIT mediaStateChanged(key, MediaDlFailed);
         }
         return;
     }

@@ -104,28 +104,37 @@ static MediaDisplayMetrics measureMedia(const MessageItem& item, qreal availW) {
         break;
     }
     case MsgMediaType::Video: {
-        m.bubbleW = (maxW < 220.0) ? maxW : 220.0;
-        m.bubbleH = 56.0;
-        m.label = QString::fromUtf8("视频 ▶");
+        // qltox 口径：视频视觉区与图片同构（比例框 + ▶ 圆钮覆盖），非矮条
+        qreal w = maxW;
+        qreal h;
+        if (item.mediaWidth > 0 && item.mediaHeight > 0) {
+            h = w * qreal(item.mediaHeight) / qreal(item.mediaWidth);
+        } else {
+            h = w * 3.0 / 4.0;
+        }
+        if (h < 60.0) { h = 60.0; }
+        if (h > 240.0) { h = 240.0; }
+        m.bubbleW = w;
+        m.bubbleH = h;
+        m.label = QString::fromUtf8("视频");
         if (item.durationSec > 0) {
             m.subLabel = mediaDurationLabel(item.durationSec);
         }
         break;
     }
     case MsgMediaType::Audio: {
-        m.bubbleW = (maxW < 200.0) ? maxW : 200.0;
-        m.bubbleH = 56.0;
-        m.label = QString::fromUtf8("语音消息 🔊");
+        // qltox paintAudioContent 口径：48px 图标块 + 时长，气泡加高
+        m.bubbleW = (maxW < 220.0) ? maxW : 220.0;
+        m.bubbleH = 72.0;
+        m.label = QString::fromUtf8("语音 🔊");
         m.subLabel = mediaDurationLabel(item.durationSec);
         break;
     }
     case MsgMediaType::File: {
         m.bubbleW = (maxW < 240.0) ? maxW : 240.0;
-        m.bubbleH = 64.0;
-        m.label = QString::fromUtf8("文件 📄");
-        if (!item.fileName.isEmpty()) {
-            m.label = item.fileName + QString::fromUtf8(" 📄");
-        }
+        m.bubbleH = 84.0;
+        m.label = item.fileName.isEmpty()
+            ? QString::fromUtf8("文件") : item.fileName;
         m.subLabel = item.fileSizeStr;
         break;
     }
@@ -171,6 +180,199 @@ static void msgDrawHeaderButtons(QPainter* painter, MessageRowNode* node,
         painter->drawText(node->m_speakRect, Qt::AlignCenter, QString::fromUtf8("🔊"));
     }
     painter->restore();
+}
+
+// ── 媒体绘制辅助（paint / 几何命中共用的纯数学，无 GUI 对象）──
+
+// 状态条大小后缀（mainpage fmtMediaSize 同口径 B/KB/MB/GB）
+static QString mediaBarSizeText(qint64 bytes) {
+    if (bytes <= 0) { return QString(); }
+    if (bytes < 1024) { return QString::number((long long)bytes)
+        + QString::fromUtf8("B"); }
+    if (bytes < 1024*1024) { return QString::asprintf("%.1fKB", bytes/1024.0); }
+    if (bytes < 1024LL*1024*1024) { return QString::asprintf("%.1fMB",
+        bytes/1048576.0); }
+    return QString::asprintf("%.1fGB", bytes/1073741824.0);
+}
+
+// 媒体框底部的下载状态条几何（tap 命中与 paint 必须一致；isAudio 无条）
+static QRectF msgMediaBarRect(const MessageItem& item, qreal viewW) {
+    const MediaDisplayMetrics mm = measureMedia(item, viewW);
+    if (mm.type == MsgMediaType::Unknown || mm.type == MsgMediaType::Text
+        || item.isAudio) {
+        return QRectF();
+    }
+    qreal bx;
+    if (item.isSelf) {
+        bx = viewW - (mm.bubbleW + BUBBLE_PADDING_H * 2) - SIDE_MARGIN;
+    } else {
+        bx = SIDE_MARGIN + AVATAR_SIZE + AVATAR_SPACING;
+    }
+    const QRectF mediaRect(bx + BUBBLE_PADDING_H,
+        NAME_HEIGHT + BUBBLE_PADDING_V, mm.bubbleW, mm.bubbleH);
+    return QRectF(mediaRect.x(), mediaRect.bottom() - 22.0,
+        mediaRect.width(), 22.0);
+}
+
+// 图片等比缩放目标 rect（修 drawImage 满框拉伸 bug：居中 KeepAspectRatio）
+static QRectF mediaFitRect(const QImage& img, const QRectF& rect) {
+    if (img.isNull() || rect.width() <= 0 || rect.height() <= 0) {
+        return rect;
+    }
+    const qreal iw = img.width(), ih = img.height();
+    qreal w = rect.width();
+    qreal h = w * ih / iw;
+    if (h > rect.height()) {
+        h = rect.height();
+        w = h * iw / ih;
+    }
+    return QRectF(rect.x() + (rect.width() - w) / 2.0,
+                  rect.y() + (rect.height() - h) / 2.0, w, h);
+}
+
+// 媒体主体统一绘制（self/peer 共用；渲染线程安全：painter 数学与文本）：
+// 真图(等比) / 占位(W×H 或 label) + GIF 徽章 / ▶ 圆钮 / 语音 tile + 下载状态条
+static void paintMediaBody(QPainter* p, const MessageItem& item,
+                           const QImage& mediaImage,
+                           const MediaDisplayMetrics& mm,
+                           const QRectF& mediaRect,
+                           const QColor& textColor, const QColor& subColor,
+                           const QFont& baseFont)
+{
+    // ── Audio：48px 图标块 + 大号时长 + 文件名副行（qltox paintAudioContent）──
+    if (mm.type == MsgMediaType::Audio) {
+        const qreal iconSize = 48.0;
+        const QRectF iconR(mediaRect.x(), mediaRect.y() + 12.0,
+            iconSize, iconSize);
+        p->setPen(Qt::NoPen);
+        p->setBrush(QColor(255, 255, 255, 26));
+        p->drawRoundedRect(iconR, 8, 8);
+        QFont af = baseFont;
+        af.setPixelSize(24);
+        p->setFont(af);
+        p->setPen(textColor);
+        p->drawText(iconR, Qt::AlignCenter, QString::fromUtf8("🔊"));
+        p->setFont(baseFont);
+        QFont df = baseFont;
+        df.setPixelSize(15);
+        df.setBold(true);
+        p->setFont(df);
+        const QString dur = (item.durationSec > 0)
+            ? mediaDurationLabel(item.durationSec)
+            : QString::fromUtf8("--:--");
+        p->drawText(QRectF(iconR.right() + 12.0, mediaRect.y() + 14.0,
+            mediaRect.right() - iconR.right() - 12.0, 22.0),
+            Qt::AlignLeft | Qt::AlignVCenter, dur);
+        p->setFont(baseFont);
+        if (!item.fileName.isEmpty()) {
+            p->setPen(subColor);
+            p->drawText(QRectF(iconR.right() + 12.0, mediaRect.y() + 36.0,
+                mediaRect.right() - iconR.right() - 12.0, 16.0),
+                Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
+                item.fileName);
+        }
+        return;
+    }
+
+    // ── 主体：真图（等比居中）else 占位（有宽高 → "W × H"，否则类型 label）──
+    if (!mediaImage.isNull()) {
+        p->drawImage(mediaFitRect(mediaImage, mediaRect), mediaImage);
+    } else {
+        QString center = mm.label;
+        if (item.mediaWidth > 0 && item.mediaHeight > 0
+            && (mm.type == MsgMediaType::Image || mm.type == MsgMediaType::Gif)) {
+            center = QStringLiteral("%1 × %2")
+                .arg(QString::number((int)item.mediaWidth),
+                     QString::number((int)item.mediaHeight));
+        }
+        p->setPen(textColor);
+        p->setFont(baseFont);
+        p->drawText(mediaRect, Qt::AlignCenter | Qt::TextSingleLine, center);
+        if (!mm.subLabel.isEmpty()) {
+            p->setPen(subColor);
+            p->drawText(QRectF(mediaRect.x(), mediaRect.bottom() - 24.0,
+                mediaRect.width(), 18.0),
+                Qt::AlignCenter | Qt::TextSingleLine, mm.subLabel);
+        }
+    }
+
+    // ── GIF 徽章（左上角；qltox paintMediaContent :521-539 口径）──
+    if (mm.type == MsgMediaType::Gif) {
+        const QRectF badgeR(mediaRect.x() + 4.0, mediaRect.y() + 4.0,
+            30.0, 16.0);
+        p->setPen(Qt::NoPen);
+        p->setBrush(QColor(0, 0, 0, 150));
+        p->drawRoundedRect(badgeR, 3, 3);
+        p->setPen(Qt::white);
+        QFont bf = baseFont;
+        bf.setPixelSize(9);
+        bf.setBold(true);
+        p->setFont(bf);
+        p->drawText(badgeR, Qt::AlignCenter, QStringLiteral("GIF"));
+        p->setFont(baseFont);
+    }
+
+    // ── 视频 ▶ 圆钮覆盖（真图/占位都画；qltox :542-556 口径）──
+    if (mm.type == MsgMediaType::Video) {
+        const qreal btn = 40.0;
+        const QRectF playR(mediaRect.center().x() - btn / 2.0,
+            mediaRect.center().y() - btn / 2.0, btn, btn);
+        p->setPen(Qt::NoPen);
+        p->setBrush(QColor(0, 0, 0, 160));
+        p->drawEllipse(playR);
+        QPainterPath tri;
+        tri.moveTo(playR.left() + 14.0, playR.top() + 10.0);
+        tri.lineTo(playR.left() + 14.0, playR.bottom() - 10.0);
+        tri.lineTo(playR.right() - 10.0, playR.center().y());
+        tri.closeSubpath();
+        p->setBrush(Qt::white);
+        p->drawPath(tri);
+    }
+
+    // ── 下载状态条（媒体框底部 22px，isAudio 无条；NotRequested/Failed 可点）──
+    if (item.isAudio) {
+        return;
+    }
+    const QRectF barRect(mediaRect.x(), mediaRect.bottom() - 22.0,
+        mediaRect.width(), 22.0);
+    p->fillRect(barRect, QColor(0, 0, 0, 140));
+    QString barText;
+    QColor barColor = Qt::white;
+    switch (item.downloadState) {
+    case MediaDlInProgress:
+        barText = (item.downloadProgress >= 0)
+            ? (QString::fromUtf8("⬇⏳ ") + QString::number(item.downloadProgress)
+               + QStringLiteral("%"))
+            : QString::fromUtf8("⏳ …");
+        break;
+    case MediaDlCompleted:
+        barText = QString::fromUtf8("✓ 已下载");
+        barColor = QColor(0x4C, 0xAF, 0x50);
+        break;
+    case MediaDlFailed:
+        barText = QString::fromUtf8("✗ 失败 · 点按重试");
+        barColor = QColor(0xE5, 0x39, 0x35);
+        break;
+    default: {
+        barText = QString::fromUtf8("⬇ 下载");
+        QString sz = item.fileSizeStr;
+        if (sz.isEmpty()) {
+            sz = mediaBarSizeText(item.fileSizeBytes);
+        }
+        if (!sz.isEmpty()) {
+            barText += QLatin1Char(' ') + sz;
+        }
+        break;
+    }
+    }
+    QFont bf = baseFont;
+    bf.setPixelSize(10);
+    bf.setBold(true);
+    p->setFont(bf);
+    p->setPen(barColor);
+    p->drawText(barRect.adjusted(0, 0, -8.0, 0),
+        Qt::AlignRight | Qt::AlignVCenter | Qt::TextSingleLine, barText);
+    p->setFont(baseFont);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -552,22 +754,10 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
         painter->drawPath(bubblePath);
 
         if (isMedia) {
-            // 媒体主体框：P2 本地真绘 else 占位（label/subLabel）
             const QRectF mediaRect(bubbleX + BUBBLE_PADDING_H,
                 bubbleY + BUBBLE_PADDING_V, mm.bubbleW, mm.bubbleH);
-            if (!m_mediaImage.isNull()) {
-                painter->drawImage(mediaRect, m_mediaImage);
-            } else {
-                painter->setPen(Qt::white);
-                painter->setFont(msgFont);
-                painter->drawText(mediaRect, Qt::AlignCenter, mm.label);
-                if (!mm.subLabel.isEmpty()) {
-                    painter->setPen(QColor(0xff, 0xff, 0xff, 0x99));
-                    painter->drawText(QRectF(mediaRect.x(),
-                            mediaRect.bottom() - 18, mediaRect.width(), 18),
-                        Qt::AlignCenter, mm.subLabel);
-                }
-            }
+            paintMediaBody(painter, m_item, m_mediaImage, mm, mediaRect,
+                Qt::white, QColor(0xff, 0xff, 0xff, 0x99), msgFont);
             // caption 正文行（content 非空），同款换行绘制
             if (!displayContent.isEmpty()) {
                 painter->setPen(Qt::white);
@@ -670,22 +860,10 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
         painter->drawPath(bubblePath2);
 
         if (isMedia) {
-            // 媒体主体框：P2 本地真绘 else 占位（label/subLabel）
             const QRectF mediaRect(bubbleX + BUBBLE_PADDING_H,
                 bubbleY + BUBBLE_PADDING_V, mm.bubbleW, mm.bubbleH);
-            if (!m_mediaImage.isNull()) {
-                painter->drawImage(mediaRect, m_mediaImage);
-            } else {
-                painter->setPen(QColor("#ddd"));
-                painter->setFont(msgFont);
-                painter->drawText(mediaRect, Qt::AlignCenter, mm.label);
-                if (!mm.subLabel.isEmpty()) {
-                    painter->setPen(QColor(0x8f, 0xa0, 0xc0));
-                    painter->drawText(QRectF(mediaRect.x(),
-                            mediaRect.bottom() - 18, mediaRect.width(), 18),
-                        Qt::AlignCenter, mm.subLabel);
-                }
-            }
+            paintMediaBody(painter, m_item, m_mediaImage, mm, mediaRect,
+                QColor("#ddd"), QColor(0x8f, 0xa0, 0xc0), msgFont);
             // caption 正文行（content 非空），同款换行绘制
             if (!displayContent.isEmpty()) {
                 painter->setPen(QColor("#ddd"));
@@ -751,6 +929,10 @@ QskHashValue MessageRowNode::hash(const void*) const
         ^ qHash(m_item.fileSizeStr)
         ^ static_cast<uint>(m_item.mediaWidth)
         ^ static_cast<uint>(m_item.mediaHeight)
+        ^ qHash(m_item.thumbUrl)
+        ^ qHash(m_item.downloadState)
+        ^ qHash(m_item.downloadProgress)
+        ^ qHash(static_cast<qulonglong>(m_item.fileSizeBytes))
         ^ m_mediaTick;
 }
 
@@ -784,22 +966,35 @@ void MessageRowItem::refreshAvatar()
 void MessageRowItem::refreshMedia()
 {
     // 媒体真绘源（GUI 线程解码，与 avatar 的 QImage+tick 体系同构）：
-    // 1) mediaUrl → MediaHost（内存/CacheDb 同步读，miss 即占位）；
-    // 2) localPath 本地文件 → QImageReader 兜底（P2 直读，下载链外的本地消息）。
+    //   Image/Gif：mediaUrl（图片类字节可 QImage decode）
+    //   Video：thumbUrl（CS info.thumbnail_url）优先，缺则 mxc /thumbnail 端点
+    //   File/Audio：不绘图（非 image 字节）
+    //   localPath 本地文件兜底（P2 直读）
     ++m_mediaTick;
     m_mediaImage = QImage();
-    if (!m_item.mediaUrl.isEmpty()) {
-        m_mediaSrc = m_item.mediaUrl;
-        m_mediaImage = MediaHost::instance()->get(m_item.mediaUrl);
+    QString showUrl;
+    const MsgMediaType mt = msgMediaTypeOf(m_item);
+    if (mt == MsgMediaType::Video) {
+        if (!m_item.thumbUrl.isEmpty()) {
+            showUrl = m_item.thumbUrl;
+        } else if (m_item.mediaWidth > 0 && m_item.mediaHeight > 0) {
+            showUrl = MediaHost::thumbnailUrl(m_item.mediaUrl,
+                (int)m_item.mediaWidth, (int)m_item.mediaHeight);
+        }
+    } else if (mt == MsgMediaType::Image || mt == MsgMediaType::Gif) {
+        showUrl = m_item.mediaUrl;
+    }
+    m_mediaSrc = showUrl.isEmpty() ? m_item.localPath : showUrl;
+    if (!showUrl.isEmpty()) {
+        m_mediaImage = MediaHost::instance()->get(showUrl);
         if (!m_mediaImage.isNull()) {
             m_dirty = true;
             return;
         }
-        // 无缓存继续尝试 localPath（两路都空 → 占位）
-    } else {
-        m_mediaSrc = m_item.localPath;
     }
-    if (!m_item.localPath.isEmpty()) {
+    if (!m_item.localPath.isEmpty()
+        && (mt == MsgMediaType::Image || mt == MsgMediaType::Gif
+            || mt == MsgMediaType::Video)) {
         QImageReader reader(m_item.localPath);
         reader.setAutoTransform(true);
         m_mediaImage = reader.read();
@@ -902,6 +1097,28 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
                 Q_EMIT avatarClicked(row, mapToScene(localPos));
                 return;
             }
+            // 媒体下载状态条命中：NotRequested/Failed → 发起/重试
+            //（qltox startMediaDownload mw:4114 口径；防重复由 MediaHost
+            //  m_pending/m_files/m_cache 与行状态双保险）
+            {
+                const int rowState = m_items[row].downloadState;
+                const bool rowIsAudio = m_items[row].isAudio;
+                const QString rowUrl = m_items[row].mediaUrl;
+                if (!rowIsAudio && !rowUrl.isEmpty()
+                    && (rowState == MediaDlNotRequested
+                        || rowState == MediaDlFailed)
+                    && msgMediaBarRect(m_items[row], m_contentView->width())
+                        .contains(localPos)) {
+                    m_items[row].downloadState = MediaDlInProgress;
+                    m_items[row].downloadProgress = 0;
+                    if (MessageRowItem* rowItem = m_visibleRows.value(row)) {
+                        rowItem->setMessageDataNoUpdate(m_items[row]);
+                        rowItem->update();
+                    }
+                    MediaHost::instance()->download(rowUrl);
+                    return;
+                }
+            }
             Q_EMIT rowClicked(row);
         });
     // 双击改由 MyScrollArea::childMouseEventFilter 检测
@@ -998,24 +1215,43 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
             }
         });
 
-    // 媒体下载完成 → 定向刷新命中该 url 的可见行（重绘）
-    connect(MediaHost::instance(), &MediaHost::mediaUpdated,
-        this, [this](const QString& url) {
-            if (url.isEmpty()) {
-                return;
+    // 媒体行统一更新：url 命中（mediaUrl/thumbUrl）→ 全行落状态（不可见行
+    // 也不丢）+ 可见行走合并刷新（与 avatarUpdated 同款节流口径）
+    auto applyMediaRow = [this](const QString& url, int state, int pct) {
+        if (url.isEmpty()) {
+            return;
+        }
+        for (int idx = 0; idx < m_items.size(); ++idx) {
+            if (m_items[idx].mediaUrl != url && m_items[idx].thumbUrl != url) {
+                continue;
             }
-            for (auto it = m_visibleRows.begin(); it != m_visibleRows.end(); ++it) {
-                const int idx = it.key();
-                if (idx < 0 || idx >= m_items.size()
-                    || m_items[idx].mediaUrl != url) {
-                    continue;
-                }
-                it.value()->refreshMedia();
+            if (state >= 0) {
+                m_items[idx].downloadState = state;
+            }
+            m_items[idx].downloadProgress = pct;
+            if (m_visibleRows.contains(idx)) {
                 queueVisibleRefresh(idx);
             }
-            if (m_isScrolling) {
-                m_scrollIdleTimer.start();
-            }
+        }
+        if (m_isScrolling) {
+            m_scrollIdleTimer.start();
+        }
+    };
+    // 下载完成（mediaUpdated，Task A 首发信号）→ Completed
+    connect(MediaHost::instance(), &MediaHost::mediaUpdated,
+        this, [applyMediaRow](const QString& url) {
+            applyMediaRow(url, MediaDlCompleted, 100);
+        });
+    // 状态迁移（InProgress/Completed/Failed）
+    connect(MediaHost::instance(), &MediaHost::mediaStateChanged,
+        this, [applyMediaRow](const QString& url, int state) {
+            applyMediaRow(url, state,
+                state == MediaDlCompleted ? 100 : 0);
+        });
+    // 进度（state<0 → 只更进度，不覆盖状态）
+    connect(MediaHost::instance(), &MediaHost::mediaProgress,
+        this, [applyMediaRow](const QString& url, int pct, int /*speedBps*/) {
+            applyMediaRow(url, -1, pct);
         });
 }
 
@@ -1210,12 +1446,44 @@ void MessageListWidget::stopFadeIn()
     setOpacity(1.0);
 }
 
+void MessageListWidget::kickMediaPrefetch(const MessageItem& item)
+{
+    AvatarHost::instance()->download(item.avatarUrl);
+    // 视频缩略：thumbUrl 优先（CS info.thumbnail_url），mxc + 宽高时构造
+    // /_matrix/media/v3/thumbnail（spec 标准端点，不加自定义 API）
+    if (!item.thumbUrl.isEmpty()) {
+        MediaHost::instance()->download(item.thumbUrl);
+    } else if (item.msgType.contains(QString::fromUtf8("video"))
+               && !item.mediaUrl.isEmpty()
+               && item.mediaWidth > 0 && item.mediaHeight > 0) {
+        const QString tu = MediaHost::thumbnailUrl(item.mediaUrl,
+            (int)item.mediaWidth, (int)item.mediaHeight);
+        if (!tu.isEmpty()) {
+            MediaHost::instance()->download(tu);
+        }
+    }
+    // 自动预取（qltox chatview.cpp:4238 口径）：image 类恒自动；
+    // video/file 本体 <1MB 自动（大文件等状态条手动 tap，不接播放/抽帧）
+    QString mt = item.msgType;
+    if (mt.startsWith(QString::fromUtf8("m."))) {
+        mt = mt.mid(2);
+    }
+    if (mt == QString::fromUtf8("image")
+        || item.mediaMime.startsWith(QString::fromUtf8("image/"))) {
+        MediaHost::instance()->autoDownload(item.msgType, item.mediaMime,
+                                            item.mediaUrl);
+    } else if (!item.mediaUrl.isEmpty() && item.fileSizeBytes > 0
+               && item.fileSizeBytes < 1048576
+               && (mt == QString::fromUtf8("video")
+                   || mt == QString::fromUtf8("file"))) {
+        MediaHost::instance()->download(item.mediaUrl);
+    }
+}
+
 void MessageListWidget::appendMessage(const MessageItem& item)
 {
     m_items.append(item);
-    AvatarHost::instance()->download(item.avatarUrl);
-    MediaHost::instance()->autoDownload(item.msgType, item.mediaMime,
-                                        item.mediaUrl);
+    kickMediaPrefetch(item);
 
     qreal viewW = viewContentsRect().width();
     if (viewW <= 0) viewW = width();
@@ -1441,9 +1709,7 @@ void MessageListWidget::setChannel(const QString& protocol, const QString& chatI
     }
     for (const auto& msg : msgs) {
         m_items.append(msg);
-        AvatarHost::instance()->download(msg.avatarUrl);
-        MediaHost::instance()->autoDownload(msg.msgType, msg.mediaMime,
-                                            msg.mediaUrl);
+        kickMediaPrefetch(msg);
     }
 
     rebuildLayout(this);

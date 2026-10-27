@@ -337,10 +337,21 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
                 if (!mime.isEmpty()) {
                     msgItem.mediaMime = mime;
                 }
-                const qint64 fsize = obj.value("filesize").toVariant().toLongLong();
+                // 大小三来源：info.size（CS 标准）/ file_size / filesize
+                qint64 fsize = info.value("size").toVariant().toLongLong();
+                if (fsize <= 0) {
+                    fsize = obj.value("file_size").toVariant().toLongLong();
+                }
+                if (fsize <= 0) {
+                    fsize = obj.value("filesize").toVariant().toLongLong();
+                }
                 if (fsize > 0) {
                     msgItem.fileSizeStr = fmtMediaSize(fsize);
+                    msgItem.fileSizeBytes = fsize;
                 }
+                // 缩略图（CS 标准 info.thumbnail_url，m.image/m.video/m.file 通用；
+                // 加密 room 的 thumbnail_file 不适用本链 → 退化纯占位）
+                msgItem.thumbUrl = info.value("thumbnail_url").toString();
                 const QString fcName = info.value("filename").toString(
                     obj.value("filename").toString());
                 if (!fcName.isEmpty()) {

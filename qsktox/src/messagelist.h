@@ -61,6 +61,12 @@ struct MessageItem {
     qint64  mediaWidth = 0;           // 图片/视频原始宽
     qint64  mediaHeight = 0;          // 原始高
     QString localPath;                // 本地可读源（P2 真绘唯一前提）
+    // == 下载状态（纯内存，qltox DownloadState 四态口径；重启清零）==
+    // 状态条覆盖媒体框底部 22px（NotRequested/Failed 可点 → tap 触发下载）
+    int     downloadState = 0;     // 0=NotRequested 1=InProgress 2=Completed 3=Failed
+    int     downloadProgress = 0;  // 0-100；-1=总长未知（显示 …）
+    qint64  fileSizeBytes = 0;     // 原始字节（<1MB 自动预取判定 + 状态条大小后缀）
+    QString thumbUrl;              // CS info.thumbnail_url（视频缩略图源）
 };
 
 class MessageRowNode : public QskPaintedNode
@@ -170,6 +176,7 @@ protected:
 
 private:
     friend void rebuildLayout(MessageListWidget*);
+    void kickMediaPrefetch(const MessageItem& item);
 
     int rowFromPosition(const QPointF& localPos) const;
     int rowFromContentY(qreal contentY) const;
