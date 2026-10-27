@@ -166,9 +166,37 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     inputBar->setFixedHeight(56);
     inputBar->setSpacing(8);
 
+    // ── 附加按钮三槽（静态全显示，无动态替换）──
+    // 😊 恒最左（Telegram/微信口径）；📎/🎤 在 input 右、发送前
+    // （WhatsApp"文本条右侧"、Telegram"右下角末位"口径）；
+    // 空操作：点击仅 toast 占位，表情面板/附件菜单/录音基建后续任务另上。
+    auto* emojiBtn = new QskPushButton(QString::fromUtf8("😊"), inputBar);
+    emojiBtn->setPreferredWidth(36);
+    emojiBtn->setBoxShapeHint(QskPushButton::Panel,
+        QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+    connect(emojiBtn, &QskAbstractButton::clicked, this, [this]() {
+        showAndroidToast(QString::fromUtf8("😊 表情面板未实装"));
+    });
+
     m_input = new QskTextField(inputBar);
     m_input->setPlaceholderText(QString::fromUtf8("输入消息..."));
     m_input->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    auto* attachBtn = new QskPushButton(QString::fromUtf8("📎"), inputBar);
+    attachBtn->setPreferredWidth(40);
+    attachBtn->setBoxShapeHint(QskPushButton::Panel,
+        QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+    connect(attachBtn, &QskAbstractButton::clicked, this, [this]() {
+        showAndroidToast(QString::fromUtf8("📎 附件未实装"));
+    });
+
+    auto* micBtn = new QskPushButton(QString::fromUtf8("🎤"), inputBar);
+    micBtn->setPreferredWidth(40);
+    micBtn->setBoxShapeHint(QskPushButton::Panel,
+        QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+    connect(micBtn, &QskAbstractButton::clicked, this, [this]() {
+        showAndroidToast(QString::fromUtf8("🎤 语音未实装"));
+    });
 
     auto* sendBtn = new QskPushButton(QString::fromUtf8("发送"), inputBar);
     sendBtn->setPreferredWidth(60);
