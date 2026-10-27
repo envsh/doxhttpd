@@ -1,6 +1,7 @@
 #include "messagepage.h"
 #include "messageattribbar.h"
 #include "messagelist.h"
+#include "mediapreview.h"
 #include "msgenlargeoverlay.h"
 #include "rawdatapopup.h"
 #include "androidutils.h"
@@ -211,6 +212,34 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     m_attrBar->setDefs(messageAttribBarDefsForType(m_protocol));
 
     // ── Double click handler ──
+    // 媒体本体单击（单击即开口径；qltox 双击 openFullSizeImage/
+    // openMediaPlayer 的动作映射体）——像 qltox 一样分类型各自组件：
+    //   Image/Gif → MediaViewerPopup（qskcomp，本页 P1 实装）
+    //   Video     → 视频专用浮动层组件（P3，QMediaPlayer+QVideoSink）
+    //   Audio     → 行内播放（P2，QMediaPlayer 行内 ▶↔⏸）
+    //   File      → 系统打开（P4，ACTION_VIEW/QDesktopServices）
+    connect(m_messageList, &MessageListWidget::mediaBodyTapped,
+        this, [this](int row, int mediaType) {
+            const MessageItem mi = m_messageList->messageItem(row);
+            switch (mediaType) {
+            case static_cast<int>(MsgMediaType::Image):
+            case static_cast<int>(MsgMediaType::Gif):
+                MediaPreview::showFor(this, mi, mediaType);
+                break;
+            case static_cast<int>(MsgMediaType::Video):
+                showAndroidToast(QString::fromUtf8(
+                    "视频预览/播放：后续任务（浮动层）"));
+                break;
+            case static_cast<int>(MsgMediaType::Audio):
+                showAndroidToast(QString::fromUtf8(
+                    "语音播放：后续任务（行内）"));
+                break;
+            default: // File
+                showAndroidToast(QString::fromUtf8(
+                    "文件打开：后续任务（系统）"));
+                break;
+            }
+        });
     connect(m_messageList, &MessageListWidget::rowDoubleClicked,
         this, [this](int row) {
             const MessageItem& mi = m_messageList->messageItem(row);

@@ -40,7 +40,7 @@ static constexpr qreal HDR_BTN_GAP = 4;
 // 左→右依 qltox 口径：source | translate | speak（speak 最贴行右缘）。
 
 // ── 媒体消息分类（镜像 qltox etype 派发，chatview.cpp:4074/:2986 口径）──
-enum class MsgMediaType { Unknown, Text, Image, Gif, Video, Audio, File };
+// MsgMediaType 定义移至 messagelist.h（mediaBodyTapped 信号跨 TU 需要枚举可见）
 
 static MsgMediaType msgMediaTypeOf(const MessageItem& item) {
     if (item.isAudio) {
@@ -209,10 +209,11 @@ static QString mediaBarSpeedText(int bps) {
 }
 
 // 媒体框底部的下载状态条几何（tap 命中与 paint 必须一致；isAudio 无条）
-static QRectF msgMediaBarRect(const MessageItem& item, qreal viewW) {
+// 媒体主体框（row 内容坐标系；tap 本体命中与 paint 共用）
+static QRectF msgMediaRect(const MessageItem& item, qreal viewW) {
     const MediaDisplayMetrics mm = measureMedia(item, viewW);
     if (mm.type == MsgMediaType::Unknown || mm.type == MsgMediaType::Text
-        || item.isAudio) {
+        || mm.bubbleW <= 0) {
         return QRectF();
     }
     qreal bx;
@@ -221,8 +222,18 @@ static QRectF msgMediaBarRect(const MessageItem& item, qreal viewW) {
     } else {
         bx = SIDE_MARGIN + AVATAR_SIZE + AVATAR_SPACING;
     }
-    const QRectF mediaRect(bx + BUBBLE_PADDING_H,
-        NAME_HEIGHT + BUBBLE_PADDING_V, mm.bubbleW, mm.bubbleH);
+    return QRectF(bx + BUBBLE_PADDING_H, NAME_HEIGHT + BUBBLE_PADDING_V,
+        mm.bubbleW, mm.bubbleH);
+}
+
+static QRectF msgMediaBarRect(const MessageItem& item, qreal viewW) {
+    const MediaDisplayMetrics mm = measureMedia(item, viewW);
+    if (mm.type == MsgMediaType::Unknown || mm.type == MsgMediaType::Text
+        || item.isAudio) {
+        return QRectF();
+    }
+    // 复用本体框坐标（单一事实来源），不再重复 bx 数学
+    const QRectF mediaRect = msgMediaRect(item, viewW);
     return QRectF(mediaRect.x(), mediaRect.bottom() - 22.0,
         mediaRect.width(), 22.0);
 }
@@ -1231,6 +1242,19 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
                         rowItem->update();
                     }
                     MediaHost::instance()->download(rowUrl);
+                    return;
+                }
+            }
+            // 媒体本体命中：单击即开（触摸端无 qltox 双击依赖；状态条段
+            // 未命中才走这里——Completed 状态下点条带 = 开预览）
+            {
+                const int bodyMt = static_cast<int>(
+                    msgMediaTypeOf(m_items[row]));
+                if (bodyMt != static_cast<int>(MsgMediaType::Unknown)
+                    && bodyMt != static_cast<int>(MsgMediaType::Text)
+                    && msgMediaRect(m_items[row], m_contentView->width())
+                        .contains(localPos)) {
+                    Q_EMIT mediaBodyTapped(row, bodyMt);
                     return;
                 }
             }

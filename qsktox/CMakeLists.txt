@@ -80,12 +80,16 @@ set(QSKTOX_SOURCES
     src/messageattribbar.cpp
     src/msgenlargeoverlay.h
     src/msgenlargeoverlay.cpp
+    src/mediapreview.h
+    src/mediapreview.cpp
     src/rawdatautil.h
     src/rawdatautil.cpp
     src/rawdatapopup.h
     src/rawdatapopup.cpp
     ${qskcomp_dir}/multilinetextedit.h
     ${qskcomp_dir}/multilinetextedit.cpp
+    ${qskcomp_dir}/mediaviewer.h
+    ${qskcomp_dir}/mediaviewer.cpp
     src/settingspage.h
     src/settingspage.cpp
     src/aboutpage.h

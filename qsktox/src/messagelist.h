@@ -16,6 +16,11 @@
 // GIF 逐帧动画（qltox QMovie 对位）：仅指针成员，头文件不引重头
 class QMovie;
 class QBuffer;
+
+// 媒体消息分类（镜像 qltox etype 派发，chatview.cpp:4074/:2986 口径；
+// 信号 mediaBodyTapped 跨 TU 传递，枚举须在头文件）
+enum class MsgMediaType { Unknown, Text, Image, Gif, Video, Audio, File };
+
 struct MessageItem {
     enum SendState { SendSending, SendSent, SendFailed };
     QString sender;
@@ -182,6 +187,10 @@ Q_SIGNALS:
     void rowLongPressed(int row, const QPointF& scenePos);
     void rowDoubleClicked(int row);
     void avatarClicked(int row, const QPointF& pos);
+    // 媒体本体（图/GIF/视频/语音/文件 气泡框内、非状态条）单击命中——
+    // 触摸端口径（qltox 双击 openFullSizeImage/openMediaPlayer 的动作映射手），
+    // mediaType = MsgMediaType 枚举 int（messagelist.h:43）
+    void mediaBodyTapped(int row, int mediaType);
     void avatarLongPressed(int row, const QPointF& scenePos);
     void retryRequested(int row);
 
