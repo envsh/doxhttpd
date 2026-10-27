@@ -68,6 +68,8 @@ set(QSKTOX_SOURCES
     src/avatarutil.h
     src/avatarhost.h
     src/avatarhost.cpp
+    src/mediahost.h
+    src/mediahost.cpp
     src/msgdb_bridge.h
     src/msgdb_bridge.cpp
     src/messagelist.h

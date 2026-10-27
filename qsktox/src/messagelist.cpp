@@ -4,6 +4,7 @@
 #include "avatarhost.h"
 #include "avatar_manager.h"
 #include "avatarutil.h"
+#include "mediahost.h"
 #include <private/qquicktaphandler_p.h>
 #include <private/qquickpincharea_p.h>
 #include <QPainter>
@@ -782,24 +783,36 @@ void MessageRowItem::refreshAvatar()
 
 void MessageRowItem::refreshMedia()
 {
-    // P2 本地媒体源解码：localPath 在 GUI 线程 QImageReader 解码
-    //（渲染线程禁 QImage 解码读盘重活），与 avatar 的 QImage+tick 体系同构。
-    m_mediaSrc = m_item.localPath;
-    m_mediaImage = QImage();
+    // 媒体真绘源（GUI 线程解码，与 avatar 的 QImage+tick 体系同构）：
+    // 1) mediaUrl → MediaHost（内存/CacheDb 同步读，miss 即占位）；
+    // 2) localPath 本地文件 → QImageReader 兜底（P2 直读，下载链外的本地消息）。
     ++m_mediaTick;
-    if (m_item.localPath.isEmpty()) {
-        return;
+    m_mediaImage = QImage();
+    if (!m_item.mediaUrl.isEmpty()) {
+        m_mediaSrc = m_item.mediaUrl;
+        m_mediaImage = MediaHost::instance()->get(m_item.mediaUrl);
+        if (!m_mediaImage.isNull()) {
+            m_dirty = true;
+            return;
+        }
+        // 无缓存继续尝试 localPath（两路都空 → 占位）
+    } else {
+        m_mediaSrc = m_item.localPath;
     }
-    QImageReader reader(m_item.localPath);
-    reader.setAutoTransform(true);
-    m_mediaImage = reader.read();
+    if (!m_item.localPath.isEmpty()) {
+        QImageReader reader(m_item.localPath);
+        reader.setAutoTransform(true);
+        m_mediaImage = reader.read();
+    }
     m_dirty = true;
 }
 
 void MessageRowItem::setMessageData(const MessageItem& item)
 {
     const bool avatarChanged = (item.avatarUrl != m_item.avatarUrl);
-    const bool mediaChanged = (item.localPath != m_item.localPath);
+    const bool mediaChanged = (item.localPath != m_item.localPath
+        || item.mediaUrl != m_item.mediaUrl);
+    const bool needMedia = mediaChanged || !item.mediaUrl.isEmpty();
     m_item = item;
     if (avatarChanged) {
         m_avatarResolved = false;
@@ -808,7 +821,9 @@ void MessageRowItem::setMessageData(const MessageItem& item)
         refreshAvatar();
         m_avatarResolved = true;
     }
-    if (mediaChanged) {
+    if (needMedia) {
+        // mediaUrl 行每次刷新都回查 MediaHost：下载完成（mediaUpdated）前
+        // 该行可能已被回收重建，命中与否只差一次内存/CacheDb 查询
         refreshMedia();
     }
     m_dirty = true;
@@ -818,7 +833,9 @@ void MessageRowItem::setMessageData(const MessageItem& item)
 void MessageRowItem::setMessageDataNoUpdate(const MessageItem& item)
 {
     const bool avatarChanged = (item.avatarUrl != m_item.avatarUrl);
-    const bool mediaChanged = (item.localPath != m_item.localPath);
+    const bool mediaChanged = (item.localPath != m_item.localPath
+        || item.mediaUrl != m_item.mediaUrl);
+    const bool needMedia = mediaChanged || !item.mediaUrl.isEmpty();
     m_item = item;
     if (avatarChanged) {
         m_avatarResolved = false;
@@ -827,7 +844,7 @@ void MessageRowItem::setMessageDataNoUpdate(const MessageItem& item)
         refreshAvatar();
         m_avatarResolved = true;
     }
-    if (mediaChanged) {
+    if (needMedia) {
         refreshMedia();
     }
     m_dirty = true;
@@ -974,6 +991,26 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
                     continue;
                 }
                 it.value()->refreshAvatar();
+                queueVisibleRefresh(idx);
+            }
+            if (m_isScrolling) {
+                m_scrollIdleTimer.start();
+            }
+        });
+
+    // 媒体下载完成 → 定向刷新命中该 url 的可见行（重绘）
+    connect(MediaHost::instance(), &MediaHost::mediaUpdated,
+        this, [this](const QString& url) {
+            if (url.isEmpty()) {
+                return;
+            }
+            for (auto it = m_visibleRows.begin(); it != m_visibleRows.end(); ++it) {
+                const int idx = it.key();
+                if (idx < 0 || idx >= m_items.size()
+                    || m_items[idx].mediaUrl != url) {
+                    continue;
+                }
+                it.value()->refreshMedia();
                 queueVisibleRefresh(idx);
             }
             if (m_isScrolling) {
@@ -1177,6 +1214,8 @@ void MessageListWidget::appendMessage(const MessageItem& item)
 {
     m_items.append(item);
     AvatarHost::instance()->download(item.avatarUrl);
+    MediaHost::instance()->autoDownload(item.msgType, item.mediaMime,
+                                        item.mediaUrl);
 
     qreal viewW = viewContentsRect().width();
     if (viewW <= 0) viewW = width();
@@ -1403,6 +1442,8 @@ void MessageListWidget::setChannel(const QString& protocol, const QString& chatI
     for (const auto& msg : msgs) {
         m_items.append(msg);
         AvatarHost::instance()->download(msg.avatarUrl);
+        MediaHost::instance()->autoDownload(msg.msgType, msg.mediaMime,
+                                            msg.mediaUrl);
     }
 
     rebuildLayout(this);
