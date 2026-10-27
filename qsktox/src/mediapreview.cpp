@@ -2,6 +2,7 @@
 #include "mediahost.h"
 #include "messagelist.h"
 #include "mediaviewer.h"
+#include "videoviewer.h"
 
 #include <QFile>
 #include <QIODevice>
@@ -62,6 +63,42 @@ void showFor(QQuickItem* parent, const MessageItem& item, int mediaType)
                 popupGuard->canvas()->setData(fresh, isGif, false, QString());
             } else {
                 // 解不出图：没有 pending 重开意义，直接关闭现层
+                popupGuard->close();
+            }
+        });
+}
+
+void showVideoFor(QQuickItem* parent, const MessageItem& item)
+{
+    const QString mime = !item.audioMime.isEmpty()
+        ? item.audioMime : item.mediaMime;
+    const QString src = !item.mediaUrl.isEmpty() ? item.mediaUrl
+        : item.localPath;
+    const bool remote = src.contains(QStringLiteral("://"));
+
+    const QByteArray raw = resolveBytes(src);
+    if (!raw.isEmpty() || !remote) {
+        // 齐/本地读失败：非 pending；空字节 → 组件内"无法加载"
+        VideoViewerPopup::show(parent, raw, mime, false, QString());
+        return;
+    }
+    // pendingPlay（qltox :4350 泛化）：pending 打开 + download + 自动播
+    VideoViewerPopup* popup = VideoViewerPopup::show(parent, raw, mime,
+        true, QString::fromUtf8("⏳ 下载中…"));
+    MediaHost::instance()->download(src);
+    const QPointer<VideoViewerPopup> popupGuard(popup);
+    // watcher 挂 popup 上：弹窗关闭即自动断连
+    QObject* watcher = new QObject(popup);
+    QObject::connect(MediaHost::instance(), &MediaHost::mediaUpdated,
+        watcher, [popupGuard, src, mime](const QString& url) {
+            if (url != src || popupGuard.isNull()) {
+                return;
+            }
+            const QByteArray fresh = resolveBytes(src);
+            if (!fresh.isEmpty()) {
+                popupGuard->canvas()->setData(fresh, mime, false, QString());
+            } else {
+                // 解不出/字节缺：没有 pending 重开意义，直接关闭现层
                 popupGuard->close();
             }
         });

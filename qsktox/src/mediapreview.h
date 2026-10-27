@@ -13,6 +13,9 @@ struct MessageItem;
 namespace MediaPreview {
 // mediaType = MsgMediaType 枚举 int 值（messagelist.h:43）
 void showFor(QQuickItem* parent, const MessageItem& item, int mediaType);
+// Video 型分壳（同一 resolveBytes/pending watcher 基建，组件换 videoviewer）：
+// 字节齐 → 自动播放；缺 → pending + download + mediaUpdated 递料自动播放
+void showVideoFor(QQuickItem* parent, const MessageItem& item);
 }
 
 #endif // MEDIA_PREVIEW_BRIDGE_H

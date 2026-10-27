@@ -3,6 +3,8 @@
 
 #include "page.h"
 
+#include <QStringList>
+
 class MessageListWidget;
 class MessageAttribBar;
 class QskTextField;
@@ -43,11 +45,15 @@ private:
                                   int64_t rowid);
     // 通知会话列表：本会话有新消息，需要上浮（排序键 last_active）
     void touchChannelInList();
+    // 语音行内播放 tap 派发（P2）：tts:// 原链直接播；mxc 字节齐 →
+    // AudioPlayer；字节缺 → download + pending 意图下载完自动播
+    void toggleAudio(int row);
 
     MessageListWidget* m_messageList = nullptr;
     MessageAttribBar* m_attrBar = nullptr;
     QskTextField* m_input = nullptr;
     QskTextLabel* m_titleLabel = nullptr;
+    QStringList m_audioPendingUrls;   // 语音 pendingPlay 意图 → mediaUpdated 自动播
     QString m_chatId;
     QString m_chatType;
     QString m_protocol;

@@ -275,7 +275,15 @@ static void paintMediaBody(QPainter* p, const MessageItem& item,
         af.setPixelSize(24);
         p->setFont(af);
         p->setPen(textColor);
-        p->drawText(iconR, Qt::AlignCenter, QString::fromUtf8("🔊"));
+        // 三态：下载中 ⏳（audio 无状态条，pending 视觉只能挂 tile）/
+        // 播放中 ⏸（暂停后 flag 归 false）/ 其余 🔊
+        QString audioIcon = QString::fromUtf8("🔊");
+        if (item.downloadState == MediaDlInProgress) {
+            audioIcon = QString::fromUtf8("⏳");
+        } else if (item.mediaPlaying) {
+            audioIcon = QString::fromUtf8("⏸");
+        }
+        p->drawText(iconR, Qt::AlignCenter, audioIcon);
         p->setFont(baseFont);
         QFont df = baseFont;
         df.setPixelSize(15);
@@ -976,6 +984,7 @@ QskHashValue MessageRowNode::hash(const void*) const
         ^ qHash(m_item.thumbUrl)
         ^ qHash(m_item.downloadState)
         ^ qHash(m_item.downloadProgress)
+        ^ qHash(m_item.mediaPlaying ? 1 : 0)
         ^ qHash(static_cast<qulonglong>(m_item.fileSizeBytes))
         ^ m_mediaTick;
 }
@@ -1417,6 +1426,23 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
                 m_scrollIdleTimer.start();
             }
         });
+}
+
+void MessageListWidget::setAudioPlaying(const QString& url, bool on)
+{
+    for (int idx = 0; idx < m_items.size(); ++idx) {
+        const bool want = (m_items[idx].mediaUrl == url) && on;
+        if (m_items[idx].mediaPlaying == want) {
+            continue;
+        }
+        m_items[idx].mediaPlaying = want;
+        if (m_visibleRows.contains(idx)) {
+            queueVisibleRefresh(idx);
+        }
+    }
+    if (m_isScrolling) {
+        m_scrollIdleTimer.start();
+    }
 }
 
 MessageListWidget::~MessageListWidget()

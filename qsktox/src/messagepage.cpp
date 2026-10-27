@@ -2,6 +2,8 @@
 #include "messageattribbar.h"
 #include "messagelist.h"
 #include "mediapreview.h"
+#include "mediahost.h"
+#include "audioplayer.h"
 #include "msgenlargeoverlay.h"
 #include "rawdatapopup.h"
 #include "androidutils.h"
@@ -29,6 +31,26 @@
 #include <QskLabelData.h>
 #include <QTime>
 #include <QDateTime>
+
+// ── 语音行内播放（P2）──
+
+static QByteArray resolveAudioBytes(const QString& src)
+{
+    if (src.isEmpty()) {
+        return QByteArray();
+    }
+    if (!src.contains(QStringLiteral("://"))) {
+        // 本地文件（发送方 localPath）：直读磁盘，不经 CacheDb
+        QFile f(src);
+        if (!f.open(QIODevice::ReadOnly)) {
+            return QByteArray();
+        }
+        return f.readAll();
+    }
+    const std::vector<uint8_t> bytes = MediaHost::instance()->getBytes(src);
+    return QByteArray(reinterpret_cast<const char*>(bytes.data()),
+        static_cast<int>(bytes.size()));
+}
 
 MessagePage::MessagePage(QQuickItem* parent)
     : Page(parent)
@@ -162,7 +184,7 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
         });
 
     // ── InputBar ──
-    auto* inputBar = new QskLinearBox(Qt::Horizontal, layout);
+auto* inputBar = new QskLinearBox(Qt::Horizontal, layout);
     inputBar->setPanel(true);
     inputBar->setFixedHeight(56);
     inputBar->setSpacing(8);
@@ -227,18 +249,34 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
                 MediaPreview::showFor(this, mi, mediaType);
                 break;
             case static_cast<int>(MsgMediaType::Video):
-                showAndroidToast(QString::fromUtf8(
-                    "视频预览/播放：后续任务（浮动层）"));
+                MediaPreview::showVideoFor(this, mi);
                 break;
             case static_cast<int>(MsgMediaType::Audio):
-                showAndroidToast(QString::fromUtf8(
-                    "语音播放：后续任务（行内）"));
+                toggleAudio(row);
                 break;
             default: // File
                 showAndroidToast(QString::fromUtf8(
                     "文件打开：后续任务（系统）"));
                 break;
             }
+        });
+    // 语音 pending 意图：下载完成 → 自动播（qltox pendingPlay 泛化）
+    connect(MediaHost::instance(), &MediaHost::mediaUpdated,
+        this, [this](const QString& url) {
+            if (!m_audioPendingUrls.contains(url)) {
+                return;
+            }
+            m_audioPendingUrls.removeAll(url);
+            const QByteArray fresh = resolveAudioBytes(url);
+            if (!fresh.isEmpty()) {
+                AudioPlayer::instance()->play(url, fresh, QString());
+                m_messageList->setAudioPlaying(url, true);
+            }
+        });
+    // 自然播完/切播 → 行内 tile 复位 🔊
+    connect(AudioPlayer::instance(), &AudioPlayer::finished,
+        this, [this](const QString& id) {
+            m_messageList->setAudioPlaying(id, false);
         });
     connect(m_messageList, &MessageListWidget::rowDoubleClicked,
         this, [this](int row) {
@@ -333,6 +371,47 @@ void MessagePage::openAvatarMenu(int row, const QPointF& pos)
     }
 
     menu->open();
+}
+
+void MessagePage::toggleAudio(int row)
+{
+    const MessageItem mi = m_messageList->messageItem(row);
+    if (mi.mediaUrl.isEmpty()) {
+        return;
+    }
+    // tts:// 键走 TtsAudio 原链（双击 :218 同源；合成字节不在 CacheDb）
+    if (mi.mediaUrl.startsWith(QStringLiteral("tts://"))) {
+        TtsAudio::instance()->play(mi.mediaUrl);
+        return;
+    }
+    AudioPlayer* ap = AudioPlayer::instance();
+    if (ap->isPlaying(mi.mediaUrl)) {
+        ap->pause();                                    // 保进度挂起
+        m_messageList->setAudioPlaying(mi.mediaUrl, false);
+        return;
+    }
+    if (ap->pausedId() == mi.mediaUrl) {
+        ap->resume();                                   // 同 id 续播
+        m_messageList->setAudioPlaying(mi.mediaUrl, true);
+        return;
+    }
+    const QByteArray raw = resolveAudioBytes(mi.mediaUrl);
+    if (raw.isEmpty()) {
+        if (!mi.mediaUrl.contains(QStringLiteral("://"))) {
+            showAndroidToast(QString::fromUtf8("本地语音文件丢失"));
+            return;
+        }
+        // pendingPlay 泛化（qltox :4350 口径）：下载中 tile ⏳（行状态
+        // mediaStateChanged 自动 InProgress），完成自动播
+        if (!m_audioPendingUrls.contains(mi.mediaUrl)) {
+            m_audioPendingUrls.append(mi.mediaUrl);
+        }
+        MediaHost::instance()->download(mi.mediaUrl);
+        return;
+    }
+    ap->play(mi.mediaUrl, raw, mi.audioMime.isEmpty()
+        ? mi.mediaMime : mi.audioMime);
+    m_messageList->setAudioPlaying(mi.mediaUrl, true);
 }
 
 void MessagePage::openChatMenu(QskPushButton* optionsBtn)

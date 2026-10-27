@@ -78,6 +78,7 @@ struct MessageItem {
     QString thumbUrl;              // CS info.thumbnail_url（视频缩略图源）
     QString errorMsg;              // 下载失败详情（qltox mediaErrorMsg 触摸端口径：
                                    // 无 tooltip，Failed 状态条内直出，单行自动裁剪）
+    bool    mediaPlaying = false;  // 语音行内播放中（P2 纯内存；tap toggle 切换）
 };
 
 class MessageRowNode : public QskPaintedNode
@@ -161,6 +162,8 @@ public:
     void scrollToBottom();
     void stopFadeIn();
     int messageCount() const { return m_items.size(); }
+    // 语音行内播放行状态（单实例语义：写 true 先清其他行 playing，行内⏸/🔊切换）
+    void setAudioPlaying(const QString& url, bool on);
     // 已创建的可见行数（回归测试用：换频道后必须 > 0，否则消息列表整表空白）
     int visibleRowCount() const { return m_visibleRows.size(); }
     // 越界安全：旧实现直接 m_items[row]，列表被清空/回填后调用方持有的

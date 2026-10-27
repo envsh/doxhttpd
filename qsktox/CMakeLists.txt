@@ -90,6 +90,10 @@ set(QSKTOX_SOURCES
     ${qskcomp_dir}/multilinetextedit.cpp
     ${qskcomp_dir}/mediaviewer.h
     ${qskcomp_dir}/mediaviewer.cpp
+    ${qskcomp_dir}/audioplayer.h
+    ${qskcomp_dir}/audioplayer.cpp
+    ${qskcomp_dir}/videoviewer.h
+    ${qskcomp_dir}/videoviewer.cpp
     src/settingspage.h
     src/settingspage.cpp
     src/aboutpage.h
