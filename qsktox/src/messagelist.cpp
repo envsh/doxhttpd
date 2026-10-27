@@ -19,6 +19,8 @@
 #include <QTextLayout>
 #include <QTextOption>
 #include <QImageReader>
+#include <QMovie>
+#include <QBuffer>
 
 static constexpr qreal MIN_ROW_HEIGHT = 60;
 static constexpr qreal NAME_HEIGHT = 20;
@@ -290,7 +292,9 @@ static void paintMediaBody(QPainter* p, const MessageItem& item,
         p->drawText(mediaRect, Qt::AlignCenter | Qt::TextSingleLine, center);
         if (!mm.subLabel.isEmpty()) {
             p->setPen(subColor);
-            p->drawText(QRectF(mediaRect.x(), mediaRect.bottom() - 24.0,
+            // 上移到状态条（22px）上方 2px 处：视频时长/文件大小不再被状态
+            // 条遮住半截（占位分支只会出现在带状态条的非 Audio 行）
+            p->drawText(QRectF(mediaRect.x(), mediaRect.bottom() - 42.0,
                 mediaRect.width(), 18.0),
                 Qt::AlignCenter | Qt::TextSingleLine, mm.subLabel);
         }
@@ -974,6 +978,22 @@ void MessageRowItem::refreshMedia()
     m_mediaImage = QImage();
     QString showUrl;
     const MsgMediaType mt = msgMediaTypeOf(m_item);
+    if (mt == MsgMediaType::Gif) {
+        // GIF 动画（qltox QMovie 对位）：源 = mediaUrl（优先）else localPath；
+        // 首帧先行（start 后 currentImage），CacheDb miss（尚未下载）时
+        // 退化为占位，与静帧口径一致
+        const QString src = !m_item.mediaUrl.isEmpty()
+            ? m_item.mediaUrl : m_item.localPath;
+        m_mediaSrc = src;
+        setupGifMovie(src);
+        m_mediaImage = m_gifMovie ? m_gifMovie->currentImage() : QImage();
+        m_dirty = true;
+        return;
+    }
+    if (m_gifMovie) {
+        // 行数据变更为非 GIF → 释放动画资源
+        stopGifMovie();
+    }
     if (mt == MsgMediaType::Video) {
         if (!m_item.thumbUrl.isEmpty()) {
             showUrl = m_item.thumbUrl;
@@ -1000,6 +1020,70 @@ void MessageRowItem::refreshMedia()
         m_mediaImage = reader.read();
     }
     m_dirty = true;
+}
+
+MessageRowItem::~MessageRowItem()
+{
+    // QMovie/QBuffer 均以 this 为父，Qt 自动清理；此处显式 stop 防
+    // deleteLater 延迟窗口内继续刷帧
+    if (m_gifMovie) {
+        m_gifMovie->stop();
+    }
+}
+
+void MessageRowItem::setupGifMovie(const QString& src)
+{
+    if (src.isEmpty()) {
+        stopGifMovie();
+        return;
+    }
+    if (m_gifMovie && m_gifSrc == src) {
+        return;   // 同源已在播
+    }
+    stopGifMovie();
+    m_gifMovie = new QMovie(this);
+    if (src.contains(QStringLiteral("://"))) {
+        // URL 源：CacheDb 同步读字节（QMovie 不支持网络直拾），
+        // miss（尚未下载完成）→ 不启动动画，保持占位静帧
+        const std::vector<uint8_t> bytes = MediaHost::instance()->getBytes(src);
+        if (bytes.empty()) {
+            m_gifMovie->deleteLater();
+            m_gifMovie = nullptr;
+            m_gifSrc.clear();
+            return;
+        }
+        m_gifData = QByteArray(
+            reinterpret_cast<const char*>(bytes.data()), (int)bytes.size());
+        m_gifBuf = new QBuffer(this);
+        m_gifBuf->setData(m_gifData);
+        m_gifBuf->open(QIODevice::ReadOnly);
+        m_gifMovie->setDevice(m_gifBuf);
+    } else {
+        // 本地文件源（localPath 直读）
+        m_gifMovie->setFileName(src);
+    }
+    connect(m_gifMovie, &QMovie::frameChanged, this, [this](int) {
+        m_mediaImage = m_gifMovie->currentImage();
+        ++m_mediaTick;
+        m_dirty = true;
+        update();
+    });
+    m_gifMovie->start();
+}
+
+void MessageRowItem::stopGifMovie()
+{
+    if (m_gifMovie) {
+        m_gifMovie->stop();
+        m_gifMovie->deleteLater();
+        m_gifMovie = nullptr;
+    }
+    if (m_gifBuf) {
+        m_gifBuf->deleteLater();
+        m_gifBuf = nullptr;
+    }
+    m_gifData = QByteArray();
+    m_gifSrc = QString();
 }
 
 void MessageRowItem::setMessageData(const MessageItem& item)
@@ -1463,7 +1547,8 @@ void MessageListWidget::kickMediaPrefetch(const MessageItem& item)
         }
     }
     // 自动预取（qltox chatview.cpp:4238 口径）：image 类恒自动；
-    // video/file 本体 <1MB 自动（大文件等状态条手动 tap，不接播放/抽帧）
+    // video/file 本体 <1MB 自动（大文件等状态条手动 tap，不接播放/抽帧）。
+    // 未知大小（=0）同过门槛：qltox fileSize UnkSize=-1 亦通过同款门槛
     QString mt = item.msgType;
     if (mt.startsWith(QString::fromUtf8("m."))) {
         mt = mt.mid(2);
@@ -1472,8 +1557,9 @@ void MessageListWidget::kickMediaPrefetch(const MessageItem& item)
         || item.mediaMime.startsWith(QString::fromUtf8("image/"))) {
         MediaHost::instance()->autoDownload(item.msgType, item.mediaMime,
                                             item.mediaUrl);
-    } else if (!item.mediaUrl.isEmpty() && item.fileSizeBytes > 0
-               && item.fileSizeBytes < 1048576
+    } else if (!item.mediaUrl.isEmpty()
+               && (item.fileSizeBytes <= 0
+                   || item.fileSizeBytes < 1048576)
                && (mt == QString::fromUtf8("video")
                    || mt == QString::fromUtf8("file"))) {
         MediaHost::instance()->download(item.mediaUrl);

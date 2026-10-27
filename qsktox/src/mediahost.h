@@ -68,6 +68,10 @@ public:
     // 非 mxc 或缺宽高返回空（无服务端生成能力 → 调用方保持纯占位）。
     static QString thumbnailUrl(const QString& url, int width, int height);
 
+    // 原始字节同步读（CacheDb "msg_" 键，GUI 线程；供 GIF QMovie/QBuffer 用，
+    // 与 get() 的内存 QImage 路径独立）
+    std::vector<uint8_t> getBytes(const QString& url);
+
     // 内存 → CacheDb（同步读）。无缓存返回空 QImage（调用方走占位绘制）。
     QImage get(const QString& url);
 

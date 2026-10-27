@@ -13,6 +13,9 @@
 #include <QPointF>
 #include <QSet>
 #include <QTimer>
+// GIF 逐帧动画（qltox QMovie 对位）：仅指针成员，头文件不引重头
+class QMovie;
+class QBuffer;
 struct MessageItem {
     enum SendState { SendSending, SendSent, SendFailed };
     QString sender;
@@ -99,6 +102,7 @@ class MessageRowItem : public QQuickItem
 {
 public:
     MessageRowItem(QQuickItem* parent = nullptr);
+    ~MessageRowItem() override;
 
     void setMessageData(const MessageItem& item);
     void setMessageDataNoUpdate(const MessageItem& item);
@@ -106,8 +110,7 @@ public:
     // 并递增 avatarTick 参与 hash，保证下载完成后精准重绘。
     void refreshAvatar();
 
-    // P2 本地媒体源解码：localPath 在 GUI 线程 QImageReader 解码（有变化时调用），
-    // 递增 mediaTick 参与 hash；无本地源时 mediaImage 置空 → paint 走占位。
+    // 媒体真绘源解码 GUI 线程口径见 cpp；递增 mediaTick 参与 hash 保证重绘。
     void refreshMedia();
 
 protected:
@@ -122,6 +125,14 @@ private:
     quint32 m_mediaTick = 0;
     bool m_avatarResolved = false;
     bool m_dirty = true;
+    // GIF 逐帧动画（qltox QMovie 对位）：仅指针成员，头文件不引重头；
+    // 帧变化只换 QImage+tick，渲染线程侧复用现有 hash 重绘门
+    void setupGifMovie(const QString& src);
+    void stopGifMovie();
+    QMovie* m_gifMovie = nullptr;
+    QBuffer* m_gifBuf = nullptr;
+    QByteArray m_gifData;
+    QString m_gifSrc;              // 当前动画源（相同则不重建）
 };
 
 class MessageRowItem;

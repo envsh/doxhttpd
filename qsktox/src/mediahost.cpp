@@ -79,6 +79,24 @@ void MediaHost::download(const QString& url)
         Q_EMIT mediaStateChanged(url, MediaDlCompleted);
         return;
     }
+    // 重启兜底（qltox startMediaDownload :4130 CacheDb loadMedia 命中同款
+    // 语义，不新增 exists()）：下载入口同步读一次字节，非空 = 已下载过 →
+    // 直接重同步 Completed；可解码顺带装回内存缩略缓存，不再发 GET
+    {
+        const std::vector<uint8_t> dbBytes = Storage::instance().cacheDb()->get(
+            mediaCacheKey("msg", url).c_str());
+        if (!dbBytes.empty()) {
+            QImage img;
+            img.loadFromData(dbBytes.data(), (int)dbBytes.size());
+            if (!img.isNull()) {
+                insertCache(url, img);
+            } else {
+                m_files.insert(url);
+            }
+            Q_EMIT mediaStateChanged(url, MediaDlCompleted);
+            return;
+        }
+    }
     if (m_pending.contains(url)) {
         return;
     }
@@ -150,6 +168,16 @@ QString MediaHost::thumbnailUrl(const QString& url, int width, int height)
         "https://%1/_matrix/media/v3/thumbnail/%1/%2?width=%3&height=%4&method=scale")
         .arg(rest.left(slash), rest.mid(slash + 1))
         .arg(width).arg(height);
+}
+
+std::vector<uint8_t> MediaHost::getBytes(const QString& url)
+{
+    if (url.isEmpty()) {
+        return {};
+    }
+    // 与 AvatarManager::get（avatar_manager.cpp:76）同款同步读（GUI 线程）
+    return Storage::instance().cacheDb()->get(
+        mediaCacheKey("msg", url).c_str());
 }
 
 QImage MediaHost::get(const QString& url)
