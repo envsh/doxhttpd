@@ -31,26 +31,18 @@
 #include <QskLabelData.h>
 #include <QTime>
 #include <QDateTime>
+#include <QDesktopServices>
+#include <QDir>
+#include <QStandardPaths>
+#include <QUrl>
 
-// ── 语音行内播放（P2）──
+// ── 媒体字节共用解析（P2/P4）——mediapreview 暴露的 resolveBytesFor ──
+//（原 resolveAudioBytes static 上移 → MediaPreview::resolveBytesFor，共用面）
 
-static QByteArray resolveAudioBytes(const QString& src)
-{
-    if (src.isEmpty()) {
-        return QByteArray();
-    }
-    if (!src.contains(QStringLiteral("://"))) {
-        // 本地文件（发送方 localPath）：直读磁盘，不经 CacheDb
-        QFile f(src);
-        if (!f.open(QIODevice::ReadOnly)) {
-            return QByteArray();
-        }
-        return f.readAll();
-    }
-    const std::vector<uint8_t> bytes = MediaHost::instance()->getBytes(src);
-    return QByteArray(reinterpret_cast<const char*>(bytes.data()),
-        static_cast<int>(bytes.size()));
-}
+// 文件打开 helpers（P4）：定义在 toggleAudio 前，ctor 内先声明使用
+static QString mediaOpenPath(const MessageItem& item);
+static bool writeOpenFile(const MessageItem& item, const QString& path);
+static void openSavedFile(const QString& path, const QString& mime);
 
 MessagePage::MessagePage(QQuickItem* parent)
     : Page(parent)
@@ -255,8 +247,7 @@ auto* inputBar = new QskLinearBox(Qt::Horizontal, layout);
                 toggleAudio(row);
                 break;
             default: // File
-                showAndroidToast(QString::fromUtf8(
-                    "文件打开：后续任务（系统）"));
+                openFileFor(row);
                 break;
             }
         });
@@ -267,10 +258,29 @@ auto* inputBar = new QskLinearBox(Qt::Horizontal, layout);
                 return;
             }
             m_audioPendingUrls.removeAll(url);
-            const QByteArray fresh = resolveAudioBytes(url);
+            const QByteArray fresh = MediaPreview::resolveBytesFor(url);
             if (!fresh.isEmpty()) {
                 AudioPlayer::instance()->play(url, fresh, QString());
                 m_messageList->setAudioPlaying(url, true);
+            }
+        });
+    // 文件 pending 意图：下载完成 → 落盘 + 自动打开（audio 同款语义）
+    connect(MediaHost::instance(), &MediaHost::mediaUpdated,
+        this, [this](const QString& url) {
+            if (!m_filePendingUrls.contains(url)) {
+                return;
+            }
+            m_filePendingUrls.removeAll(url);
+            for (int idx = 0; idx < m_messageList->messageCount(); ++idx) {
+                if (m_messageList->messageItem(idx).mediaUrl != url) {
+                    continue;
+                }
+                const MessageItem mi = m_messageList->messageItem(idx);
+                const QString path = mediaOpenPath(mi);
+                if (!path.isEmpty() && writeOpenFile(mi, path)) {
+                    openSavedFile(path, mi.mediaMime);
+                }
+                break;
             }
         });
     // 自然播完/切播 → 行内 tile 复位 🔊
@@ -373,6 +383,137 @@ void MessagePage::openAvatarMenu(int row, const QPointF& pos)
     menu->open();
 }
 
+// ── 文件系统打开（P4，专属一套：cache 落盘 + 系统跳转）──
+
+// file mime → 后缀兜底（fileName 无扩展名时）
+static QString fileExtFromMime(const QString& mime)
+{
+    if (mime.contains(QStringLiteral("pdf"))) {
+        return QStringLiteral(".pdf");
+    }
+    if (mime.contains(QStringLiteral("zip"))) {
+        return QStringLiteral(".zip");
+    }
+    if (mime.contains(QStringLiteral("mp3"))) {
+        return QStringLiteral(".mp3");
+    }
+    if (mime.contains(QStringLiteral("ogg"))) {
+        return QStringLiteral(".ogg");
+    }
+    if (mime.contains(QStringLiteral("mp4"))) {
+        return QStringLiteral(".mp4");
+    }
+    if (mime.contains(QStringLiteral("webm"))) {
+        return QStringLiteral(".webm");
+    }
+    if (mime.contains(QStringLiteral("image/"))) {
+        return QStringLiteral(".png");
+    }
+    return QStringLiteral(".bin");
+}
+
+// 打开文件的落盘路径：cache/media_open/<净化名>（Android=app cache，
+// 桌面=QStandardPaths::CacheLocation；同名复用不重写）
+static QString mediaOpenPath(const MessageItem& item)
+{
+    QString dirStr;
+#ifdef Q_OS_ANDROID
+    dirStr = androidCacheDir();
+#else
+    dirStr = QStandardPaths::writableLocation(
+        QStandardPaths::CacheLocation);
+#endif
+    if (dirStr.isEmpty()) {
+        return QString();
+    }
+    const QString dir = dirStr + QStringLiteral("/media_open");
+    // 文件名净化：仅保留字母数字/./-/_，长度封顶 64
+    QString name;
+    for (const QChar c : item.fileName) {
+        if (c.isLetterOrNumber() || c == QLatin1Char('.')
+            || c == QLatin1Char('-') || c == QLatin1Char('_')) {
+            name += c;
+        }
+        if (name.size() >= 64) {
+            break;
+        }
+    }
+    if (name.isEmpty() || !name.contains(QLatin1Char('.'))) {
+        // 无名/无扩展名 → file_<hash> + mime 映射后缀
+        const QStringList parts =
+            item.mediaUrl.split(QStringLiteral("/"));
+        const QString tail = parts.isEmpty() ? QString()
+            : parts.last();
+        name = QStringLiteral("file_%1%2")
+            .arg(qHash(tail) & 0xffffffffULL, 8, 16, QLatin1Char('0'))
+            .arg(fileExtFromMime(item.mediaMime));
+    }
+    QDir().mkpath(dir);
+    return dir + QLatin1Char('/') + name;
+}
+
+static bool writeOpenFile(const MessageItem& item, const QString& path)
+{
+    const QString src = !item.mediaUrl.isEmpty() ? item.mediaUrl
+        : item.localPath;
+    const QByteArray raw = MediaPreview::resolveBytesFor(src);
+    if (raw.isEmpty()) {
+        return false;
+    }
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        return false;
+    }
+    f.write(raw);
+    f.flush();
+    return true;
+}
+
+static void openSavedFile(const QString& path, const QString& mime)
+{
+#ifdef Q_OS_ANDROID
+    openFile(path, mime);
+#else
+    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+#endif
+}
+
+void MessagePage::openFileFor(int row)
+{
+    const MessageItem mi = m_messageList->messageItem(row);
+    if (mi.mediaUrl.isEmpty()) {
+        return;
+    }
+    const QString path = mediaOpenPath(mi);
+    if (path.isEmpty()) {
+        showAndroidToast(QString::fromUtf8("无可用存储目录"));
+        return;
+    }
+    if (QFile::exists(path)) {
+        openSavedFile(path, mi.mediaMime);      // 同名复用不重写
+        return;
+    }
+    const bool remote = mi.mediaUrl.contains(QStringLiteral("://"));
+    if (!remote) {
+        if (writeOpenFile(mi, path)) {
+            openSavedFile(path, mi.mediaMime);
+        } else {
+            showAndroidToast(QString::fromUtf8("本地文件丢失"));
+        }
+        return;
+    }
+    if (!writeOpenFile(mi, path)) {
+        // pendingPlay 泛化（qltox :4350 口径）：下载条自动 InProgress，
+        // mediaUpdated 到达 → 落盘 + 自动打开
+        if (!m_filePendingUrls.contains(mi.mediaUrl)) {
+            m_filePendingUrls.append(mi.mediaUrl);
+        }
+        MediaHost::instance()->download(mi.mediaUrl);
+    } else {
+        openSavedFile(path, mi.mediaMime);
+    }
+}
+
 void MessagePage::toggleAudio(int row)
 {
     const MessageItem mi = m_messageList->messageItem(row);
@@ -395,7 +536,7 @@ void MessagePage::toggleAudio(int row)
         m_messageList->setAudioPlaying(mi.mediaUrl, true);
         return;
     }
-    const QByteArray raw = resolveAudioBytes(mi.mediaUrl);
+    const QByteArray raw = MediaPreview::resolveBytesFor(mi.mediaUrl);
     if (raw.isEmpty()) {
         if (!mi.mediaUrl.contains(QStringLiteral("://"))) {
             showAndroidToast(QString::fromUtf8("本地语音文件丢失"));

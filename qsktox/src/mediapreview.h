@@ -1,6 +1,7 @@
 #ifndef MEDIA_PREVIEW_BRIDGE_H
 #define MEDIA_PREVIEW_BRIDGE_H
 
+#include <QByteArray>
 #include <QQuickItem>
 
 struct MessageItem;
@@ -16,6 +17,9 @@ void showFor(QQuickItem* parent, const MessageItem& item, int mediaType);
 // Video 型分壳（同一 resolveBytes/pending watcher 基建，组件换 videoviewer）：
 // 字节齐 → 自动播放；缺 → pending + download + mediaUpdated 递料自动播放
 void showVideoFor(QQuickItem* parent, const MessageItem& item);
+// 字节解析共用面（mediaUrl → CacheDb getBytes；localPath → QFile 直读）；
+// messagepage P2/P4 共用，消多处 static 重复
+QByteArray resolveBytesFor(const QString& src);
 }
 
 #endif // MEDIA_PREVIEW_BRIDGE_H

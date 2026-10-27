@@ -4,8 +4,12 @@ import android.Manifest;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.content.ContentResolver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
+import android.os.PowerManager;
 import android.provider.Settings;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -71,6 +75,39 @@ public class PermissionHelper {
         if (!perms.isEmpty()) {
             ActivityCompat.requestPermissions(activity,
                 perms.toArray(new String[0]), REQ_PHONE_CALL);
+        }
+    }
+
+    // ── 电池优化白名单（dataSync 6h 超时的跨版本解法，2026-10）──
+    // 白名单后走非 FGS 保活路径：不进 dataSync 计时体系，无 6h 上限
+    //（Android 14 险档免疫；15/≤13 本就无涉）。
+    // 注意：不走 REQUEST_IGNORE_BATTERY_OPTIMIZATIONS 直弹——那需要
+    // manifest 权限声明（明令不改 manifest），故引导到设置列表页，
+    // 用户手动勾选 qsktox。
+    public static boolean isBatteryWhitelisted(Activity activity) {
+        PowerManager pm = activity.getSystemService(PowerManager.class);
+        return pm != null
+            && pm.isIgnoringBatteryOptimizations(activity.getPackageName());
+    }
+
+    // 仅首次引导（SharedPreferences 记忆；已白名单/已提示过均直接返回）
+    public static void requestBatteryWhitelist(Activity activity) {
+        if (isBatteryWhitelisted(activity)) {
+            return;
+        }
+        SharedPreferences sp = activity.getSharedPreferences(
+            "mobutil_prefs", Context.MODE_PRIVATE);
+        if (sp.getBoolean("battery_whitelist_prompted", false)) {
+            return;
+        }
+        sp.edit().putBoolean("battery_whitelist_prompted", true).apply();
+        try {
+            activity.startActivity(new Intent(
+                Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS));
+        } catch (Exception e) {
+            android.util.Log.w("qsktox",
+                "[PermissionHelper] battery whitelist settings page failed: " + e);
+            // 极端 OEM 无设置页：静默跳过（保活退回 FGS 路径仍可工作）
         }
     }
 

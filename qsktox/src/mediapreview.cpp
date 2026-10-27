@@ -104,4 +104,9 @@ void showVideoFor(QQuickItem* parent, const MessageItem& item)
         });
 }
 
+QByteArray resolveBytesFor(const QString& src)
+{
+    return resolveBytes(src);
+}
+
 } // namespace MediaPreview

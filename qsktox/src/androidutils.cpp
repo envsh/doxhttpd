@@ -138,6 +138,63 @@ void shareText(const QString& text)
     });
 }
 
+QString androidCacheDir()
+{
+    // 对象方法直接调用即可（GUI 线程 JNI 自动附加；仅取路径，不起 UI）
+    QJniObject ctx = QNativeInterface::QAndroidApplication::context();
+    if (!ctx.isValid()) {
+        return QString();
+    }
+    QJniObject dir = ctx.callObjectMethod("getCacheDir",
+        "()Ljava/io/File;");
+    if (!dir.isValid()) {
+        return QString();
+    }
+    return dir.callObjectMethod("getAbsolutePath",
+        "()Ljava/lang/String;").toString();
+}
+
+void openFile(const QString& path, const QString& mime)
+{
+    const QString type = mime.isEmpty() ? QStringLiteral(
+        "application/octet-stream") : mime;
+    QNativeInterface::QAndroidApplication::runOnAndroidMainThread(
+        [path, type]() {
+        QJniObject ctx = QNativeInterface::QAndroidApplication::context();
+        if (!ctx.isValid()) {
+            return;
+        }
+        // authority = <applicationId>.qtprovider（manifest :91-92 已配置）
+        const QString authority = ctx.callObjectMethod("getPackageName",
+            "()Ljava/lang/String;").toString()
+            + QStringLiteral(".qtprovider");
+        QJniObject file("java/io/File", "(Ljava/lang/String;)V",
+            QJniObject::fromString(path).object());
+        QJniObject uri = QJniObject::callStaticObjectMethod(
+            "androidx/core/content/FileProvider", "getUriForFile",
+            "(Landroid/content/Context;Ljava/lang/String;"
+            "Ljava/io/File;)Landroid/net/Uri;",
+            ctx.object(), QJniObject::fromString(authority).object(),
+            file.object());
+        if (!uri.isValid()) {
+            return;
+        }
+        QJniObject intent("android/content/Intent");
+        intent.callObjectMethod("setAction",
+            "(Ljava/lang/String;)Landroid/content/Intent;",
+            QJniObject::fromString(
+                "android.intent.action.VIEW").object());
+        intent.callObjectMethod("setDataAndType",
+            "(Landroid/net/Uri;Ljava/lang/String;)Landroid/content/Intent;",
+            uri.object(), QJniObject::fromString(type).object());
+        intent.callObjectMethod("addFlags",
+            "(I)Landroid/content/Intent;", (jint)0x1);
+            // ^ FLAG_GRANT_READ_URI_PERMISSION
+        ctx.callMethod<void>("startActivity",
+            "(Landroid/content/Intent;)V", intent.object());
+    });
+}
+
 #else
 
 QString androidDeviceName()
@@ -147,6 +204,17 @@ QString androidDeviceName()
 
 void androidRequestBluetoothNamePermission()
 {
+}
+
+QString androidCacheDir()
+{
+    return QString();
+}
+
+void openFile(const QString& path, const QString& mime)
+{
+    Q_UNUSED(path)
+    Q_UNUSED(mime)
 }
 
 void shareText(const QString& text)
