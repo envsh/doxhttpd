@@ -197,6 +197,17 @@ static QString mediaBarSizeText(qint64 bytes) {
     return QString::asprintf("%.1fGB", bytes/1073741824.0);
 }
 
+// 下载速率格式（qltox formatSpeed chatview.cpp:215-217 口径）；
+// bps<=0 返回空（状态条不显示拖尾分隔符）
+static QString mediaBarSpeedText(int bps) {
+    if (bps <= 0) { return QString(); }
+    const double kb = bps / 1024.0;
+    if (kb < 1024.0) { return QString::asprintf("%.1fKB/s", kb); }
+    const double mb = kb / 1024.0;
+    if (mb < 1024.0) { return QString::asprintf("%.1fMB/s", mb); }
+    return QString::asprintf("%.1fGB/s", mb / 1024.0);
+}
+
 // 媒体框底部的下载状态条几何（tap 命中与 paint 必须一致；isAudio 无条）
 static QRectF msgMediaBarRect(const MessageItem& item, qreal viewW) {
     const MediaDisplayMetrics mm = measureMedia(item, viewW);
@@ -340,6 +351,14 @@ static void paintMediaBody(QPainter* p, const MessageItem& item,
     const QRectF barRect(mediaRect.x(), mediaRect.bottom() - 22.0,
         mediaRect.width(), 22.0);
     p->fillRect(barRect, QColor(0, 0, 0, 140));
+    // InProgress：条内半透明白填充（宽度=pct）——qltox「顶部 4px 线性进度条」
+    // 在 qsk 状态条内的同义落位（22px 全高，bottom bar 不再另分顶条）
+    if (item.downloadState == MediaDlInProgress && item.downloadProgress >= 0
+        && item.downloadProgress <= 100) {
+        p->fillRect(QRectF(barRect.x(), barRect.y(),
+            barRect.width() * item.downloadProgress / 100.0, barRect.height()),
+            QColor(255, 255, 255, 38));
+    }
     QString barText;
     QColor barColor = Qt::white;
     switch (item.downloadState) {
@@ -348,13 +367,23 @@ static void paintMediaBody(QPainter* p, const MessageItem& item,
             ? (QString::fromUtf8("⬇⏳ ") + QString::number(item.downloadProgress)
                + QStringLiteral("%"))
             : QString::fromUtf8("⏳ …");
+        {
+            const QString spd = mediaBarSpeedText(item.downloadSpeedBps);
+            if (!spd.isEmpty()) {
+                barText += QString::fromUtf8(" · ") + spd;
+            }
+        }
         break;
     case MediaDlCompleted:
         barText = QString::fromUtf8("✓ 已下载");
         barColor = QColor(0x4C, 0xAF, 0x50);
         break;
     case MediaDlFailed:
-        barText = QString::fromUtf8("✗ 失败 · 点按重试");
+        // 详情直出（qltox tooltip 文案 chatview.cpp:3706-3708 的触摸端改版；
+        // 详情空保持旧文案；单行 TextSingleLine 已兜裁剪）
+        barText = item.errorMsg.isEmpty()
+            ? QString::fromUtf8("✗ 失败 · 点按重试")
+            : QString::fromUtf8("✗ ") + item.errorMsg;
         barColor = QColor(0xE5, 0x39, 0x35);
         break;
     default: {
@@ -1195,6 +1224,8 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
                         .contains(localPos)) {
                     m_items[row].downloadState = MediaDlInProgress;
                     m_items[row].downloadProgress = 0;
+                    m_items[row].downloadSpeedBps = 0;
+                    m_items[row].errorMsg = QString();
                     if (MessageRowItem* rowItem = m_visibleRows.value(row)) {
                         rowItem->setMessageDataNoUpdate(m_items[row]);
                         rowItem->update();
@@ -1301,7 +1332,7 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
 
     // 媒体行统一更新：url 命中（mediaUrl/thumbUrl）→ 全行落状态（不可见行
     // 也不丢）+ 可见行走合并刷新（与 avatarUpdated 同款节流口径）
-    auto applyMediaRow = [this](const QString& url, int state, int pct) {
+    auto applyMediaRow = [this](const QString& url, int state, int pct, int speed) {
         if (url.isEmpty()) {
             return;
         }
@@ -1311,6 +1342,13 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
             }
             if (state >= 0) {
                 m_items[idx].downloadState = state;
+                m_items[idx].downloadSpeedBps = speed;   // 状态切换即刻归零速率
+                if (state == MediaDlInProgress) {
+                    m_items[idx].errorMsg = QString();   // 重试再发起：清旧错误
+                }
+            } else {
+                // 纯进度更新（state<0）：速率随进度泵实时刷新
+                m_items[idx].downloadSpeedBps = speed;
             }
             m_items[idx].downloadProgress = pct;
             if (m_visibleRows.contains(idx)) {
@@ -1324,18 +1362,36 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
     // 下载完成（mediaUpdated，Task A 首发信号）→ Completed
     connect(MediaHost::instance(), &MediaHost::mediaUpdated,
         this, [applyMediaRow](const QString& url) {
-            applyMediaRow(url, MediaDlCompleted, 100);
+            applyMediaRow(url, MediaDlCompleted, 100, 0);
         });
     // 状态迁移（InProgress/Completed/Failed）
     connect(MediaHost::instance(), &MediaHost::mediaStateChanged,
         this, [applyMediaRow](const QString& url, int state) {
             applyMediaRow(url, state,
-                state == MediaDlCompleted ? 100 : 0);
+                state == MediaDlCompleted ? 100 : 0, 0);
         });
-    // 进度（state<0 → 只更进度，不覆盖状态）
+    // 进度（state<0 → 只更进度 + 速率，不覆盖状态）
     connect(MediaHost::instance(), &MediaHost::mediaProgress,
-        this, [applyMediaRow](const QString& url, int pct, int /*speedBps*/) {
-            applyMediaRow(url, -1, pct);
+        this, [applyMediaRow](const QString& url, int pct, int speedBps) {
+            applyMediaRow(url, -1, pct, speedBps);
+        });
+    // 失败详情（mediaFailed，qltox mediaErrorMsg 链）：独立 lambda，
+    // 专走 errorMsg 填充（mediaFailed 必伴随 mediaStateChanged(Failed)）
+    connect(MediaHost::instance(), &MediaHost::mediaFailed,
+        this, [this](const QString& url, const QString& errorInfo) {
+            for (int idx = 0; idx < m_items.size(); ++idx) {
+                if (m_items[idx].mediaUrl != url
+                    && m_items[idx].thumbUrl != url) {
+                    continue;
+                }
+                m_items[idx].errorMsg = errorInfo;
+                if (m_visibleRows.contains(idx)) {
+                    queueVisibleRefresh(idx);
+                }
+            }
+            if (m_isScrolling) {
+                m_scrollIdleTimer.start();
+            }
         });
 }
 

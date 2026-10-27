@@ -68,8 +68,11 @@ struct MessageItem {
     // 状态条覆盖媒体框底部 22px（NotRequested/Failed 可点 → tap 触发下载）
     int     downloadState = 0;     // 0=NotRequested 1=InProgress 2=Completed 3=Failed
     int     downloadProgress = 0;  // 0-100；-1=总长未知（显示 …）
+    int     downloadSpeedBps = 0;  // 下载速率（mediaBarSpeedText 显示用；非进度更新归零）
     qint64  fileSizeBytes = 0;     // 原始字节（<1MB 自动预取判定 + 状态条大小后缀）
     QString thumbUrl;              // CS info.thumbnail_url（视频缩略图源）
+    QString errorMsg;              // 下载失败详情（qltox mediaErrorMsg 触摸端口径：
+                                   // 无 tooltip，Failed 状态条内直出，单行自动裁剪）
 };
 
 class MessageRowNode : public QskPaintedNode

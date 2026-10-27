@@ -104,6 +104,7 @@ void MediaHost::download(const QString& url)
     if (httpUrl.isEmpty()) {
         ALOG_WARN("media download skip: bad url", url);
         Q_EMIT mediaStateChanged(url, MediaDlFailed);
+        Q_EMIT mediaFailed(url, QStringLiteral("bad url"));
         return;
     }
     m_pending.insert(url);
@@ -277,6 +278,7 @@ void MediaHost::customEvent(QEvent* event)
         } else {
             ALOG_WARN("media fetch failed", key, evt->errorInfo);
             Q_EMIT mediaStateChanged(key, MediaDlFailed);
+            Q_EMIT mediaFailed(key, QString::fromStdString(evt->errorInfo));
         }
         return;
     }

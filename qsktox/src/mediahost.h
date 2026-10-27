@@ -79,6 +79,9 @@ Q_SIGNALS:
     void mediaUpdated(const QString& url);
     void mediaProgress(const QString& url, int pct, int speedBps);
     void mediaStateChanged(const QString& url, int state);
+    // 失败详情（qltox ChatElement::mediaErrorMsg 口径，chatview.h:129）：
+    // 信号新增而不改 mediaStateChanged 签名（既有多处 emit/连接不受影响）
+    void mediaFailed(const QString& url, const QString& errorInfo);
 
 protected:
     void customEvent(QEvent* event) override;
