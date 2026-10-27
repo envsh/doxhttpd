@@ -26,6 +26,52 @@ static constexpr qreal BUBBLE_PADDING_V = 8;
 static constexpr qreal SIDE_MARGIN = 12;
 static constexpr qreal AVATAR_SIZE = 36;
 static constexpr qreal AVATAR_SPACING = 8;
+static constexpr qreal HDR_BTN_SIZE = 14;
+static constexpr qreal HDR_BTN_GAP = 4;
+
+// 卡片 header 右上角三钮：📋 source / 🌐 translate / 🔊 朗读。
+// 本次空操作：仅绘制并存 Rect 锚点，不挂任何点击事件。
+// 显示条件镜像 qltox chatview（chatview.cpp:1203-1214/1295-1306）：
+// audio 类卡片整组不画；🔊 仅正文非空时画（m_speakRect 置空 Rect）。
+// 左→右依 qltox 口径：source | translate | speak（speak 最贴行右缘）。
+static void msgDrawHeaderButtons(QPainter* painter, MessageRowNode* node,
+                                 qreal rightEdge, const MessageItem& item) {
+    node->m_sourceRect = QRectF();
+    node->m_translateRect = QRectF();
+    node->m_speakRect = QRectF();
+    if (item.isAudio) {
+        return;
+    }
+
+    const qreal btnAreaW = HDR_BTN_SIZE * 3 + HDR_BTN_GAP * 2;
+    const qreal btnY = (NAME_HEIGHT - HDR_BTN_SIZE) / 2.0;
+    const qreal srcX = rightEdge - btnAreaW;
+    const qreal trX = srcX + HDR_BTN_SIZE + HDR_BTN_GAP;
+    const qreal spX = trX + HDR_BTN_SIZE + HDR_BTN_GAP;
+    node->m_sourceRect = QRectF(srcX, btnY, HDR_BTN_SIZE, HDR_BTN_SIZE);
+    node->m_translateRect = QRectF(trX, btnY, HDR_BTN_SIZE, HDR_BTN_SIZE);
+    if (!item.content.isEmpty()) {
+        node->m_speakRect = QRectF(spX, btnY, HDR_BTN_SIZE, HDR_BTN_SIZE);
+    }
+
+    painter->save();
+    QFont iconFont;
+    iconFont.setPixelSize(11);
+    painter->setFont(iconFont);
+    painter->setPen(QColor("#666"));
+    painter->setBrush(Qt::NoBrush);
+    painter->drawEllipse(node->m_sourceRect);
+    painter->drawEllipse(node->m_translateRect);
+    if (node->m_speakRect.isValid()) {
+        painter->drawEllipse(node->m_speakRect);
+    }
+    painter->drawText(node->m_sourceRect, Qt::AlignCenter, QString::fromUtf8("📋"));
+    painter->drawText(node->m_translateRect, Qt::AlignCenter, QString::fromUtf8("🌐"));
+    if (node->m_speakRect.isValid()) {
+        painter->drawText(node->m_speakRect, Qt::AlignCenter, QString::fromUtf8("🔊"));
+    }
+    painter->restore();
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // 120 条共享模拟消息数据（长短不一）
@@ -319,12 +365,22 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
         qreal bubbleX = w - bubbleWidth - SIDE_MARGIN;
         qreal bubbleY = NAME_HEIGHT;
 
-        // 名字
+        // 名字（右上角让出三钮区域，超宽省略）
         painter->setPen(QColor("#888"));
         QFontMetrics nameFm(nameFont);
         int nameW = nameFm.horizontalAdvance(m_item.sender);
+        QString shownName = m_item.sender;
+        const qreal btnAreaW = HDR_BTN_SIZE * 3 + HDR_BTN_GAP * 2;
+        const qreal maxNameW = w - SIDE_MARGIN * 2 - btnAreaW - 4;
+        if (nameW > maxNameW) {
+            shownName = nameFm.elidedText(shownName, Qt::ElideRight, (int)maxNameW);
+            nameW = nameFm.horizontalAdvance(shownName);
+        }
         painter->drawText(QRectF(w - SIDE_MARGIN - nameW, 2, nameW, NAME_HEIGHT - 4),
-            Qt::AlignLeft | Qt::AlignVCenter, m_item.sender);
+            Qt::AlignLeft | Qt::AlignVCenter, shownName);
+
+        // header 三钮（空操作，仅绘制）
+        msgDrawHeaderButtons(painter, this, w - SIDE_MARGIN, m_item);
 
         // 气泡背景
         painter->setBrush(QColor("#1565C0"));
@@ -410,6 +466,9 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
         painter->setPen(QColor("#888"));
         painter->drawText(QRectF(bubbleX, 2, 200, NAME_HEIGHT - 4),
             Qt::AlignLeft | Qt::AlignVCenter, m_item.sender);
+
+        // header 三钮（空操作，仅绘制；行右缘锚点，与 self 口径一致）
+        msgDrawHeaderButtons(painter, this, w - SIDE_MARGIN, m_item);
 
         // 气泡背景
         painter->setBrush(QColor("#2a2a3e"));

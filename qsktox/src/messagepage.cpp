@@ -111,7 +111,11 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             const int rawDataOption = menu->addOption(
                 QskLabelData(QString::fromUtf8("查看原始数据")));
             menu->addSeparator();
-            menu->addOption(QskLabelData(QString::fromUtf8("删除")));
+            // 间隔后:本地删除 / 撤回消息（qltox chatview.cpp:4026-4036 口径
+            // reply/edit → separator → delete_local → redact_message）；
+            // 空操作:不取 index、不进 triggered 分支,点击后走既有 close() 收尾
+            menu->addOption(QskLabelData(QString::fromUtf8("本地删除")));
+            menu->addOption(QskLabelData(QString::fromUtf8("撤回消息")));
 
             menu->setOrigin(pos);
 

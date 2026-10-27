@@ -70,6 +70,11 @@ private:
     QImage m_avatarImage;
     quint32 m_avatarTick = 0;
     QRectF m_statusRect;
+public:
+    // header 右上角三钮锚点（空操作，本次仅绘制；后续补点击时直接消费）
+    QRectF m_sourceRect;    // 📋 原文
+    QRectF m_translateRect; // 🌐 翻译
+    QRectF m_speakRect;     // 🔊 朗读（正文为空时置空）
 };
 
 class MessageRowItem : public QQuickItem
