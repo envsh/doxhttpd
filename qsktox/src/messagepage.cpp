@@ -201,8 +201,38 @@ auto* inputBar = new QskLinearBox(Qt::Horizontal, layout);
     attachBtn->setPreferredWidth(40);
     attachBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
-    connect(attachBtn, &QskAbstractButton::clicked, this, [this]() {
-        showAndroidToast(QString::fromUtf8("📎 附件未实装"));
+    connect(attachBtn, &QskAbstractButton::clicked, this, [this, attachBtn]() {
+        // 附件菜单（矩阵 CS msgtype 全集，网搜核对 spec
+        // instant_messaging.md + matrix-js-sdk MsgType）：
+        //   🖼 m.image 📹 m.video 🎵 m.audio 📄 m.file 📍 m.location
+        // 全部占位空响应：triggered 只收尾 close（与长按菜单"本地删除/
+        // 撤回消息"空操作同款"不取 index、不进分支"口径；逐项实装另批）
+        for (auto* old : findChildren<QskMenu*>()) {
+            old->deleteLater();
+        }
+        for (auto* old : findChildren<MenuOverlay*>()) {
+            old->deleteLater();
+        }
+        auto* menu = new QskMenu(this);
+        menu->setModal(true);
+        menu->addOption(QskLabelData(QString::fromUtf8("🖼 图片")));
+        menu->addOption(QskLabelData(QString::fromUtf8("📹 视频")));
+        menu->addOption(QskLabelData(QString::fromUtf8("🎵 音频")));
+        menu->addOption(QskLabelData(QString::fromUtf8("📄 文件")));
+        menu->addOption(QskLabelData(QString::fromUtf8("📍 位置")));
+        menu->setOrigin(attachBtn->mapToItem(this,
+            QPointF(0.0, attachBtn->height())));
+        connect(menu, &QskMenu::triggered, this, [this](int index) {
+            Q_UNUSED(index);   // 响应为空（占位）
+            if (auto* m = qobject_cast<QskMenu*>(QObject::sender())) {
+                m->close();
+            }
+        });
+        {
+            auto* overlay = new MenuOverlay(menu);
+            connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
+        }
+        menu->open();
     });
 
     auto* micBtn = new QskPushButton(QString::fromUtf8("🎤"), inputBar);
