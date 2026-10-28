@@ -2,9 +2,12 @@
 #define MSGDB_BRIDGE_H
 
 #include "messagelist.h"
+#include "message_db.h"
 #include <QObject>
 #include <QString>
 #include <QVector>
+#include <memory>
+#include <functional>
 
 namespace MsgDbBridge {
 
@@ -107,6 +110,13 @@ void insertMessage(const QString& protocol, const QString& chatId,
                    const MessageItem& item, RowidCallback cb, void* ctx);
 
 void updateSendStateByRowid(int64_t rowid, MessageItem::SendState state);
+
+// ── 翻译缓存透传（translations 表，schema 已在 message_db；零 DDL）──
+// done 在 GUI 线程回程（async 包装 Queued）；无缓存行 done(nullptr)
+void translationLookup(qint64 msgRowid, const QString& lang,
+                       std::function<void(std::unique_ptr<TranslationRow>)> done);
+// INSERT OR REPLACE 写入（异步）；msgRowid<=0 忽略
+void translationSave(qint64 msgRowid, const QString& lang, const QString& text);
 
 } // namespace MsgDbBridge
 

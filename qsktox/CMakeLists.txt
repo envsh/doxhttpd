@@ -70,6 +70,10 @@ set(QSKTOX_SOURCES
     src/avatarhost.cpp
     src/mediahost.h
     src/mediahost.cpp
+    src/translatehost.h
+    src/translatehost.cpp
+    src/linkpreviewhost.h
+    src/linkpreviewhost.cpp
     src/msgdb_bridge.h
     src/msgdb_bridge.cpp
     src/messagelist.h

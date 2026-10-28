@@ -567,6 +567,47 @@ void updateSendStateByRowid(int64_t rowid, MessageItem::SendState state)
     db->update_message(rowid, std::move(upd), [](bool) {});
 }
 
+void translationLookup(qint64 msgRowid, const QString& lang,
+                       std::function<void(std::unique_ptr<TranslationRow>)> done)
+{
+    if (msgRowid <= 0) {
+        if (done) {
+            done(nullptr);
+        }
+        return;
+    }
+    auto* db = Storage::instance().messageDbAsync();
+    if (!db) {
+        if (done) {
+            done(nullptr);
+        }
+        return;
+    }
+    // async 包装回程（Queued 到 GUI 线程）
+    db->get_translation(msgRowid, lang.toStdString(),
+                        [done](std::unique_ptr<TranslationRow> row) {
+        if (done) {
+            done(std::move(row));
+        }
+    });
+}
+
+void translationSave(qint64 msgRowid, const QString& lang, const QString& text)
+{
+    if (msgRowid <= 0 || text.isEmpty()) {
+        return;
+    }
+    auto* db = Storage::instance().messageDbAsync();
+    if (!db) {
+        return;
+    }
+    TranslationRow row;
+    row.message_rowid = msgRowid;
+    row.target_lang = lang.toStdString();
+    row.translated_text = text.toUtf8().constData();
+    db->set_translation(std::move(row), [](bool) {});
+}
+
 } // namespace MsgDbBridge
 
 #include "moc_msgdb_bridge.cpp"

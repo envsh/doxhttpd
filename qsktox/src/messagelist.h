@@ -81,6 +81,25 @@ struct MessageItem {
     QString errorMsg;              // 下载失败详情（qltox mediaErrorMsg 触摸端口径：
                                    // 无 tooltip，Failed 状态条内直出，单行自动裁剪）
     bool    mediaPlaying = false;  // 语音行内播放中（P2 纯内存；tap toggle 切换）
+
+    // == 自动翻译字段（纯内存；持久面 = translations 表缓存，重启后
+    //    scan 命中缓存即时回灌；qltox ChatElement 翻译字段口径）==
+    enum TransState { TransNone=0, TransScheduled=1, TransInFlight=2, TransDone=3 };
+    QString translatedText;     // 译文（Done 时渲染：小字 muted 🌐 前缀）
+    QString translateError;     // 失败详情（控制台日志口，UI 不显示）
+    bool    showTranslation = false; // true=显示译文 / false=收起（🌐 头钮 toggle）
+    int     transState = TransNone;
+    qint64  translateKey = 0;   // 定位键：dbRowid>0 优先，否则 localId
+
+    // == 自动链接预览字段（纯内存；重启清零后 scan 重抓，LinkPreviewCache
+    //    结构化缓存兜底；qltox 预览字段口径）==
+    // 语义 = 请求 URL → 抓内容信息 → 更新本行绘制；点击跳转另批。
+    enum LpState { LpNone=0, LpScheduled=1, LpReady=2, LpFailed=3 };
+    int     lpState = LpNone;
+    QString lpUrl;              // 规范化 URL（缓存键，linkReady 定位）
+    QString lpTitle;
+    QString lpDesc;
+    QString lpSite;
 };
 
 class MessageRowNode : public QskPaintedNode
@@ -190,6 +209,11 @@ public:
     // content 并重算行高（content 变化不改行高结构，rebuildLayout 全量廉推）；
     // msgId 未命中返回 false（调用方走原路径兜底）
     bool replaceRowContent(const QString& msgId, const QString& newContent);
+    // 自动翻译/链接预览单次扫描（updateVisibleRows 末尾调用，qltox
+    // paintEvent 触发对位迁回布局层）：可见行（含 ±2 边带）→ Scheduled → 发起
+    void scanAutoFeatures(int rowMin, int rowMax);
+    // 翻译/预览回填与行高变化后的统一重排（rebuild + 内容高重算 + 可见行刷新）
+    void refreshLayoutAndView();
 
 Q_SIGNALS:
     void rowClicked(int row);

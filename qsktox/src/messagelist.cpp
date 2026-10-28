@@ -5,6 +5,8 @@
 #include "avatar_manager.h"
 #include "avatarutil.h"
 #include "mediahost.h"
+#include "translatehost.h"
+#include "linkpreviewhost.h"
 #include <private/qquicktaphandler_p.h>
 #include <private/qquickpincharea_p.h>
 #include <QPainter>
@@ -23,6 +25,8 @@
 #include <QBuffer>
 #include <QProcess>
 #include <QStandardPaths>
+#include <QRegularExpression>
+#include <QPointer>
 #include <QFile>
 #include <QDir>
 
@@ -738,6 +742,119 @@ static MessageTextMetrics measureMessageText(const QString& content,
     return m;
 }
 
+// ── 自动翻译/链接预览扩展块（qltox 翻译/预览渲染移植口径）──
+// 译文块（TransDone && showTranslation）：小 2pt、muted、🌐 前缀；
+// 预览卡（LpReady）：圆角底三行（site/title/desc），与译文互斥
+//（显示译文时不画卡，qltox chatview.cpp:2157 口径）。
+
+static constexpr qreal TR_GAP = 4;
+static constexpr qreal LP_CARD_PAD = 6;
+
+static void drawWrappedText(QPainter* painter, const QString& text,
+                            const QFont& font, const QRectF& rect);
+
+static qreal translateBlockHeight(const MessageItem& item, qreal textWidth)
+{
+    if (item.transState != MessageItem::TransDone
+        || !item.showTranslation || item.translatedText.isEmpty()) {
+        return 0.0;
+    }
+    QFont trFont;
+    trFont.setPixelSize(14);
+    const MessageTextMetrics m =
+        measureMessageText(item.translatedText, trFont, textWidth);
+    return TR_GAP + m.height;
+}
+
+static qreal linkPreviewCardHeight(const MessageItem& item)
+{
+    if (item.lpState != MessageItem::LpReady
+        || item.showTranslation || item.lpUrl.isEmpty()) {
+        return 0.0;
+    }
+    qreal h = LP_CARD_PAD;
+    if (!item.lpSite.isEmpty()) {
+        h += 14;
+    }
+    if (!item.lpTitle.isEmpty()) {
+        h += 18;
+    }
+    if (!item.lpDesc.isEmpty()) {
+        h += 14;
+    }
+    if (h <= LP_CARD_PAD) {
+        return 0.0;
+    }
+    return h + LP_CARD_PAD;
+}
+
+static void paintTranslateBlock(QPainter* painter, const MessageItem& item,
+                                qreal x, qreal y, qreal width)
+{
+    if (width <= 0.0) {
+        return;
+    }
+    QFont trFont;
+    trFont.setPixelSize(14);
+    painter->save();
+    painter->setFont(trFont);
+    painter->setPen(QColor("#9aa8c0"));
+    // 🌐 前缀（qltox 译文行口径，qFromUtf8 不适用 Qt6：qsktox 源码 Qt6
+    // 按源编码 UTF-8 读取；qskcommit 口径用 QStringLiteral/原始字面量）
+    const QString shown = QStringLiteral("🌐 ") + item.translatedText;
+    const qreal trH = translateBlockHeight(item, width) - TR_GAP;
+    drawWrappedText(painter, shown, trFont, QRectF(x, y, width, trH));
+    painter->restore();
+}
+
+static void paintLinkPreviewCard(QPainter* painter, const MessageItem& item,
+                                 qreal x, qreal y, qreal width)
+{
+    const qreal cardH = linkPreviewCardHeight(item);
+    if (cardH <= 0.0 || width <= 0.0) {
+        return;
+    }
+    painter->save();
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(QColor(0x23, 0x23, 0x36)); // 微异于气泡底 #2a2a3e
+    painter->drawRoundedRect(QRectF(x, y, width, cardH), 8, 8);
+    const qreal inner = width - LP_CARD_PAD * 2;
+    qreal cy = y + LP_CARD_PAD;
+    if (!item.lpSite.isEmpty()) {
+        QFont siteFont;
+        siteFont.setPixelSize(11);
+        QFontMetrics fmS(siteFont);
+        painter->setFont(siteFont);
+        painter->setPen(QColor("#8a97b5"));
+        painter->drawText(QRectF(x + LP_CARD_PAD, cy, inner, 14),
+            Qt::AlignLeft | Qt::AlignVCenter,
+            fmS.elidedText(item.lpSite, Qt::ElideRight, (int)inner));
+        cy += 14;
+    }
+    if (!item.lpTitle.isEmpty()) {
+        QFont titleFont;
+        titleFont.setPixelSize(14);
+        QFontMetrics fmT(titleFont);
+        painter->setFont(titleFont);
+        painter->setPen(QColor("#e6e9f0"));
+        painter->drawText(QRectF(x + LP_CARD_PAD, cy, inner, 18),
+            Qt::AlignLeft | Qt::AlignVCenter,
+            fmT.elidedText(item.lpTitle, Qt::ElideRight, (int)inner));
+        cy += 18;
+    }
+    if (!item.lpDesc.isEmpty()) {
+        QFont descFont;
+        descFont.setPixelSize(12);
+        QFontMetrics fmD(descFont);
+        painter->setFont(descFont);
+        painter->setPen(QColor("#9aa8c0"));
+        painter->drawText(QRectF(x + LP_CARD_PAD, cy, inner, 14),
+            Qt::AlignLeft | Qt::AlignVCenter,
+            fmD.elidedText(item.lpDesc, Qt::ElideRight, (int)inner));
+    }
+    painter->restore();
+}
+
 static qreal calcRowHeight(const MessageItem& item, qreal availableWidth)
 {
     QFont msgFont;
@@ -765,6 +882,9 @@ static qreal calcRowHeight(const MessageItem& item, qreal availableWidth)
         if (!quoteLineFor(item).isEmpty()) {
             bubbleHeight += QUOTE_LINE_H;
         }
+        // 翻译/预览扩展块计入行高（仅文本行；媒体+caption 行不套）
+        bubbleHeight += translateBlockHeight(item, textWidth);
+        bubbleHeight += linkPreviewCardHeight(item);
     }
     if (bubbleHeight < 36) {
         bubbleHeight = 36;
@@ -987,6 +1107,22 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
             }
             textLayout.endLayout();
             textLayout.draw(painter, textRect.topLeft());
+            // 翻译/预览扩展块（qltox 口径：译文双行同气泡；显示译文时
+            // 不画预览卡；本批卡片无点击跳转）
+            {
+                qreal extY = textRect.y() + textHeight;
+                const qreal trH = translateBlockHeight(m_item, textWidth);
+                if (trH > 0.0) {
+                    paintTranslateBlock(painter, m_item,
+                        bubbleX + BUBBLE_PADDING_H, extY, textWidth);
+                    extY += trH;
+                }
+                if (linkPreviewCardHeight(m_item) > 0.0) {
+                    paintLinkPreviewCard(painter, m_item,
+                        bubbleX + BUBBLE_PADDING_H, extY, textWidth);
+                }
+            }
+
         }
 
         // 时间
@@ -1107,6 +1243,20 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
             }
             textLayout2.endLayout();
             textLayout2.draw(painter, textRect.topLeft());
+            // 同上：翻译/预览扩展块（他人消息分支）
+            {
+                qreal extY2 = textRect.y() + textHeight;
+                const qreal trH2 = translateBlockHeight(m_item, textWidth);
+                if (trH2 > 0.0) {
+                    paintTranslateBlock(painter, m_item,
+                        bubbleX + BUBBLE_PADDING_H, extY2, textWidth);
+                    extY2 += trH2;
+                }
+                if (linkPreviewCardHeight(m_item) > 0.0) {
+                    paintLinkPreviewCard(painter, m_item,
+                        bubbleX + BUBBLE_PADDING_H, extY2, textWidth);
+                }
+            }
         }
 
         // 时间
@@ -1144,7 +1294,13 @@ QskHashValue MessageRowNode::hash(const void*) const
         ^ qHash(m_item.downloadProgress)
         ^ qHash(m_item.mediaPlaying ? 1 : 0)
         ^ qHash(static_cast<qulonglong>(m_item.fileSizeBytes))
-        ^ m_mediaTick;
+        ^ m_mediaTick
+        ^ qHash(m_item.transState)
+        ^ qHash(m_item.translatedText)
+        ^ (m_item.showTranslation ? 0x5555u : 0u)
+        ^ qHash(m_item.lpState) ^ qHash(m_item.lpUrl)
+        ^ qHash(m_item.lpTitle) ^ qHash(m_item.lpDesc)
+        ^ qHash(m_item.lpSite);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1391,6 +1547,61 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
     m_contentView = new QQuickItem(this);
     setScrolledItem(m_contentView);
 
+    // ── 自动翻译 / 链接预览回填接线（回程 GUI 信号 → 行内字段 → 重排）──
+    connect(TranslateHost::instance(), &TranslateHost::translateDone, this,
+        [this](qint64 key, bool ok, const QString& text, const QString& err) {
+        for (int i = 0; i < m_items.size(); ++i) {
+            MessageItem& it = m_items[i];
+            if (it.translateKey != key
+                || it.transState != MessageItem::TransInFlight) {
+                continue;
+            }
+            if (ok && !text.isEmpty()) {
+                it.translatedText = text;
+                it.translateError = QString();
+                it.transState = MessageItem::TransDone;
+                it.showTranslation = true;
+                // 持久面：translations 表缓存（msgRowid<=0 不落）
+                MsgDbBridge::translationSave(it.dbRowid, QStringLiteral("zh"),
+                    text);
+            } else {
+                // 失败：UI 静默（host 侧已控制台日志）；置终态防扫描重试
+                it.translateError = err;
+                it.transState = MessageItem::TransDone;
+                it.showTranslation = false;
+            }
+            if (MessageRowItem* rowItem = m_visibleRows.value(i)) {
+                rowItem->setMessageDataNoUpdate(m_items[i]);
+            }
+            refreshLayoutAndView();
+            break;
+        }
+    });
+    connect(LinkPreviewHost::instance(), &LinkPreviewHost::linkReady, this,
+        [this](const QString& urlKey, const LinkPreviewData& data) {
+        for (int i = 0; i < m_items.size(); ++i) {
+            MessageItem& it = m_items[i];
+            if (it.lpUrl != urlKey
+                || it.lpState != MessageItem::LpScheduled) {
+                continue;
+            }
+            if (data.ok) {
+                it.lpTitle = data.title;
+                it.lpDesc = data.description;
+                it.lpSite = data.siteName.isEmpty()
+                    ? data.url : data.siteName;
+                it.lpState = MessageItem::LpReady;
+            } else {
+                it.lpState = MessageItem::LpFailed;
+            }
+            if (MessageRowItem* rowItem = m_visibleRows.value(i)) {
+                rowItem->setMessageDataNoUpdate(m_items[i]);
+            }
+            refreshLayoutAndView();
+            break;
+        }
+    });
+
     // ── QQuickTapHandler — 单击、长按检测 ──
     auto* tapHandler = new QQuickTapHandler(m_contentView);
     tapHandler->setGesturePolicy(QQuickTapHandler::DragThreshold);
@@ -1408,6 +1619,24 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
                 && isAvatarHit(row, localPos.x(), localPos.y())) {
                 Q_EMIT avatarClicked(row, mapToScene(localPos));
                 return;
+            }
+            // 🌐 头钮命中（首个接线头钮）：Done 行切 showTranslation；
+            // 锚点数学与 msgDrawHeaderButtons 同源（行顶 header 带）
+            if (m_items[row].transState == MessageItem::TransDone) {
+                const auto vrTap = viewContentsRect();
+                const QPointF cPos(localPos.x() - vrTap.left(),
+                    localPos.y() - vrTap.top() + scrollPos().y());
+                const qreal btnAreaT = HDR_BTN_SIZE * 3 + HDR_BTN_GAP * 2;
+                const qreal srcXh = m_contentView->width() - SIDE_MARGIN - btnAreaT;
+                const QRectF trRect(
+                    srcXh + HDR_BTN_SIZE + HDR_BTN_GAP,
+                    m_rowYOffsets[row] + (NAME_HEIGHT - HDR_BTN_SIZE) / 2.0,
+                    HDR_BTN_SIZE, HDR_BTN_SIZE);
+                if (trRect.contains(cPos)) {
+                    m_items[row].showTranslation = !m_items[row].showTranslation;
+                    refreshLayoutAndView();
+                    return;
+                }
             }
             // 媒体下载状态条命中：NotRequested/Failed → 发起/重试
             //（qltox startMediaDownload mw:4114 口径；防重复由 MediaHost
@@ -2127,6 +2356,112 @@ void MessageListWidget::updateSendStateByRowid(int64_t rowid,
     }
 }
 
+void MessageListWidget::refreshLayoutAndView()
+{
+    rebuildLayout(this);
+    if (m_contentView) {
+        m_contentView->setSize(QSizeF(m_contentView->width(),
+            m_rowYOffsets.isEmpty() ? 0.0 : m_rowYOffsets.last()));
+    }
+    updateVisibleRows();
+    update();
+}
+
+// ── 首条 URL 提取（qltox extractLinks 首元裁剪版，chatview.cpp:2939 口径：
+// 尾标点/括号剔除；仅取首个，预览语义 = 一行一卡）──
+static QString firstPreviewUrlFor(const QString& text)
+{
+    static const QRegularExpression re(
+        QStringLiteral("(https?://[^\\s<>\"']+)"),
+        QRegularExpression::CaseInsensitiveOption);
+    QRegularExpressionMatch m = re.match(text);
+    if (!m.hasMatch()) {
+        return QString();
+    }
+    QString u = m.captured(1);
+    while (!u.isEmpty()) {
+        const QChar c = u.at(u.size() - 1);
+        if (c == '.' || c == ',' || c == ';' || c == ':' || c == '!'
+            || c == '?' || c == ')' || c == ']' || c == '}') {
+            u.chop(1);
+        } else {
+            break;
+        }
+    }
+    return u;
+}
+
+void MessageListWidget::scanAutoFeatures(int rowMin, int rowMax)
+{
+    if (m_rowHeights.size() != m_items.size()
+        || m_rowYOffsets.size() != m_items.size() + 1) {
+        return;
+    }
+    if (m_items.isEmpty() || rowMin > rowMax) {
+        return;
+    }
+    // 触发区间 = 可见行（updateVisibleRows 同一 ±2 边带口径，qltox
+    // paintEvent 只对绘出行触发的对位）；越界 clamp 收口
+    const int lo = qBound(0, rowMin, m_items.size() - 1);
+    const int hi = rowMax >= m_items.size() ? m_items.size() - 1 : rowMax;
+    if (lo > hi) {
+        return;
+    }
+    QPointer<MessageListWidget> guard(this);
+    for (int i = lo; i <= hi; ++i) {
+        const MsgMediaType mt = msgMediaTypeOf(m_items[i]);
+        const bool isTextRow = (mt == MsgMediaType::Text
+            || mt == MsgMediaType::Unknown);
+        if (!isTextRow || m_items[i].content.isEmpty()) {
+            continue;
+        }
+        // ── 自动翻译（决策 1=A：默认开，toLang=中文，仅他人文本消息）──
+        if (TranslateHost::enabled() && !m_items[i].isSelf
+            && m_items[i].transState == MessageItem::TransNone
+            && TranslateHost::needsTranslation(m_items[i].content)) {
+            m_items[i].transState = MessageItem::TransScheduled;
+            MessageItem& item = m_items[i];
+            // 定位键：DB 行优先（DB 加载行 localId=0）
+            item.translateKey = item.dbRowid > 0 ? item.dbRowid : item.localId;
+            MsgDbBridge::translationLookup(item.dbRowid, QStringLiteral("zh"),
+                [guard, row = i](std::unique_ptr<TranslationRow> tr) {
+                if (!guard || row < 0 || row >= guard->m_items.size()) {
+                    return;
+                }
+                MessageItem& it = guard->m_items[row];
+                if (it.transState != MessageItem::TransScheduled) {
+                    return;
+                }
+                // 缓存命中 → 免请求直接 Done 显示（重启后重灌口）
+                const QString cached =
+                    tr ? QString::fromUtf8(tr->translated_text.c_str())
+                       : QString();
+                if (!cached.isEmpty()) {
+                    it.translatedText = cached;
+                    it.translateError = QString();
+                    it.transState = MessageItem::TransDone;
+                    it.showTranslation = true;
+                    guard->refreshLayoutAndView();
+                } else {
+                    it.transState = MessageItem::TransInFlight;
+                    TranslateHost::instance()->requestTranslate(
+                        it.translateKey, it.content);
+                }
+            });
+        }
+        // ── 自动链接预览（文本行首条 URL）──
+        if (LinkPreviewHost::enabled()
+            && m_items[i].lpState == MessageItem::LpNone) {
+            const QString url = firstPreviewUrlFor(m_items[i].content);
+            if (!url.isEmpty()) {
+                m_items[i].lpState = MessageItem::LpScheduled;
+                m_items[i].lpUrl = linkPreviewNormalizeUrl(url);
+                LinkPreviewHost::instance()->requestPreview(m_items[i].lpUrl);
+            }
+        }
+    }
+}
+
 bool MessageListWidget::replaceRowContent(const QString& msgId,
                                           const QString& newContent)
 {
@@ -2369,6 +2704,10 @@ void MessageListWidget::updateVisibleRows()
             row->update();
         }
     }
+
+    // 自动翻译 / 链接预览触发扫描（可见行起效；qltox paintEvent 触发
+    // 方式的布局层对位）
+    scanAutoFeatures(rowMin, rowMax);
 }
 
 void MessageListWidget::geometryChangeEvent(QskGeometryChangeEvent* event)
