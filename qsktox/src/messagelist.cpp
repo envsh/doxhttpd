@@ -21,6 +21,10 @@
 #include <QImageReader>
 #include <QMovie>
 #include <QBuffer>
+#include <QProcess>
+#include <QStandardPaths>
+#include <QFile>
+#include <QDir>
 
 static constexpr qreal MIN_ROW_HEIGHT = 60;
 static constexpr qreal NAME_HEIGHT = 20;
@@ -32,6 +36,8 @@ static constexpr qreal AVATAR_SIZE = 36;
 static constexpr qreal AVATAR_SPACING = 8;
 static constexpr qreal HDR_BTN_SIZE = 14;
 static constexpr qreal HDR_BTN_GAP = 4;
+// 引用摘要条行高（批2，TG 式正文上方灰条）
+static constexpr qreal QUOTE_LINE_H = 22;
 
 // 卡片 header 右上角三钮：📋 source / 🌐 translate / 🔊 朗读。
 // 本次空操作：仅绘制并存 Rect 锚点，不挂任何点击事件。
@@ -41,6 +47,87 @@ static constexpr qreal HDR_BTN_GAP = 4;
 
 // ── 媒体消息分类（镜像 qltox etype 派发，chatview.cpp:4074/:2986 口径）──
 // MsgMediaType 定义移至 messagelist.h（mediaBodyTapped 信号跨 TU 需要枚举可见）
+
+// ── 渲染文本归一 helpers（批2）──
+
+// 引用摘要行（qltox " -- Re:" 语义的 TG 式正文上方灰条）：
+// replyTos 原文 elide（服务端键④ logcat 实测前不做显示名解析）
+static QString quoteLineFor(const MessageItem& item) {
+    if (item.replyTos.isEmpty()) {
+        return QString();
+    }
+    QString q = item.replyTos.first();
+    if (q.length() > 48) {
+        q = q.left(48) + QString::fromUtf8("…");
+    }
+    return QString::fromUtf8("↩ ") + q;
+}
+
+// mention 短称（qltox attachReplyLinks 简化对位）：@user:server → @user；
+// 未命中正文 token 原样保留，零命中零行为
+static QString bodyForPaint(const MessageItem& item) {
+    QString body = item.content;
+    for (const QString& tok : item.mentions) {
+        if (tok.isEmpty()) {
+            continue;
+        }
+        const int at = body.indexOf(tok);
+        if (at < 0) {
+            continue;
+        }
+        QString short_ = tok.section(QLatin1Char(':'), 0, 0);
+        if (!short_.startsWith(QLatin1Char('@'))) {
+            short_ = QLatin1Char('@') + short_;
+        }
+        body.replace(at, tok.length(), short_);
+    }
+    return body;
+}
+
+// ── giflike 短视频 helpers（批4，qltox :4468-4493 口径）──
+
+// ffmpeg 探测缓存：QStandardPaths::findExecutable 优先，一次 -version
+// 试跑确认可执行；空串 = 无 ffmpeg（Android 无二进位 → giflike 整链 no-op
+// 退化为普通视频链）。首次调用后进程生命周期缓存。
+static QString ffmpegPath() {
+    static QString cached;
+    static bool probed = false;
+    if (probed) {
+        return cached;
+    }
+    probed = true;
+    cached = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    if (cached.isEmpty()) {
+        return cached;
+    }
+    QProcess probe;
+    probe.start(cached, QStringList() << QStringLiteral("-version"));
+    probe.waitForFinished(3000);
+    if (probe.exitCode() != 0) {
+        cached = QString();
+    }
+    return cached;
+}
+
+// giflike 判定：1–3s webm/mp4 短视频 = 循环 GIF（qltox 同判据）
+static bool isGifLikeVideo(const MessageItem& item) {
+    if (item.durationSec < 1 || item.durationSec > 3) {
+        return false;
+    }
+    const QString url = item.mediaUrl.toLower();
+    return url.endsWith(QStringLiteral(".webm"))
+        || url.endsWith(QStringLiteral(".mp4"));
+}
+
+// 大文件超时放宽（qltox restapi:496 口径：50KB/s 估算 + 15s 余量；
+// 大小未知保持默认 35s 兜底）；上限 1h 防呆
+static int mediaDownloadTimeout(qint64 sizeBytes) {
+    if (sizeBytes <= 0) {
+        return 0;
+    }
+    const qint64 est = 15 + sizeBytes / (50 * 1024);
+    return (int)qMin<qint64>(est, 3600);
+}
 
 static MsgMediaType msgMediaTypeOf(const MessageItem& item) {
     if (item.isAudio) {
@@ -62,6 +149,43 @@ static MsgMediaType msgMediaTypeOf(const MessageItem& item) {
     }
     if (t == QString::fromUtf8("file")) {
         return MsgMediaType::File;
+    }
+    if (t == QString::fromUtf8("audio")) {
+        return MsgMediaType::Audio;   // 显式 msgtype 直判（isAudio 兜底之外）
+    }
+    // Misskey 桥 MIME 归一 + 兜底（qltox unknownparser:845 口径）：
+    // msgtype 缺失/非标 → MIME 前缀 → URL 扩展名 → file；
+    // mediaUrl 空 → Text。与 mainpage isAudio 判据（mainpage.cpp:361）
+    // 互不冲突：audio tile 行内播链共用同一 source url。
+    if (!item.mediaUrl.isEmpty()) {
+        const QString mime = item.mediaMime.toLower();
+        const QString url = item.mediaUrl.toLower();
+        if (mime.startsWith(QStringLiteral("image/"))
+            || url.endsWith(QStringLiteral(".gif"))) {
+            return url.endsWith(QStringLiteral(".gif"))
+                ? MsgMediaType::Gif : MsgMediaType::Image;
+        }
+        static const char* videoExts[] = {".webm", ".mp4", ".mkv",
+            ".mov", ".m4v", ".avi"};
+        if (mime.startsWith(QStringLiteral("video/"))) {
+            return MsgMediaType::Video;
+        }
+        for (const char* ext : videoExts) {
+            if (url.endsWith(QString::fromUtf8(ext))) {
+                return MsgMediaType::Video;
+            }
+        }
+        static const char* audioExts[] = {".mp3", ".ogg", ".m4a",
+            ".wav", ".opus", ".flac"};
+        if (mime.startsWith(QStringLiteral("audio/"))) {
+            return MsgMediaType::Audio;
+        }
+        for (const char* ext : audioExts) {
+            if (url.endsWith(QString::fromUtf8(ext))) {
+                return MsgMediaType::Audio;
+            }
+        }
+        return MsgMediaType::File;   // 媒体 url 兜底（qltox file 口径）
     }
     return MsgMediaType::Text;
 }
@@ -626,16 +750,21 @@ static qreal calcRowHeight(const MessageItem& item, qreal availableWidth)
     qreal bubbleHeight;
     if (mm.type != MsgMediaType::Unknown && mm.type != MsgMediaType::Text) {
         bubbleHeight = mm.bubbleH + BUBBLE_PADDING_V * 2;
-        // caption（=content 非空时）作媒体下正文行，计入行高
+        // caption（=content 非空时）作媒体上方正文行（批5a 移顶部），计入行高
         if (!item.content.isEmpty()) {
             const MessageTextMetrics cm =
-                measureMessageText(item.content, msgFont, mm.bubbleW);
+                measureMessageText(bodyForPaint(item), msgFont, mm.bubbleW);
             bubbleHeight += cm.height + BUBBLE_PADDING_V;
         }
     } else {
+        // 批2：caption 行内短称后计量（mention token 逐位替换不改语序）
         const MessageTextMetrics tm =
-            measureMessageText(item.content, msgFont, textWidth);
+            measureMessageText(bodyForPaint(item), msgFont, textWidth);
         bubbleHeight = tm.height + BUBBLE_PADDING_V * 2;
+        // 批2：reply 引用摘要条（TG 式正文上方灰条）计入行高
+        if (!quoteLineFor(item).isEmpty()) {
+            bubbleHeight += QUOTE_LINE_H;
+        }
     }
     if (bubbleHeight < 36) {
         bubbleHeight = 36;
@@ -734,8 +863,8 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
 
     const qreal maxBubbleWidth = w * 85.0 / 100.0;
 
-    // 计算内容宽度
-    QString displayContent = m_item.content;
+    // 计算内容宽度（批2：mention 短称替换后渲染/计量同源）
+    QString displayContent = bodyForPaint(m_item);
     const qreal textWidth = maxBubbleWidth - BUBBLE_PADDING_H * 2;
     const MessageTextMetrics tm = measureMessageText(displayContent, msgFont, textWidth);
     qreal contentWidth = textWidth;
@@ -806,24 +935,39 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
         painter->drawPath(bubblePath);
 
         if (isMedia) {
+            // 批5a：caption 移顶（qltox paintMediaContent:494 口径），
+            // 媒体框整体下移 caption 高度
+            const qreal captionH = displayContent.isEmpty() ? 0.0 :
+                measureMessageText(displayContent, msgFont, mm.bubbleW).height
+                    + BUBBLE_PADDING_V;
             const QRectF mediaRect(bubbleX + BUBBLE_PADDING_H,
-                bubbleY + BUBBLE_PADDING_V, mm.bubbleW, mm.bubbleH);
+                bubbleY + BUBBLE_PADDING_V + captionH, mm.bubbleW, mm.bubbleH);
             paintMediaBody(painter, m_item, m_mediaImage, mm, mediaRect,
                 Qt::white, QColor(0xff, 0xff, 0xff, 0x99), msgFont);
-            // caption 正文行（content 非空），同款换行绘制
+            // caption 正文行（顶部，content 非空），同款换行绘制
             if (!displayContent.isEmpty()) {
                 painter->setPen(Qt::white);
                 painter->setFont(msgFont);
                 drawWrappedText(painter, displayContent, msgFont,
                     QRectF(bubbleX + BUBBLE_PADDING_H,
-                        mediaRect.bottom() + BUBBLE_PADDING_V,
-                        mm.bubbleW, bubbleHeight - mm.bubbleH - BUBBLE_PADDING_V * 2));
+                        bubbleY + BUBBLE_PADDING_V,
+                        mm.bubbleW, captionH - BUBBLE_PADDING_V));
             }
         } else {
+            // 批2：reply 引用摘要条（正文上方灰条）+ 正文下移一行
+            const QString quote = quoteLineFor(m_item);
             // 消息文字（支持多行）
             painter->setPen(Qt::white);
-            const QRectF textRect(bubbleX + BUBBLE_PADDING_H, bubbleY + BUBBLE_PADDING_V,
+            const QRectF textRect(bubbleX + BUBBLE_PADDING_H,
+                bubbleY + BUBBLE_PADDING_V + (quote.isEmpty() ? 0.0 : QUOTE_LINE_H),
                 contentWidth, textHeight);
+            if (!quote.isEmpty()) {
+                painter->setPen(QColor("#7f8fb0"));
+                painter->drawText(QRectF(bubbleX + BUBBLE_PADDING_H,
+                    bubbleY + BUBBLE_PADDING_V, contentWidth, QUOTE_LINE_H),
+                    Qt::AlignLeft | Qt::AlignVCenter, quote);
+                painter->setPen(Qt::white);
+            }
             QTextOption textOption;
             textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
             QTextLayout textLayout(displayContent, msgFont);
@@ -912,23 +1056,37 @@ void MessageRowNode::paint(QPainter* painter, const QSize& size, const void*)
         painter->drawPath(bubblePath2);
 
         if (isMedia) {
+            // 批5a：caption 移顶（同 self 口径），媒体框整体下移
+            const qreal captionH2 = displayContent.isEmpty() ? 0.0 :
+                measureMessageText(displayContent, msgFont, mm.bubbleW).height
+                    + BUBBLE_PADDING_V;
             const QRectF mediaRect(bubbleX + BUBBLE_PADDING_H,
-                bubbleY + BUBBLE_PADDING_V, mm.bubbleW, mm.bubbleH);
+                bubbleY + BUBBLE_PADDING_V + captionH2, mm.bubbleW, mm.bubbleH);
             paintMediaBody(painter, m_item, m_mediaImage, mm, mediaRect,
                 QColor("#ddd"), QColor(0x8f, 0xa0, 0xc0), msgFont);
-            // caption 正文行（content 非空），同款换行绘制
+            // caption 正文行（顶部，content 非空），同款换行绘制
             if (!displayContent.isEmpty()) {
                 painter->setPen(QColor("#ddd"));
                 painter->setFont(msgFont);
                 drawWrappedText(painter, displayContent, msgFont,
                     QRectF(bubbleX + BUBBLE_PADDING_H,
-                        mediaRect.bottom() + BUBBLE_PADDING_V,
-                        mm.bubbleW, bubbleHeight - mm.bubbleH - BUBBLE_PADDING_V * 2));
+                        bubbleY + BUBBLE_PADDING_V,
+                        mm.bubbleW, captionH2 - BUBBLE_PADDING_V));
             }
         } else {
+            // 批2：reply 引用摘要条（正文上方灰条）+ 正文下移一行
+            const QString quote = quoteLineFor(m_item);
             // 消息文字（支持多行）
             painter->setPen(QColor("#ddd"));
-            const QRectF textRect(bubbleX + BUBBLE_PADDING_H, bubbleY + BUBBLE_PADDING_V,
+            if (!quote.isEmpty()) {
+                painter->setPen(QColor("#9aa8c0"));
+                painter->drawText(QRectF(bubbleX + BUBBLE_PADDING_H,
+                    bubbleY + BUBBLE_PADDING_V, contentWidth, QUOTE_LINE_H),
+                    Qt::AlignLeft | Qt::AlignVCenter, quote);
+                painter->setPen(QColor("#ddd"));
+            }
+            const QRectF textRect(bubbleX + BUBBLE_PADDING_H,
+                bubbleY + BUBBLE_PADDING_V + (quote.isEmpty() ? 0.0 : QUOTE_LINE_H),
                 contentWidth, textHeight);
             QTextOption textOption2;
             textOption2.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
@@ -1027,6 +1185,8 @@ void MessageRowItem::refreshMedia()
     m_mediaImage = QImage();
     QString showUrl;
     const MsgMediaType mt = msgMediaTypeOf(m_item);
+    // 批4：giflike 短视频（1–3s webm/mp4）→ 循环 GIF 行内播（qltox 口径）
+    const bool gifLike = (mt == MsgMediaType::Video) && isGifLikeVideo(m_item);
     if (mt == MsgMediaType::Gif) {
         // GIF 动画（qltox QMovie 对位）：源 = mediaUrl（优先）else localPath；
         // 首帧先行（start 后 currentImage），CacheDb miss（尚未下载）时
@@ -1038,6 +1198,18 @@ void MessageRowItem::refreshMedia()
         m_mediaImage = m_gifMovie ? m_gifMovie->currentImage() : QImage();
         m_dirty = true;
         return;
+    }
+    if (gifLike) {
+        // giflike：伪源 "@gif@" 键（setupGifMovie 内剥离后读 CacheDb 字节）
+        const QString pseudo = m_item.mediaUrl + QStringLiteral("@gif@");
+        if (!MediaHost::instance()->getGifLikeBytes(m_item.mediaUrl).empty()) {
+            m_mediaSrc = pseudo;
+            setupGifMovie(pseudo);
+            m_mediaImage = m_gifMovie ? m_gifMovie->currentImage() : QImage();
+            m_dirty = true;
+            return;
+        }
+        // 转码未产出（未下载完/无 ffmpeg）→ 下落常规视频缩略图链
     }
     if (m_gifMovie) {
         // 行数据变更为非 GIF → 释放动画资源
@@ -1093,8 +1265,15 @@ void MessageRowItem::setupGifMovie(const QString& src)
     m_gifMovie = new QMovie(this);
     if (src.contains(QStringLiteral("://"))) {
         // URL 源：CacheDb 同步读字节（QMovie 不支持网络直拾），
-        // miss（尚未下载完成）→ 不启动动画，保持占位静帧
-        const std::vector<uint8_t> bytes = MediaHost::instance()->getBytes(src);
+        // miss（尚未下载完成）→ 不启动动画，保持占位静帧。
+        // 批4：giflike 伪源 "@gif@" 后缀 → 剥离后读 @gif@ 键字节
+        std::vector<uint8_t> bytes;
+        if (src.endsWith(QStringLiteral("@gif@"))) {
+            bytes = MediaHost::instance()->getGifLikeBytes(
+                src.left(src.size() - 5));
+        } else {
+            bytes = MediaHost::instance()->getBytes(src);
+        }
         if (bytes.empty()) {
             m_gifMovie->deleteLater();
             m_gifMovie = nullptr;
@@ -1250,7 +1429,9 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
                         rowItem->setMessageDataNoUpdate(m_items[row]);
                         rowItem->update();
                     }
-                    MediaHost::instance()->download(rowUrl);
+                    // 批5b：大文件（>1MB 状态条手动档）按 qltox 50KB/s 估算放权超时
+                    MediaHost::instance()->download(rowUrl,
+                        mediaDownloadTimeout(m_items[row].fileSizeBytes));
                     return;
                 }
             }
@@ -1345,6 +1526,21 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
             appendMessage(item);
         });
 
+    // push 编辑（m.replace）命中：MessageStore 内存桶 mutate 后转发信号，
+    // 本列表按 msgId 原地更新行（批3）
+    connect(MessageStore::instance(), &MessageStore::messageContentUpdated,
+        this, [this](const QString& protocol, const QString& chatId,
+                     const QString& msgId, const QString& newContent) {
+            if (m_chatId.isEmpty() || chatId != m_chatId) {
+                return;
+            }
+            if (!m_chanProtocol.isEmpty() && !protocol.isEmpty()
+                && protocol != m_chanProtocol) {
+                return;
+            }
+            replaceRowContent(msgId, newContent);
+        });
+
     // 头像下载完成 → 刷新可见行（重绘）
     connect(AvatarHost::instance(), &AvatarHost::avatarUpdated,
         this, [this]() {
@@ -1392,10 +1588,12 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
             m_scrollIdleTimer.start();
         }
     };
-    // 下载完成（mediaUpdated，Task A 首发信号）→ Completed
+    // 下载完成（mediaUpdated，Task A 首发信号）→ Completed；
+    // 批4：顺带泵 giflike 待转码任务（源字节此刻已落 CacheDb）
     connect(MediaHost::instance(), &MediaHost::mediaUpdated,
-        this, [applyMediaRow](const QString& url) {
+        this, [this, applyMediaRow](const QString& url) {
             applyMediaRow(url, MediaDlCompleted, 100, 0);
+            pumpGifLikeJobs();
         });
     // 状态迁移（InProgress/Completed/Failed）
     connect(MediaHost::instance(), &MediaHost::mediaStateChanged,
@@ -1668,7 +1866,120 @@ void MessageListWidget::kickMediaPrefetch(const MessageItem& item)
                    || item.fileSizeBytes < 1048576)
                && (mt == QString::fromUtf8("video")
                    || mt == QString::fromUtf8("file"))) {
-        MediaHost::instance()->download(item.mediaUrl);
+        MediaHost::instance()->download(item.mediaUrl,
+                                        mediaDownloadTimeout(item.fileSizeBytes));
+        // 批4：giflike 待转码键登记（泵在 mediaUpdated / 本函数尾触发）
+        if (isGifLikeVideo(item) && !m_gifLikeJobs.contains(item.mediaUrl)
+            && !m_gifLikeRunning.contains(item.mediaUrl)) {
+            m_gifLikeJobs.insert(item.mediaUrl);
+        }
+    }
+    pumpGifLikeJobs();
+}
+
+void MessageListWidget::pumpGifLikeJobs()
+{
+    if (m_gifLikeJobs.isEmpty()) {
+        return;
+    }
+    // 无 ffmpeg（Android 无二进位）→ giflike 整链 no-op，任务刺消退化为
+    // 常规视频链（refreshMedia giflike miss 分支自然走缩略图）
+    const QString ff = ffmpegPath();
+    if (ff.isEmpty()) {
+        m_gifLikeJobs.clear();
+        return;
+    }
+    for (auto it = m_gifLikeJobs.begin(); it != m_gifLikeJobs.end();) {
+        const QString url = *it;
+        if (m_gifLikeRunning.contains(url)) {
+            ++it;
+            continue;
+        }
+        // 归属消息（取判据字段）；行不在列表（切频道回收）→ 刺消
+        MessageItem srcItem;
+        bool found = false;
+        for (int i = 0; i < m_items.size(); ++i) {
+            if (m_items[i].mediaUrl == url) {
+                srcItem = m_items[i];
+                found = true;
+                break;
+            }
+        }
+        if (!found || !isGifLikeVideo(srcItem)) {
+            it = m_gifLikeJobs.erase(it);
+            continue;
+        }
+        const std::vector<uint8_t> src = MediaHost::instance()->getBytes(url);
+        if (src.empty()) {
+            // 源未落 CacheDb → 留任务，等 mediaUpdated 泵再入
+            ++it;
+            continue;
+        }
+        // 临时输入/输出（tempPath 一文件一 hash，完成后清理）
+        const QString tmpDir = QDir::tempPath();
+        const QString tag =
+            QString::number(qHash(url), 16);
+        const QString inPath = tmpDir + QStringLiteral("/qsk_giflike_%1%2")
+            .arg(tag,
+                 url.endsWith(QStringLiteral(".mp4"), Qt::CaseInsensitive)
+                    ? QStringLiteral(".mp4") : QStringLiteral(".webm"));
+        const QString outPath = tmpDir + QStringLiteral("/qsk_giflike_%1.gif")
+            .arg(tag);
+        QFile in(inPath);
+        if (!in.open(QIODevice::WriteOnly)) {
+            it = m_gifLikeJobs.erase(it);
+            continue;
+        }
+        const QByteArray srcBytes(
+            reinterpret_cast<const char*>(src.data()), (int)src.size());
+        if (in.write(srcBytes) != srcBytes.size()) {
+            in.close();
+            QFile::remove(inPath);
+            it = m_gifLikeJobs.erase(it);
+            continue;
+        }
+        in.close();
+        // 转码：palettegen/paletteuse 单命令（split 一次取两抽），fps=12，
+        // 宽 ≤320（qltox :4487 口径）；-an 去音轨。argv 直传不走 shell。
+        QProcess* proc = new QProcess(this);
+        connect(proc,
+            (void (QProcess::*)(int, QProcess::ExitStatus))&QProcess::finished,
+            this, [this, proc, url, inPath, outPath](int code,
+                QProcess::ExitStatus) {
+                proc->deleteLater();
+                m_gifLikeRunning.remove(url);
+                m_gifLikeProcs.remove(url);
+                QFile::remove(inPath);
+                QFile gifOut(outPath);
+                if (code == 0 && gifOut.size() > 0
+                    && gifOut.open(QIODevice::ReadOnly)) {
+                    const QByteArray gif = gifOut.readAll();
+                    gifOut.close();
+                    MediaHost::instance()->storeGifLike(
+                        url, std::string(gif.constData(), gif.size()));
+                }
+                QFile::remove(outPath);
+                pumpGifLikeJobs();
+            });
+        m_gifLikeRunning.insert(url);
+        m_gifLikeProcs.insert(url, proc);
+        proc->start(ff, QStringList()
+            << QStringLiteral("-y")
+            << QStringLiteral("-i") << inPath
+            << QStringLiteral("-filter_complex")
+            << QStringLiteral("fps=12,scale=min(iw\\,320):-2:flags=lanczos,"
+                              "split[s0][s1];[s0]palettegen=stats_mode=diff[p];"
+                              "[s1][p]paletteuse=dither=bayer:bayer_scale=5")
+            << QStringLiteral("-an") << outPath);
+        if (proc->error() == QProcess::FailedToStart) {
+            // 起进程失败（探测后再失效）：清并退化视频链
+            m_gifLikeRunning.remove(url);
+            m_gifLikeProcs.remove(url);
+            proc->deleteLater();
+            QFile::remove(inPath);
+            QFile::remove(outPath);
+        }
+        it = m_gifLikeJobs.erase(it);
     }
 }
 
@@ -1814,6 +2125,28 @@ void MessageListWidget::updateSendStateByRowid(int64_t rowid,
         }
         return;
     }
+}
+
+bool MessageListWidget::replaceRowContent(const QString& msgId,
+                                          const QString& newContent)
+{
+    if (msgId.isEmpty()) {
+        return false;
+    }
+    for (int i = 0; i < m_items.size(); ++i) {
+        if (m_items[i].msgId != msgId) {
+            continue;
+        }
+        m_items[i].content = newContent;
+        // 行高重算（内容变化不改行高结构；rebuildLayout 全量廉推 ≤80 行）
+        rebuildLayout(this);
+        if (MessageRowItem* rowItem = m_visibleRows.value(i)) {
+            rowItem->setMessageDataNoUpdate(m_items[i]);
+        }
+        update();
+        return true;
+    }
+    return false;
 }
 
 void MessageListWidget::setChannel(const QString& protocol, const QString& chatId,

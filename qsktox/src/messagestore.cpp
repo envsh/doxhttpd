@@ -36,6 +36,24 @@ void MessageStore::addMessage(const QString& protocol, const QString& chatId,
     emit messageAdded(protocol, chatId, item);
 }
 
+bool MessageStore::updateContent(const QString& protocol, const QString& chatId,
+                                 const QString& msgId, const QString& newContent)
+{
+    if (msgId.isEmpty()) {
+        return false;
+    }
+    auto& msgs = m_channelMessages[storeKey(protocol, chatId)];
+    for (MessageItem& mi : msgs) {
+        if (mi.msgId != msgId) {
+            continue;
+        }
+        mi.content = newContent;
+        emit messageContentUpdated(protocol, chatId, msgId, newContent);
+        return true;
+    }
+    return false;
+}
+
 QList<MessageItem> MessageStore::getMessages(const QString& protocol,
                                              const QString& chatId) const
 {

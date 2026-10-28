@@ -282,6 +282,36 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             QString text = obj.value("text").toString();
             qint64 timestamp = obj.value("timestamp").toVariant().toLongLong();
 
+            // ── 批3：编辑/撤回契约键归一（qltox unknownparser:501/:221 口径）──
+            // 契约键防御性实现：键名④ logcat 实测前零命中安全（不匹配即
+            // 零行为）；redaction 定性本订阅为前缀标识，不删原行列（规模的
+            // msgId↔event_id 无映射，edit 无法对位 DB → 本轮仅内存链）。
+            bool isReplace = false;
+            bool isRedaction = false;
+            const QString relType = obj.value(QString::fromUtf8("relates_to"))
+                .toObject().value(QString::fromUtf8("rel_type")).toString();
+            if (relType == QString::fromUtf8("m.replace")) {
+                // 取新 body（m.new_content 优先，顶层 text 兜底）
+                const QJsonObject nc = obj.value(
+                    QString::fromUtf8("m.new_content")).toObject();
+                QString nb = nc.value(QString::fromUtf8("text")).toString(
+                    nc.value(QString::fromUtf8("body")).toString());
+                if (nb.isEmpty()) {
+                    nb = text;
+                }
+                if (!nb.isEmpty()) {
+                    text = nb;
+                    isReplace = true;
+                }
+            }
+            isRedaction = obj.value(QString::fromUtf8("redacted")).toBool()
+                || obj.value(QString::fromUtf8("msgtype")).toString()
+                    == QString::fromUtf8("m.redacted");
+            if (isRedaction) {
+                // qltox chatview:812 口径：撤回只留前缀标识（原 text 保真留底）
+                text = QString::fromUtf8("🗑 ") + text;
+            }
+
             QString timeStr;
             if (timestamp > 0) {
                 timeStr = QDateTime::fromSecsSinceEpoch(epochSeconds(timestamp)).toString("HH:mm");
@@ -376,6 +406,14 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
                 msgItem.avatarLetter = QString(sname.isEmpty() ? QChar(' ') : sname.at(0)).toUpper();
                 static const QColor mp[] = {QColor("#4CAF50"),QColor("#2196F3"),QColor("#FF9800"),QColor("#E91E63"),QColor("#9C27B0"),QColor("#00BCD4"),QColor("#FF5722"),QColor("#795548"),QColor("#607D8B")};
                 msgItem.avatarColor = mp[qHash(sname) % 9];
+            }
+            // 批3：编辑事件走内存原地替换；未命中原稿（进程内未见）→
+            // 退化普通新行（Matrix 语义，DB 自然落库）。命中则不落新行
+            // 不动 DB chItem 链（重启/重开会话回退原稿，已披露）。
+            if (isReplace && !msgItem.msgId.isEmpty()
+                && MessageStore::instance()->updateContent(
+                    protocol, chatId, msgItem.msgId, text)) {
+                return;
             }
             MessageStore::instance()->addMessage(protocol, chatId, msgItem);
 

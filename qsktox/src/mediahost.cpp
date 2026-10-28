@@ -31,7 +31,8 @@ QString mxcToHttp(const QString& url)
 }
 
 constexpr int kMediaMaxDim = 720;   // 内存缩略缓存窄边上限
-constexpr int kMediaCacheCap = 64;  // 入口数上限（FIFO 淘汰）
+// 内存缩略缓存字节预算（qltox mediaCache 16MB 量级口径，批5b：条数改字节）
+constexpr qint64 kMediaCacheBudgetBytes = 16 * 1024 * 1024;
 
 // HTTP 回调共享 udata：url 供 progress/done 双回调取数
 struct MediaFetchCtx {
@@ -68,7 +69,7 @@ void MediaHost::autoDownload(const QString& msgType, const QString& mime,
     download(url);
 }
 
-void MediaHost::download(const QString& url)
+void MediaHost::download(const QString& url, int timeoutSecOverride)
 {
     if (url.isEmpty()) {
         ALOG_WARN("media download skip: empty url");
@@ -111,6 +112,9 @@ void MediaHost::download(const QString& url)
     Q_EMIT mediaStateChanged(url, MediaDlInProgress);
     HttpRequest req(std::string(httpUrl.toUtf8().constData()), "GET");
     req.followRedirects = true;
+    if (timeoutSecOverride > 0) {
+        req.timeoutSec = timeoutSecOverride;   // 批5b：大文件放权超时
+    }
     // 泵线程回调只搬数字/字节（解码/落盘一律在 GUI customEvent）
     MediaFetchCtx* ctx = new MediaFetchCtx();
     ctx->url = url;
@@ -215,9 +219,18 @@ void MediaHost::insertCache(const QString& key, const QImage& img)
         thumb = thumb.scaled(kMediaMaxDim, kMediaMaxDim,
             Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
+    // 批5b：字节预算 LRU（16MB）。插入序维护 + 超预算按序剔除
+    // （QImage::sizeInBytes 量本条；保底留 1 条防整表清空）。
+    m_cacheOrder.removeAll(key);
+    m_cacheOrder.append(key);
     m_cache.insert(key, thumb);
-    while (m_cache.size() > kMediaCacheCap) {
-        m_cache.erase(m_cache.begin());
+    qint64 totalBytes = 0;
+    for (const QString& k : std::as_const(m_cacheOrder)) {
+        totalBytes += m_cache.value(k).sizeInBytes();
+    }
+    while (totalBytes > kMediaCacheBudgetBytes && m_cacheOrder.size() > 1) {
+        const QString oldest = m_cacheOrder.takeFirst();
+        totalBytes -= m_cache.take(oldest).sizeInBytes();
     }
 }
 
@@ -229,6 +242,32 @@ void MediaHost::msgDbStore(const QString& key, const std::string& body,
     std::vector<uint8_t> data(raw, raw + body.size());
     Storage::instance().cacheDbAsync()->storeMedia(
         std::move(dbKey), std::move(data), mime, 2, nullptr);
+}
+
+std::vector<uint8_t> MediaHost::getGifLikeBytes(const QString& url)
+{
+    if (url.isEmpty()) {
+        return {};
+    }
+    // "@gif@" 键段只读转码产物（批4：转码完成时存 gif key）
+    std::string dbKey = mediaCacheKey("msg", url);
+    dbKey += "@gif@";
+    return Storage::instance().cacheDb()->get(dbKey.c_str());
+}
+
+void MediaHost::storeGifLike(const QString& url, const std::string& gifBytes)
+{
+    if (url.isEmpty() || gifBytes.empty()) {
+        return;
+    }
+    std::string dbKey = mediaCacheKey("msg", url);
+    dbKey += "@gif@";
+    const auto* raw = reinterpret_cast<const uint8_t*>(gifBytes.data());
+    std::vector<uint8_t> data(raw, raw + gifBytes.size());
+    Storage::instance().cacheDbAsync()->storeMedia(
+        std::move(dbKey), std::move(data), "image/gif", 2, nullptr);
+    // url 命中行重绘 → refreshMedia giflike 分支起循环动画（批4 收点）
+    Q_EMIT mediaUpdated(url);
 }
 
 void MediaHost::customEvent(QEvent* event)

@@ -12,10 +12,12 @@
 #include <QPointer>
 #include <QPointF>
 #include <QSet>
+#include <QHash>
 #include <QTimer>
 // GIF 逐帧动画（qltox QMovie 对位）：仅指针成员，头文件不引重头
 class QMovie;
 class QBuffer;
+class QProcess;
 
 // 媒体消息分类（镜像 qltox etype 派发，chatview.cpp:4074/:2986 口径；
 // 信号 mediaBodyTapped 跨 TU 传递，枚举须在头文件）
@@ -184,6 +186,10 @@ public:
     int64_t lastRowid() const;
     void backfillRowid(qint64 localId, int64_t rowid);
     void updateSendStateByRowid(int64_t rowid, MessageItem::SendState state);
+    // push 编辑命中（MessageStore::messageContentUpdated 转发）：原地改
+    // content 并重算行高（content 变化不改行高结构，rebuildLayout 全量廉推）；
+    // msgId 未命中返回 false（调用方走原路径兜底）
+    bool replaceRowContent(const QString& msgId, const QString& newContent);
 
 Q_SIGNALS:
     void rowClicked(int row);
@@ -215,6 +221,9 @@ private:
     void forceClipRefresh();
     // 淡入计时器超时槽（构造时连接一次，避免重复 connect 累积）
     void onFadeTimeout();
+    // giflike 短视频转码任务泵（批4）：待转码集遍历，源字节齐 + ffmpeg
+    // 可执行才起 QProcess；palettegen/paletteuse 单命令产出写 CacheDb
+    void pumpGifLikeJobs();
 
     QQuickItem* m_contentView = nullptr;
     QString m_chatId;
@@ -235,6 +244,12 @@ private:
     QTimer m_coalesceTimer;
     QSet<int> m_pendingVisibleRefresh;
     QSet<int> m_coalescedRefresh;
+    // giflike 短视频转码（批4，qltox :4468-4493 口径）：待转码键集 =
+    // 源 mediaUrl；in-flight 守卫防止 mediaUpdated 泵重入转两次
+    QSet<QString> m_gifLikeJobs;
+    QSet<QString> m_gifLikeRunning;
+    // 在转程 QProcess（finished 收尾：清临时文件 + 写 @gif@ 键 + 泵再入）
+    QHash<QString, QProcess*> m_gifLikeProcs;
 };
 
 void rebuildLayout(MessageListWidget*);

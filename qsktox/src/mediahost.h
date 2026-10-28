@@ -5,6 +5,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QSet>
 #include <QMap>
 #include <QImage>
@@ -58,7 +59,12 @@ public:
     Q_DISABLE_COPY(MediaHost)
 
     // 触发一次媒体下载（内部去重：内存命中或在途则跳过）。
-    void download(const QString& url);
+    // timeoutSecOverride>0 覆盖 EventPoller 默认 35s（批5b：大文件按
+    // qltox restapi:496 口径 50KB/s 估算+余量由调用方传入；0=默认）
+    void download(const QString& url, int timeoutSecOverride = 0);
+    // 批4：giflike 转码产物读写（CacheDb "msg_<url>@gif@" 键，tag=2）
+    std::vector<uint8_t> getGifLikeBytes(const QString& url);
+    void storeGifLike(const QString& url, const std::string& gifBytes);
 
     // qltox 口径：msgtype(image/m.image) 或 mimetype image/* 才自动抓。
     void autoDownload(const QString& msgType, const QString& mime,
@@ -93,7 +99,8 @@ private:
                     const std::string& mime);
 
     QSet<QString> m_pending;
-    QMap<QString, QImage> m_cache;   // FIFO 上限淘汰（近似 LRU，P1 不做严格时效）
+    QMap<QString, QImage> m_cache;   // 字节预算上限（16MB）内存缩略缓存
+    QStringList m_cacheOrder;        // 插入序（FIFO 淘汰基准，insertCache 维护）
     // 已落盘但非图片字节（video/file/audio）：MediaHost 侧持久去重标记
     QSet<QString> m_files;
 };
