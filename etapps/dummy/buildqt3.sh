@@ -16,3 +16,13 @@ fi
 make -j1
 
 ls -la ../../../qltox/plugins/uiapps/libdummy_ui.so
+
+### for exe
+
+cd .. && mkdir -p build-exe && cd build-exe 
+/opt/qt338sh/bin/qmake -makefile ../exe.pro
+if [ x"$1" == x"c" ]; then
+    make clean
+fi
+make -j1
+ls -lha dummy_ui
