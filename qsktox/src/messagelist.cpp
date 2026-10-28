@@ -1544,6 +1544,13 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
     setFlickableOrientations(Qt::Vertical);
     setItemResizable(false);
 
+    // 自动翻译/链接预览扫描尾随防抖（见 h 内注释：进入动画窗口外单次）
+    m_autoScanTimer.setSingleShot(true);
+    m_autoScanTimer.setInterval(350);
+    connect(&m_autoScanTimer, &QTimer::timeout, this, [this]() {
+        scanAutoFeatures(m_lastScanMin, m_lastScanMax);
+    });
+
     m_contentView = new QQuickItem(this);
     setScrolledItem(m_contentView);
 
@@ -2489,6 +2496,7 @@ void MessageListWidget::setChannel(const QString& protocol, const QString& chatI
 {
     m_scrollIdleTimer.stop();
     m_coalesceTimer.stop();
+    m_autoScanTimer.stop();
     m_pendingVisibleRefresh.clear();
     m_coalescedRefresh.clear();
     m_isScrolling = false;
@@ -2705,9 +2713,11 @@ void MessageListWidget::updateVisibleRows()
         }
     }
 
-    // 自动翻译 / 链接预览触发扫描（可见行起效；qltox paintEvent 触发
-    // 方式的布局层对位）
-    scanAutoFeatures(rowMin, rowMax);
+    // 自动翻译 / 链接预览触发扫描：尾随防抖（进入动画/连滚窗口外单次，
+    // m_lastScanMin/Max 记最近可见区间）
+    m_lastScanMin = rowMin;
+    m_lastScanMax = rowMax;
+    m_autoScanTimer.start();
 }
 
 void MessageListWidget::geometryChangeEvent(QskGeometryChangeEvent* event)

@@ -266,6 +266,11 @@ private:
     bool m_flushPending = false;
     QTimer m_scrollIdleTimer;
     QTimer m_coalesceTimer;
+    // 自动翻译/链接预览扫描尾随防抖（进入动画窗口外单次触发；滚动
+    // 停止 350ms 后补扫，避免进入/转场动画期与其逐帧 advance 打架）
+    QTimer m_autoScanTimer;
+    int m_lastScanMin = 0;
+    int m_lastScanMax = 0;
     QSet<int> m_pendingVisibleRefresh;
     QSet<int> m_coalescedRefresh;
     // giflike 短视频转码（批4，qltox :4468-4493 口径）：待转码键集 =
