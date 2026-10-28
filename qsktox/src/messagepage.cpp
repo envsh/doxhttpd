@@ -22,12 +22,14 @@
 #include "mainpage.h"
 #include "pagemanager.h"
 #include <QskLinearBox.h>
-#include <QskTextLabel.h>
-#include <QClipboard>
 #include <QskPushButton.h>
+#include <QskTextOptions.h>
+#include <QClipboard>
 #include <QskTextField.h>
 #include <QskBoxShapeMetrics.h>
 #include <QskMenu.h>
+#include <QskEvent.h>
+#include <QFontMetrics>
 #include <QskLabelData.h>
 #include <QTime>
 #include <QDateTime>
@@ -75,9 +77,23 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
     connect(backBtn, &QskAbstractButton::clicked, this, &Page::finish);
 
-    m_titleLabel = new QskTextLabel(channelName, topBar);
-    m_titleLabel->setAlignment(Qt::AlignCenter);
-    m_titleLabel->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    // 标题按钮：👤 联系人图标前缀 + 超宽 elide + 点击 toast
+    // （QskTextLabel 无点击信号 → QskPushButton 目标化；elide 手动
+    // QFontMetrics 口径 = channellist.cpp:231 先例）
+    m_titleBtn = new QskPushButton(topBar);
+    m_titleBtn->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+    m_titleBtn->setBoxShapeHint(QskPushButton::Panel,
+        QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+    // 声明式兜底：单行 + 右端 elide（若 skinlet 按真实宽生效天然自裁；
+    // manual elide 仅 width≥160 时覆盖，两者只缩短不冲突）
+    QskTextOptions titleOpts;
+    titleOpts.setMaximumLineCount(1);
+    titleOpts.setElideMode(Qt::ElideRight);
+    m_titleBtn->setTextOptions(titleOpts);
+    connect(m_titleBtn, &QskAbstractButton::clicked, this, [this]() {
+        showAndroidToast(QString::fromUtf8("联系人: ") + m_channelName);
+    });
+    updateTitleElide();
 
     auto* optionsBtn = new QskPushButton(QString::fromUtf8("⋮"), topBar);
     optionsBtn->setPreferredSize(44, 44);
@@ -413,6 +429,35 @@ void MessagePage::openAvatarMenu(int row, const QPointF& pos)
     menu->open();
 }
 
+// 标题按钮 elide：👤 前缀整串计算（ElideRight 截尾，前缀永不断）；
+// 宽度未定（构造初期）不过窄裁剪，保完整文本待 geometryChangeEvent 重算
+void MessagePage::updateTitleElide()
+{
+    if (!m_titleBtn) {
+        return;
+    }
+    const QString full = QString::fromUtf8("👤 ") + m_channelName;
+    const qreal availW = m_titleBtn->width() - 16;
+    // 宽度信任门（修 init 偏小误裁）：onCreate 阶段布局未定稿，按钮
+    // 宽度偏小（~80px）会把标题裁到 5-6 字符 → 阈值下保全文，等
+    // geometryChangeEvent 真宽度再裁。阈值口径：topBar 固定件
+    //（44+44+40+40+56 + spacing 8×5）≈ 224px，<160 必为未定稿阶段。
+    if (m_titleBtn->width() < 160) {
+        m_titleBtn->setText(full);
+        return;
+    }
+    const QFontMetrics fm(m_titleBtn->font());
+    m_titleBtn->setText(fm.elidedText(full, Qt::ElideRight, (int)availW));
+}
+
+void MessagePage::geometryChangeEvent(QskGeometryChangeEvent* event)
+{
+    Page::geometryChangeEvent(event);
+    if (event->isResized()) {
+        updateTitleElide();
+    }
+}
+
 // ── 文件系统打开（P4，专属一套：cache 落盘 + 系统跳转）──
 
 // file mime → 后缀兜底（fileName 无扩展名时）
@@ -612,7 +657,7 @@ void MessagePage::openChatMenu(QskPushButton* optionsBtn)
 
     connect(menu, &QskMenu::triggered, this, [this](int index) {
         if (index == 0) {
-            showAndroidToast(QString::fromUtf8("名称: ") + m_titleLabel->text()
+            showAndroidToast(QString::fromUtf8("名称: ") + m_channelName
                 + QString::fromUtf8("\nID: ") + m_chatId
                 + QString::fromUtf8("\n协议: ") + m_protocol);
         } else if (index == 2) {
@@ -655,8 +700,8 @@ void MessagePage::onNewIntent(const QVariantMap& launchArgs)
     m_chanId = launchArgs.value("chanId").toString();
     m_channelName = channelName;
 
-    if (m_titleLabel) {
-        m_titleLabel->setText(channelName);
+    if (m_titleBtn) {
+        updateTitleElide();
     }
     if (m_messageList) {
         m_messageList->setChannel(m_protocol, chatId, m_chanId);

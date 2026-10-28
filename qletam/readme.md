@@ -1,0 +1,1 @@
+etapp standalone apps
