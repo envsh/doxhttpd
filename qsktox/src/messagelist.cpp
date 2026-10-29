@@ -1846,15 +1846,26 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
     // 专走 errorMsg 填充（mediaFailed 必伴随 mediaStateChanged(Failed)）
     connect(MediaHost::instance(), &MediaHost::mediaFailed,
         this, [this](const QString& url, const QString& errorInfo) {
+            int matched = 0;
             for (int idx = 0; idx < m_items.size(); ++idx) {
                 if (m_items[idx].mediaUrl != url
                     && m_items[idx].thumbUrl != url) {
                     continue;
                 }
+                ++matched;
                 m_items[idx].errorMsg = errorInfo;
+                qWarning("[media-fail] url=%s idx=%d msgType=%s mime=%s err=%s",
+                         qPrintable(url), idx,
+                         qPrintable(m_items[idx].msgType),
+                         qPrintable(m_items[idx].mediaMime),
+                         qPrintable(errorInfo));
                 if (m_visibleRows.contains(idx)) {
                     queueVisibleRefresh(idx);
                 }
+            }
+            if (matched == 0) {
+                qWarning("[media-fail] unmatched url=%s err=%s",
+                         qPrintable(url), qPrintable(errorInfo));
             }
             if (m_isScrolling) {
                 m_scrollIdleTimer.start();

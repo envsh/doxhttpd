@@ -10,21 +10,25 @@
 namespace {
 
 // mxc://HOST/MEDIAID → https://HOST/_matrix/media/v3/download/HOST/MEDIAID
-// 非 mxc（如 https:// 直链）原样返回；格式非法返回空。
+// 仅接受 mxc:// 或 http(s)://，其余视为非法。
 QString mxcToHttp(const QString& url)
 {
-    if (!url.startsWith(QStringLiteral("mxc://"))) {
+    if (url.startsWith(QStringLiteral("mxc://"))) {
+        const QString rest = url.mid(6);
+        const int slash = rest.indexOf(QLatin1Char('/'));
+        if (slash <= 0 || slash >= rest.size() - 1) {
+            return QString();
+        }
+        const QString host = rest.left(slash);
+        const QString mediaId = rest.mid(slash + 1);
+        return QStringLiteral("https://%1/_matrix/media/v3/download/%1/%2")
+            .arg(host, mediaId);
+    }
+    if (url.startsWith(QStringLiteral("http://"))
+        || url.startsWith(QStringLiteral("https://"))) {
         return url;
     }
-    const QString rest = url.mid(6);
-    const int slash = rest.indexOf(QLatin1Char('/'));
-    if (slash <= 0 || slash >= rest.size() - 1) {
-        return QString();
-    }
-    const QString host = rest.left(slash);
-    const QString mediaId = rest.mid(slash + 1);
-    return QStringLiteral("https://%1/_matrix/media/v3/download/%1/%2")
-        .arg(host, mediaId);
+    return QString();
 }
 
 constexpr int kAvatarSize = 36;
