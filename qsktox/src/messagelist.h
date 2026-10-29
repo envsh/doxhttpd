@@ -40,7 +40,6 @@ struct MessageItem {
     int64_t dbRowid = 0;
     bool    isAudio = false;
     QString mediaUrl;
-    QString audioMime;
     int     durationSec = 0;
     // 引用/提及：push 载荷字段回程解析（reply_tos=matrix event id 列表，
     // mentions=@user 列表，元素原文照存；DB 侧逗号 join 存既有 TEXT 列）
@@ -62,6 +61,15 @@ struct MessageItem {
     QString msgFormat;   // push msgformat
     QString msgId;       // push msgid（Matrix $id 原文）
     qint64  timestampMs = 0;  // push timestamp 原值（含纳秒档）
+    // UnifiedMessage 元数据字段（纯内存接收保真，2026 push 契约对键；
+    // DB 不存，rawdata 原始数据页展示）
+    QString gateway;            // 来源网关标识
+    QString chatTopic;          // 房间主题（m.room.topic）
+    QString chatAlias;          // 房间 canonical alias
+    int     chatMembers = 0;    // 房间成员数
+    int     chatFederated = -1; // 际连三态：-1 未知 / 0 false / 1 true（*bool）
+    QString usrPresence;        // usr_presence（best-effort，常缺）
+    QString usrStatus;          // usr_status（status_msg 原文）
 
     // == 媒体展示字段（纯内存，重启退化占位，与接收字段同口径）==
     // 对位 qltox ChatElement（chatview.h:93 mediaWidth 等），不落 DB。

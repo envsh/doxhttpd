@@ -17,6 +17,24 @@ namespace {
 // 进程实例标签（每个进程一个 UUID，仅 UI 线程访问）
 QString g_instanceTag;
 
+// 人工可读大小（mainpage fmtMediaSize 口径精简版，本 TU 本地自持，
+// 避免跨文件改动；file_size 列回灌 fileSizeStr 专用）
+QString fmtMediaSizeRow(qint64 bytes)
+{
+    if (bytes < 1024) {
+        return QString("%1 B").arg(bytes);
+    }
+    const double kb = bytes / 1024.0;
+    if (kb < 1024.0) {
+        return QString("%1 KB").arg(kb, 0, 'f', 1);
+    }
+    const double mb = kb / 1024.0;
+    if (mb < 1024.0) {
+        return QString("%1 MB").arg(mb, 0, 'f', 1);
+    }
+    return QString("%1 GB").arg(mb / 1024.0, 0, 'f', 2);
+}
+
 MessageItem itemFromRow(const MessageRow& row)
 {
     MessageItem it;
@@ -28,13 +46,47 @@ MessageItem itemFromRow(const MessageRow& row)
     it.isSelf      = (row.category == "self");
     it.sendState   = (MessageItem::SendState)row.send_state;
     it.mediaUrl    = QString::fromUtf8(row.media_url.c_str());
-    it.audioMime   = QString::fromUtf8(row.media_mime.c_str());
+    it.mediaMime   = QString::fromUtf8(row.media_mime.c_str());
     it.durationSec = row.duration_sec;
     it.isAudio     = !it.mediaUrl.isEmpty()
                      && row.media_mime.rfind("audio/", 0) == 0;
     it.avatarLetter = msgAvatarLetterFor(it.sender);
     it.avatarColor  = msgAvatarColorFor(it.sender);
     it.dbRowid     = row.rowid;
+    // msgid 回灌：合成键（local_/auto_ 前缀）不算 msgid，上游 $id 原样还原
+    //（rowFromItem 已把 msgid 主链写入 event_id）
+    {
+        const QString eid = QString::fromUtf8(row.event_id.c_str());
+        if (!eid.startsWith(QStringLiteral("local_"))
+            && !eid.startsWith(QStringLiteral("auto_"))) {
+            it.msgId = eid;
+        }
+    }
+    // 媒体元数据回灌（push 实时链与 DB 重载两分支同源分型）
+    it.mediaMime = QString::fromUtf8(row.media_mime.c_str());
+    it.fileName  = QString::fromUtf8(row.file_name.c_str());
+    {
+        const qint64 fs = row.file_size;
+        if (fs > 0) {
+            it.fileSizeBytes = fs;
+            it.fileSizeStr = fmtMediaSizeRow(fs);
+        }
+    }
+    it.thumbUrl = QString::fromUtf8(row.thumbnail_key.c_str());
+    it.isAudio  = it.mediaMime.startsWith(QStringLiteral("audio/"));
+    // msgtype 原文回灌；老行（列空）媒体行 mime 派生兜底（纯内存，不落 DB）
+    it.msgType = QString::fromUtf8(row.msg_type.c_str());
+    if (it.msgType.isEmpty() && !it.mediaUrl.isEmpty()) {
+        if (it.mediaMime.startsWith(QStringLiteral("image/"))) {
+            it.msgType = QStringLiteral("m.image");
+        } else if (it.mediaMime.startsWith(QStringLiteral("video/"))) {
+            it.msgType = QStringLiteral("m.video");
+        } else if (it.mediaMime.startsWith(QStringLiteral("audio/"))) {
+            it.msgType = QStringLiteral("m.audio");
+        } else {
+            it.msgType = QStringLiteral("m.file");
+        }
+    }
     it.replyTos = QString::fromUtf8(row.relates_to_ids.c_str())
         .split(QLatin1Char(','), Qt::SkipEmptyParts);
     it.mentions = QString::fromUtf8(row.mentions_text.c_str())
@@ -54,12 +106,22 @@ MessageRow rowFromItem(const QString& chanid, const MessageItem& it)
     row.time_text    = it.time.toUtf8().constData();
     row.category     = it.isSelf ? "self" : "other";
     row.media_url    = it.mediaUrl.toUtf8().constData();
-    row.media_mime   = it.audioMime.toUtf8().constData();
+    row.media_mime   = it.mediaMime.toUtf8().constData();
+    row.msg_type     = it.msgType.toUtf8().constData();
+    // 列复用披露：thumbnail_key 原语义客户端缓存键，qltox 流程未写用，
+    // 本处承载 CS info.thumbnail_url 原文，无消费冲突
+    row.thumbnail_key = it.thumbUrl.toUtf8().constData();
+    row.file_name    = it.fileName.toUtf8().constData();
+    row.file_size    = it.fileSizeBytes;
     row.duration_sec = it.durationSec;
     row.send_state   = (int)it.sendState;
     row.relates_to_ids = it.replyTos.join(QLatin1Char(',')).toUtf8().constData();
     row.mentions_text  = it.mentions.join(QLatin1Char(',')).toUtf8().constData();
-    if (it.localId != 0) {
+    if (!it.msgId.isEmpty()) {
+        // UnifiedMessage 契约：push 必带 msgid（Matrix $id）→ 直接作
+        // messages.event_id（UNIQUE 天然到达级去重，同 $id 重推不再插双行）
+        row.event_id = it.msgId.toUtf8().constData();
+    } else if (it.localId != 0) {
         // localId 是进程内自增，跨进程会重复（都从 local_1 开始），
         // 撞上 messages.event_id 的 UNIQUE 约束 → 消息不落库。
         row.event_id = std::string("local_")

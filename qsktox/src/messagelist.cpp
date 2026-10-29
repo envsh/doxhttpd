@@ -1278,7 +1278,7 @@ QskHashValue MessageRowNode::hash(const void*) const
         ^ qHash(m_item.time) ^ qHash(m_item.isSelf)
         ^ qHash(m_item.avatarUrl) ^ m_item.peerNumber
         ^ qHash(static_cast<int>(m_item.sendState))
-        ^ qHash(m_item.mediaUrl) ^ qHash(m_item.audioMime)
+        ^ qHash(m_item.mediaUrl)
         ^ qHash(m_item.isAudio) ^ m_item.durationSec
         ^ qHash(m_item.avatarLetter)
         ^ qHash(static_cast<uint>(m_item.avatarColor.rgb()))

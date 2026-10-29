@@ -18,6 +18,7 @@
 #include <QCoreApplication>
 #include <QSettings>
 #include <QJsonDocument>
+#include <QRegularExpression>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QTime>
@@ -43,6 +44,19 @@ static QString fmtMediaSize(qint64 bytes) {
         return QString("%1 MB").arg(mb, 0, 'f', 1);
     }
     return QString("%1 GB").arg(mb / 1024.0, 0, 'f', 2);
+}
+
+// push html 正文剥标签简版（UnifiedMessage html 兜底链专供）：
+// br 系 → \n、去 <> 标签、四基础实体还原；不做完整 HTML 解析（披露）
+static QString stripPushHtml(QString s) {
+    s.replace(QRegularExpression("<\\s*(?:br|BR)\\s*/?>"),
+        QStringLiteral("\n"));
+    s.replace(QRegularExpression("<[^>]*>"), QString());
+    s.replace(QStringLiteral("&amp;"), QStringLiteral("&"));
+    s.replace(QStringLiteral("&lt;"), QStringLiteral("<"));
+    s.replace(QStringLiteral("&gt;"), QStringLiteral(">"));
+    s.replace(QStringLiteral("&quot;"), QStringLiteral("\""));
+    return s.trimmed();
 }
 
 static void jniKeepScreenOn(bool on) {
@@ -246,7 +260,8 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             QString chatId    = obj.value("chat_id").toString();
             QString protocol  = obj.value("protocol").toString();
             QString accountId = obj.value("account_id").toString();
-            QString userId    = obj.value("user_id").toString();
+            QString userId    = obj.value("userid").toString(
+                obj.value("user_id").toString());
             if (chatId.isEmpty()) {
                 qWarning() << "[MainPage] chat_id is empty, skip"
                            << "protocol:" << (protocol.isEmpty()
@@ -280,6 +295,18 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
                 }
             }
             QString text = obj.value("text").toString();
+            // ── 正文 fallback（UnifiedMessage text/markdown/html 三态）：
+            // msgformat=markdown/html 的 push 中 text 常空 → 依次兜底
+            //（html 剥标签简版见 stripPushHtml；markdown 原文直入）──
+            if (text.isEmpty()) {
+                text = obj.value("markdown").toString();
+            }
+            if (text.isEmpty()) {
+                const QString html = obj.value("html").toString();
+                if (!html.isEmpty()) {
+                    text = stripPushHtml(html);
+                }
+            }
             qint64 timestamp = obj.value("timestamp").toVariant().toLongLong();
 
             // ── 批3：编辑/撤回契约键归一（qltox unknownparser:501/:221 口径）──
@@ -343,15 +370,76 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             msgItem.msgFormat   = obj.value("msgformat").toString();
             msgItem.msgId       = obj.value("msgid").toString();
             msgItem.timestampMs = timestamp;
+            // UnifiedMessage 元数据字段（同上保真口径）
+            msgItem.gateway     = obj.value("gateway").toString();
+            msgItem.chatTopic   = obj.value("chat_topic").toString();
+            msgItem.chatAlias   = obj.value("chat_alias").toString();
+            msgItem.chatMembers = obj.value("chat_members").toInt();
+            {
+                // chat_federated 为 *bool 三态（缺键 = 未知 -1；
+                // omitempty 下 homeserver 未上报时直接缺失）
+                const QJsonValue fedV = obj.value("chat_federated");
+                msgItem.chatFederated = fedV.isBool()
+                    ? (fedV.toBool() ? 1 : 0) : -1;
+            }
+            msgItem.usrPresence = obj.value("usr_presence").toString();
+            msgItem.usrStatus   = obj.value("usr_status").toString();
+            msgItem.msgId       = obj.value("msgid").toString();
+            if (!msgItem.msgId.isEmpty()) {
+                qDebug() << "[push] msgid detected:"
+                         << msgItem.msgId
+                         << "protocol:" << protocol
+                         << "chat_id:" << chatId;
+            }
+            // ── 附件数组（UnifiedMessage 契约主源；决策①：首个为主源，
+            // 其余不渲染——qltox 一行一卡口径）──
+            // 优先级：attachments[0] > info.* / 顶层 loose（历史 push 兼容），
+            // 命中附件即不再走兜底；缺键退化占位不阻断文本链
+            bool haveAttach = false;
+            {
+                const QJsonArray atts = obj.value("attachments").toArray();
+                if (!atts.isEmpty() && atts.at(0).isObject()) {
+                    const QJsonObject att = atts.at(0).toObject();
+                    msgItem.mediaUrl = att.value("url").toString();
+                    msgItem.mediaMime = att.value("mimetype").toString();
+                    msgItem.mediaWidth = att.value("width").toInt();
+                    msgItem.mediaHeight = att.value("height").toInt();
+                    msgItem.fileName = att.value("filename").toString();
+                    const qint64 asize =
+                        att.value("size").toVariant().toLongLong();
+                    if (asize > 0) {
+                        msgItem.fileSizeBytes = asize;
+                        msgItem.fileSizeStr = fmtMediaSize(asize);
+                    }
+                    haveAttach = !msgItem.mediaUrl.isEmpty();
+                }
+            }
+            // attach-only push（msgtype 键缺失）→ mime 派生兜底
+            //（与 msgMediaTypeOf 主源一致；原文有值时不覆盖）
+            if (haveAttach && msgItem.msgType.isEmpty()) {
+                if (msgItem.mediaMime.startsWith(
+                        QString::fromUtf8("image/"))) {
+                    msgItem.msgType = QString::fromUtf8("m.image");
+                } else if (msgItem.mediaMime.startsWith(
+                        QString::fromUtf8("video/"))) {
+                    msgItem.msgType = QString::fromUtf8("m.video");
+                } else if (msgItem.mediaMime.startsWith(
+                        QString::fromUtf8("audio/"))) {
+                    msgItem.msgType = QString::fromUtf8("m.audio");
+                } else {
+                    msgItem.msgType = QString::fromUtf8("m.file");
+                }
+            }
             // 媒体字段防御性填充（qltox unknownparser.cpp:208 content.info.*
-            // 口径）：push 若带 info 子对象优先，扁平键兜底；缺键退化占位。
+            // 口径）：attachments 未命中（历史 push）→ info 子对象优先，
+            // 扁平键兜底；缺键退化占位。
             // 服务端实际键名未验证，缺则全部留空 → measureMedia 自行退化
             // 为默认占位尺寸，不阻断文本链。
-            msgItem.mediaUrl = obj.value("media_url").toString(
-                obj.value("url").toString());
-            msgItem.mediaMime = obj.value("media_mime").toString(
-                obj.value("mediamime").toString());
-            {
+            if (!haveAttach) {
+                msgItem.mediaUrl = obj.value("media_url").toString(
+                    obj.value("url").toString());
+                msgItem.mediaMime = obj.value("media_mime").toString(
+                    obj.value("mediamime").toString());
                 const QJsonObject info = obj.value("info").toObject();
                 msgItem.mediaWidth = info.value("w").toInt(
                     obj.value("mediawidth").toInt());
@@ -387,11 +475,12 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
                 if (!fcName.isEmpty()) {
                     msgItem.fileName = fcName;
                 }
-                // 内存侧 isAudio（与 msgdb_bridge.cpp:34 DB 侧同判据）
-                if (msgItem.mediaMime.startsWith(QString::fromUtf8("audio/"))
-                    || msgItem.msgType.endsWith(QString::fromUtf8("audio"))) {
-                    msgItem.isAudio = true;
-                }
+            }
+            // 内存侧 isAudio（与 msgdb_bridge.cpp:34 DB 侧同判据；
+            // attachment / info 兜底两分支汇合后统一判定）
+            if (msgItem.mediaMime.startsWith(QString::fromUtf8("audio/"))
+                || msgItem.msgType.endsWith(QString::fromUtf8("audio"))) {
+                msgItem.isAudio = true;
             }
             msgItem.sender = username;
             msgItem.content = text;

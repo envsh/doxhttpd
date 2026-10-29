@@ -53,27 +53,50 @@ QString sendStateText(MessageItem::SendState state)
 QString buildItemSection(const MessageItem& item)
 {
     QString text;
-    text += QString::fromUtf8("== 消息对象 ==\n");
+    text += QString::fromUtf8("== 消息对象（内存态） ==\n");
     text += line("sender", item.sender);
     text += line("content", item.content);
     text += line("time", item.time);
     text += boolLine("isSelf", item.isSelf);
-    text += line("avatarUrl", item.avatarUrl);
-    text += numberLine("peerNumber", item.peerNumber);
-    text += line("avatarLetter", item.avatarLetter);
-    text += line("avatarColor", item.avatarColor.name());
     text += line("sendState", sendStateText(item.sendState));
     text += line("sendError", item.sendError);
     text += numberLine("reqSeq", item.reqSeq);
     text += numberLine("localId", item.localId);
     text += numberLine("dbRowid", item.dbRowid);
-    text += boolLine("isAudio", item.isAudio);
+    text += line("peerNumber", QString::number(item.peerNumber));
+    text += line("avatarLetter", item.avatarLetter);
+    text += line("avatarColor", item.avatarColor.name());
     text += line("mediaUrl", item.mediaUrl);
-    text += line("audioMime", item.audioMime);
+    text += line("mediaMime", item.mediaMime);
+    text += numberLine("mediaWidth", item.mediaWidth);
+    text += numberLine("mediaHeight", item.mediaHeight);
+    text += line("localPath", item.localPath);
+    text += line("thumbUrl", item.thumbUrl);
+    text += line("fileName", item.fileName);
+    text += line("fileSizeStr", item.fileSizeStr);
+    text += numberLine("fileSizeBytes", item.fileSizeBytes);
+    text += numberLine("downloadState", item.downloadState);
+    text += numberLine("downloadProgress", item.downloadProgress);
+    text += line("errorMsg", item.errorMsg);
+    text += boolLine("mediaPlaying", item.mediaPlaying);
+    text += boolLine("isAudio", item.isAudio);
     text += numberLine("durationSec", item.durationSec);
+    // 翻译组（会话内存态）：全部已存字段回显
+    text += numberLine("transState", item.transState);
+    text += boolLine("showTranslation", item.showTranslation);
+    text += line("translatedText", item.translatedText);
+    text += line("translateError", item.translateError);
+    text += numberLine("translateKey", item.translateKey);
+    // 预览组（会话内存态）：全部已存字段回显
+    text += numberLine("lpState", item.lpState);
+    text += line("lpUrl", item.lpUrl);
+    text += line("lpTitle", item.lpTitle);
+    text += line("lpDesc", item.lpDesc);
+    text += line("lpSite", item.lpSite);
 
-    // == 接收字段：push 载荷保真记录（纯内存，重启/翻历史后为空显示 "—"） ==
-    text += QString::fromUtf8("\n== 接收字段 ==\n");
+    // == 接收字段：push 原文保真记录（纯内存，重启后为空显示 "—"；
+    // user_icon = 对象段 avatarUrl 同源，单点在此回显） ==
+    text += QString::fromUtf8("\n== 接收字段（push 原文保真） ==\n");
     text += line("protocol", item.protocol);
     text += line("chat_id", item.chatId);
     text += line("chat_name", item.chatName);
@@ -88,7 +111,20 @@ QString buildItemSection(const MessageItem& item)
     text += line("msgtype", item.msgType);
     text += line("msgformat", item.msgFormat);
     text += line("msgid", item.msgId);
+    text += line("reply_tos", item.replyTos.join(QLatin1Char(',')));
+    text += line("mentions", item.mentions.join(QLatin1Char(',')));
     text += numberLine("timestamp", item.timestampMs);
+    // UnifiedMessage 元数据字段（纯内存，落库前 rawdata 对账）
+    text += line("gateway", item.gateway);
+    text += line("chat_topic", item.chatTopic);
+    text += line("chat_alias", item.chatAlias);
+    text += numberLine("chat_members", item.chatMembers);
+    text += line("chat_federated",
+        item.chatFederated == 1 ? QStringLiteral("true")
+        : item.chatFederated == 0 ? QStringLiteral("false")
+        : QStringLiteral("unknown"));
+    text += line("usr_presence", item.usrPresence);
+    text += line("usr_status", item.usrStatus);
     return text;
 }
 
@@ -120,6 +156,7 @@ QString buildRowSection(const MessageRow& row)
     text += line("caption", fromStd(row.caption));
     text += line("media_url", fromStd(row.media_url));
     text += line("media_mime", fromStd(row.media_mime));
+    text += line("msg_type", fromStd(row.msg_type));
     text += numberLine("media_width", row.media_width);
     text += numberLine("media_height", row.media_height);
     text += line("file_name", fromStd(row.file_name));

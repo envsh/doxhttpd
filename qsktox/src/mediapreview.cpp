@@ -70,8 +70,7 @@ void showFor(QQuickItem* parent, const MessageItem& item, int mediaType)
 
 void showVideoFor(QQuickItem* parent, const MessageItem& item)
 {
-    const QString mime = !item.audioMime.isEmpty()
-        ? item.audioMime : item.mediaMime;
+    const QString mime = item.mediaMime;
     const QString src = !item.mediaUrl.isEmpty() ? item.mediaUrl
         : item.localPath;
     const bool remote = src.contains(QStringLiteral("://"));

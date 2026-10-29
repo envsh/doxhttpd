@@ -625,8 +625,7 @@ void MessagePage::toggleAudio(int row)
         MediaHost::instance()->download(mi.mediaUrl);
         return;
     }
-    ap->play(mi.mediaUrl, raw, mi.audioMime.isEmpty()
-        ? mi.mediaMime : mi.audioMime);
+    ap->play(mi.mediaUrl, raw, mi.mediaMime);
     m_messageList->setAudioPlaying(mi.mediaUrl, true);
 }
 
@@ -968,7 +967,7 @@ void MessagePage::onTtsDone(int chatId, qint64 localId, bool success,
     ack.sendState = MessageItem::SendSent;
     ack.isAudio = !key.isEmpty();
     ack.mediaUrl = key;
-    ack.audioMime = mime;
+    ack.mediaMime = mime;
     ack.durationSec = durationSec;
     m_messageList->appendMessage(ack);
     MsgDbBridge::insertMessage(m_protocol, m_chatId, ack, nullptr, nullptr);
