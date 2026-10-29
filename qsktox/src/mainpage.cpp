@@ -414,6 +414,55 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
                     haveAttach = !msgItem.mediaUrl.isEmpty();
                 }
             }
+            // 全量保留 attachments[] 到 MessageItem（查看原始数据用，不平铺）
+            {
+                msgItem.attachments.clear();
+                const QJsonArray attsArr = obj.value("attachments").toArray();
+                for (int ai = 0; ai < attsArr.size(); ++ai) {
+                    const QJsonObject a = attsArr.at(ai).toObject();
+                    AttachRaw ar;
+                    ar.url = a.value("url").toString();
+                    if (ar.url.isEmpty()) ar.url = a.value("src").toString();
+                    ar.mime = a.value("mimetype").toString();
+                    if (ar.mime.isEmpty()) ar.mime = a.value("mime").toString();
+                    ar.filename = a.value("filename").toString();
+                    if (ar.filename.isEmpty()) ar.filename = a.value("name").toString();
+                    ar.attachtype = a.value("attachtype").toString();
+                    ar.size = qint64(a.value("size").toVariant().toLongLong());
+                    QJsonObject ainfo = a.value("info").toObject();
+                    if (!ainfo.isEmpty()) {
+                        if (ar.mime.isEmpty()) ar.mime = ainfo.value("mimetype").toString();
+                        if (ar.filename.isEmpty()) ar.filename = ainfo.value("filename").toString();
+                        if (ar.width == 0) ar.width = ainfo.value("w").toInt();
+                        if (ar.height == 0) ar.height = ainfo.value("h").toInt();
+                        {
+                            const QVariant d = ainfo.value("duration").toVariant();
+                            if (d.isValid()) {
+                                const qint64 dv = qint64(d.toLongLong());
+                                ar.durationSec = dv > 10000 ? dv / 1000 : dv;
+                            }
+                        }
+                        if (ar.size == 0) ar.size = qint64(ainfo.value("size").toVariant().toLongLong());
+                        if (ar.thumbnailUrl.isEmpty()) ar.thumbnailUrl = ainfo.value("thumbnail_url").toString();
+                    }
+                    if (ar.thumbnailUrl.isEmpty()) ar.thumbnailUrl = a.value("thumbnail_url").toString();
+                    msgItem.attachments.append(ar);
+                }
+                msgItem.attachCount = msgItem.attachments.size();
+                // attachBrief 概览（多附件时有用，不替代数组）
+                if (!msgItem.attachments.isEmpty()) {
+                    QString brief;
+                    for (int ai = 0; ai < msgItem.attachments.size(); ++ai) {
+                        const auto& ar = msgItem.attachments.at(ai);
+                        brief += QStringLiteral("%1 %2 %3 %4\n")
+                            .arg(ai)
+                            .arg(ar.mime)
+                            .arg(ar.attachtype)
+                            .arg(ar.url);
+                    }
+                    msgItem.attachBrief = brief.trimmed();
+                }
+            }
             // attach-only push（msgtype 键缺失）→ mime 派生兜底
             //（与 msgMediaTypeOf 主源一致；原文有值时不覆盖）
             if (haveAttach && msgItem.msgType.isEmpty()) {

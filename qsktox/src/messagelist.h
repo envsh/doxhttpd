@@ -23,6 +23,18 @@ class QProcess;
 // 信号 mediaBodyTapped 跨 TU 传递，枚举须在头文件）
 enum class MsgMediaType { Unknown, Text, Image, Gif, Video, Audio, File };
 
+struct AttachRaw {
+    QString url;
+    QString mime;
+    QString filename;
+    QString attachtype;
+    qint64 size = 0;
+    int width = 0;
+    int height = 0;
+    qint64 durationSec = 0;
+    QString thumbnailUrl;
+};
+
 struct MessageItem {
     enum SendState { SendSending, SendSent, SendFailed };
     QString sender;
@@ -85,7 +97,11 @@ struct MessageItem {
     int     downloadProgress = 0;  // 0-100；-1=总长未知（显示 …）
     int     downloadSpeedBps = 0;  // 下载速率（mediaBarSpeedText 显示用；非进度更新归零）
     qint64  fileSizeBytes = 0;     // 原始字节（<1MB 自动预取判定 + 状态条大小后缀）
-    QString thumbUrl;              // CS info.thumbnail_url（视频缩略图源）
+    QString thumbUrl;
+    // 多附件原始数组（push 原文保真，用于查看原始数据结构化展示）
+    QVector<AttachRaw> attachments;
+    int attachCount = 0;
+    QString attachBrief;              // CS info.thumbnail_url（视频缩略图源）
     QString errorMsg;              // 下载失败详情（qltox mediaErrorMsg 触摸端口径：
                                    // 无 tooltip，Failed 状态条内直出，单行自动裁剪）
     bool    mediaPlaying = false;  // 语音行内播放中（P2 纯内存；tap toggle 切换）
