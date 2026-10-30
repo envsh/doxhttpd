@@ -7,6 +7,7 @@
 #include "pushhandler.h"
 #include "messagestore.h"
 #include "msgdb_bridge.h"
+#include "peerinfocache.h"
 #include "virtualcontacts.h"
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
@@ -365,6 +366,20 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             msgItem.username    = obj.value("username").toString();
             msgItem.userId      = userId;
             msgItem.usernick    = obj.value("usernick").toString();
+            // 推送链 peer 信息缓存（qltox mainwindow.cpp:2868 通道对位）：
+            // UnknownParser 的 pr.peers → mergePeerInfo(getOrCreatePeerEntry)
+            // 同语义，qsktox 侧 push 载荷即含发送者全部字段，逐条顺手入缓存，
+            // 供后续消息 mention token 解析昵称（绘制/点击同源）
+            {
+                PeerInfo pi;
+                pi.publicKey    = msgItem.userId.toStdString();
+                pi.userName     = msgItem.username.toStdString();
+                pi.nickname     = msgItem.usernick.toStdString();
+                pi.iconUrl      = usericon.toStdString();
+                pi.userStatus   = obj.value("user_status").toString().toStdString();
+                //pi.userPresence = obj.value("user_presence").toString();
+                PeerInfoCache::instance()->mergePeerInfo(pi);
+            }
             msgItem.chanIcon    = obj.value("chan_icon").toString();
             msgItem.msgType     = obj.value("msgtype").toString();
             msgItem.msgFormat   = obj.value("msgformat").toString();

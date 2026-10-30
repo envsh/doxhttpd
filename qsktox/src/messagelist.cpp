@@ -5,6 +5,7 @@
 #include "avatar_manager.h"
 #include "avatarutil.h"
 #include "mediahost.h"
+#include "peerinfocache.h"
 #include "translatehost.h"
 #include "linkpreviewhost.h"
 #include <private/qquicktaphandler_p.h>
@@ -67,25 +68,51 @@ static QString quoteLineFor(const MessageItem& item) {
     return QString::fromUtf8("↩ ") + q;
 }
 
-// mention 短称（qltox attachReplyLinks 简化对位）：@user:server → @user；
-// 未命中正文 token 原样保留，零命中零行为
-static QString bodyForPaint(const MessageItem& item) {
+// mention 替换（qltox attachReplyLinks 对位体）：token 显示名优先
+// PeerInfoCache 昵称（nickname>userName 同 qltox onReplyLinkActivated
+// 口径）；miss 退化 @localpart 短称。基于逐次 indexOf 前向扫描，同一
+// token 多次出现也逐个产出 span；spans 可空（仅计量场景）。
+static QString bodyForPaintWithSpans(const MessageItem& item,
+                                     QVector<MentionSpan>* spans) {
+    if (spans) {
+        spans->clear();
+    }
     QString body = item.content;
     for (const QString& tok : item.mentions) {
         if (tok.isEmpty()) {
             continue;
         }
-        const int at = body.indexOf(tok);
-        if (at < 0) {
-            continue;
+        int from = 0;
+        while (true) {
+            const int at = body.indexOf(tok, from);
+            if (at < 0) {
+                break;
+            }
+            QString shown = PeerInfoCache::instance()->displayName(tok);
+            if (shown.isEmpty()) {
+                shown = tok.section(QLatin1Char(':'), 0, 0);
+                if (!shown.startsWith(QLatin1Char('@'))) {
+                    shown = QLatin1Char('@') + shown;
+                }
+            }
+            body.replace(at, tok.length(), shown);
+            if (spans) {
+                MentionSpan sp;
+                sp.start = at;
+                sp.end = at + shown.length();
+                sp.userId = tok;
+                sp.shownName = shown;
+                spans->append(sp);
+            }
+            from = at + shown.length();
         }
-        QString short_ = tok.section(QLatin1Char(':'), 0, 0);
-        if (!short_.startsWith(QLatin1Char('@'))) {
-            short_ = QLatin1Char('@') + short_;
-        }
-        body.replace(at, tok.length(), short_);
     }
     return body;
+}
+
+// mention 短称（无 span 需求的计量场景沿用旧签名）
+static QString bodyForPaint(const MessageItem& item) {
+    return bodyForPaintWithSpans(item, nullptr);
 }
 
 // ── giflike 短视频 helpers（批4，qltox :4468-4493 口径）──
@@ -740,6 +767,112 @@ static MessageTextMetrics measureMessageText(const QString& content,
     }
     m.height = y;
     return m;
+}
+
+// mention span 命中（触摸端，qltox charPosAt+replyLinks 对位）。
+// 几何与 paint() 同源回放（media caption / quote 下移两口径都在）：
+// 坐标约定与 msgMediaRect 相同（tap localPos 直传，行顶为原点）。
+// 命中返回 true 并带出 token 原文与显示名；用 QTextLayout 的
+// xToCursor 把点击 x 映射到 cursor，落入 span 区间即命中。
+static bool msgMentionSpanAt(const MessageItem& item, qreal viewW,
+                             const QPointF& pos,
+                             QString* userId, QString* shownName)
+{
+    if (item.mentions.isEmpty() || viewW <= 0) {
+        return false;
+    }
+    QVector<MentionSpan> spans;
+    const QString display = bodyForPaintWithSpans(item, &spans);
+    if (spans.isEmpty() || display.isEmpty()) {
+        return false;
+    }
+
+    QFont msgFont;
+    msgFont.setPixelSize(16);
+    QFontMetrics msgFm(msgFont);
+    const MediaDisplayMetrics mm = measureMedia(item, viewW);
+    const bool isMedia = (mm.type != MsgMediaType::Unknown
+                          && mm.type != MsgMediaType::Text);
+    const QString quote = quoteLineFor(item);
+
+    // 文本矩形（paint() 同款双口径：media caption 移顶无引用条；
+    // 普通行 reply 引用条下移一行），SIDE_MARGIN 复用 paint 同名常量
+    qreal bubbleX;
+    qreal textY;
+    qreal lineW;
+    if (isMedia) {
+        if (item.isSelf) {
+            bubbleX = viewW - (mm.bubbleW + BUBBLE_PADDING_H * 2)
+                - SIDE_MARGIN;
+        } else {
+            bubbleX = SIDE_MARGIN + AVATAR_SIZE + AVATAR_SPACING;
+        }
+        textY = NAME_HEIGHT + BUBBLE_PADDING_V;
+        lineW = mm.bubbleW;   // caption 行宽（paint 同款）
+    } else {
+        const qreal maxBubbleWidth = viewW * 85.0 / 100.0;
+        const qreal fullTextW = maxBubbleWidth - BUBBLE_PADDING_H * 2;
+        const MessageTextMetrics tm =
+            measureMessageText(display, msgFont, fullTextW);
+        const qreal naturalWidth = msgFm.horizontalAdvance(display);
+        const qreal contentWidth =
+            naturalWidth < fullTextW ? naturalWidth : fullTextW;
+        const qreal bubbleWidth =
+            contentWidth + BUBBLE_PADDING_H * 2 < 40.0
+                ? 40.0
+                : contentWidth + BUBBLE_PADDING_H * 2;
+        if (item.isSelf) {
+            bubbleX = viewW - bubbleWidth - SIDE_MARGIN;
+        } else {
+            bubbleX = SIDE_MARGIN + AVATAR_SIZE + AVATAR_SPACING;
+        }
+        textY = NAME_HEIGHT + BUBBLE_PADDING_V
+            + (quote.isEmpty() ? 0.0 : QUOTE_LINE_H);
+        lineW = contentWidth;   // paint 排版行宽（naturalWidth 截顶）
+    }
+
+    const QRectF textRect(bubbleX + BUBBLE_PADDING_H, textY, lineW,
+        msgFm.height() + 2.0);
+    if (!textRect.contains(pos)) {
+        return false;
+    }
+
+    // 与 paint 同款排版回放（行宽/原点一致），xToCursor 映射命中
+    QTextOption opt;
+    opt.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+    QTextLayout layout(display, msgFont);
+    layout.setTextOption(opt);
+    layout.beginLayout();
+    qreal ty = textRect.y();
+    int cursor = -1;
+    while (true) {
+        QTextLine ln = layout.createLine();
+        if (!ln.isValid()) {
+            break;
+        }
+        ln.setLineWidth(lineW);
+        ln.setPosition(QPointF(textRect.x(), ty));
+        if (pos.y() >= ty && pos.y() < ty + ln.height()) {
+            cursor = ln.xToCursor(pos.x() - textRect.x());
+        }
+        ty += ln.height();
+    }
+    layout.endLayout();
+    if (cursor < 0) {
+        return false;
+    }
+    for (const MentionSpan& sp : spans) {
+        if (cursor >= sp.start && cursor < sp.end) {
+            if (userId) {
+                *userId = sp.userId;
+            }
+            if (shownName) {
+                *shownName = sp.shownName;
+            }
+            return true;
+        }
+    }
+    return false;
 }
 
 // ── 自动翻译/链接预览扩展块（qltox 翻译/预览渲染移植口径）──
@@ -1642,6 +1775,17 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
                 if (trRect.contains(cPos)) {
                     m_items[row].showTranslation = !m_items[row].showTranslation;
                     refreshLayoutAndView();
+                    return;
+                }
+            }
+            // mention token 命中（qltox replyLinkActivated 对位）：
+            // 仅文本/caption 区命中，与媒体矩形不重叠；先于媒体条带
+            {
+                QString mUid;
+                QString mName;
+                if (msgMentionSpanAt(m_items[row], m_contentView->width(),
+                                     localPos, &mUid, &mName)) {
+                    Q_EMIT mentionTapped(row, mUid, mName);
                     return;
                 }
             }

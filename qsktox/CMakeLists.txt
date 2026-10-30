@@ -78,6 +78,8 @@ set(QSKTOX_SOURCES
     src/msgdb_bridge.cpp
     src/messagelist.h
     src/messagelist.cpp
+    src/peerinfocache.cpp
+    src/peerinfocache.h
     src/messagepage.h
     src/messagepage.cpp
     src/messageattribbar.h

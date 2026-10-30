@@ -119,6 +119,44 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             openAvatarMenu(row, pos);
         });
 
+    // ── mention 点击 → 用户资料卡（qltox onReplyLinkActivated 对位，
+    // 触摸端 qsk Menu 轻量版：显示名 + 复制 ID；命中率中心弹）──
+    connect(m_messageList, &MessageListWidget::mentionTapped,
+        this, [this](int row, const QString& userId,
+                     const QString& shownName) {
+            Q_UNUSED(row);
+            for (auto* old : findChildren<QskMenu*>())
+                old->deleteLater();
+            for (auto* old : findChildren<MenuOverlay*>())
+                old->deleteLater();
+
+            auto* menu = new QskMenu(this);
+            menu->setModal(true);
+            const int copyOption = menu->addOption(
+                QskLabelData(QString::fromUtf8("复制 ID")));
+            menu->addOption(QskLabelData(QString::fromUtf8("关闭")));
+
+            menu->setOrigin(QPointF(width() / 2.0, height() / 2.0));
+
+            connect(menu, &QskMenu::triggered, this,
+                [this, userId, copyOption](int index) {
+                    if (index == copyOption) {
+                        QGuiApplication::clipboard()->setText(userId);
+                        showAndroidToast(QString::fromUtf8("已复制"));
+                    }
+                    if (auto* m = qobject_cast<QskMenu*>(QObject::sender()))
+                        m->close();
+                });
+
+            {
+                auto* overlay = new MenuOverlay(menu);
+                connect(menu, &QObject::destroyed,
+                    overlay, &QObject::deleteLater);
+            }
+
+            menu->open();
+        });
+
     // ── Long press menu ──
     connect(m_messageList, &MessageListWidget::rowLongPressed,
         this, [this](int row, const QPointF& pos) {

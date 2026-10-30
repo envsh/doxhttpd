@@ -23,6 +23,15 @@ class QProcess;
 // 信号 mediaBodyTapped 跨 TU 传递，枚举须在头文件）
 enum class MsgMediaType { Unknown, Text, Image, Gif, Video, Audio, File };
 
+// mention 点击命中区间（qltox ReplyLinkSpan 对位）：bodyForPaintWithSpans
+// 输出替换后文本时同步产出；start/end 为替换后文本中的字符区间
+struct MentionSpan {
+    int start = 0;
+    int end = 0;
+    QString userId;      // token 原文（@user:server 整段）
+    QString shownName;   // 替换后的显示名（昵称优先，miss 为 localpart 短称）
+};
+
 struct AttachRaw {
     QString url;
     QString mime;
@@ -248,6 +257,10 @@ Q_SIGNALS:
     // 触摸端口径（qltox 双击 openFullSizeImage/openMediaPlayer 的动作映射手），
     // mediaType = MsgMediaType 枚举 int（messagelist.h:43）
     void mediaBodyTapped(int row, int mediaType);
+    // mention token 命中（qltox replyLinkActivated 对位；触摸端单击）：
+    // userId 为 token 原文，shownName 为绘制时的显示名
+    void mentionTapped(int row, const QString& userId,
+                       const QString& shownName);
     void avatarLongPressed(int row, const QPointF& scenePos);
     void retryRequested(int row);
 
