@@ -393,6 +393,44 @@ static QRectF msgMediaBarRect(const MessageItem& item, qreal viewW) {
         mediaRect.width(), 22.0);
 }
 
+// 下载/重试命中矩形拆分（qltox downloadBtnRect/retryBtnRect 对位）：
+// 状态文案右对齐，热区取状态条右侧固定宽度（预留大小后缀/错误前缀空间）。
+// NotRequested → download；Failed → retry；InProgress/Completed 无热区
+//（进度条/已下载不响应点击）。paint 与 tap 同源（paint 出参转存，tap 读取）。
+static constexpr qreal MEDIA_BAR_HOT_W = 72.0;
+
+struct MediaBarRects {
+    QRectF download;
+    QRectF retry;
+};
+
+// barRect 由调用方传入（paint 处=真实条位含 caption 下移；tap 读缓存）
+static MediaBarRects mediaBarRectsSplitForBar(const MessageItem& item,
+                                              const QRectF& barRect)
+{
+    MediaBarRects r;
+    if (item.isAudio || barRect.isEmpty()) {
+        return r;
+    }
+    if (item.downloadState != MediaDlNotRequested
+        && item.downloadState != MediaDlFailed) {
+        return r;
+    }
+    const qreal bx = barRect.right() - MEDIA_BAR_HOT_W - 4.0;
+    r.download = QRectF(bx, barRect.y(), MEDIA_BAR_HOT_W + 4.0,
+        barRect.height());
+    if (item.downloadState == MediaDlFailed) {
+        r.retry = r.download;
+        r.download = QRectF();
+    }
+    return r;
+}
+
+// 媒体行真实条位（paint 与 updatePaintNode 双调用点同源公式，与
+// MessageRowNode::paint 的 mediaRect 推导一致：caption 偏移 + mm 几何）。
+// GUI 线程调用（updatePaintNode），热区转存无跨线程竞态。
+// 定义在 measureMessageText 之后（caption 高度依赖）
+static QRectF mediaBodyBarRect(const MessageItem& item, qreal w);
 // 图片等比缩放目标 rect（修 drawImage 满框拉伸 bug：居中 KeepAspectRatio）
 static QRectF mediaFitRect(const QImage& img, const QRectF& rect) {
     if (img.isNull() || rect.width() <= 0 || rect.height() <= 0) {
@@ -525,13 +563,12 @@ static void paintMediaBody(QPainter* p, const MessageItem& item,
     const QRectF barRect(mediaRect.x(), mediaRect.bottom() - 22.0,
         mediaRect.width(), 22.0);
     p->fillRect(barRect, QColor(0, 0, 0, 140));
-    // InProgress：条内半透明白填充（宽度=pct）——qltox「顶部 4px 线性进度条」
-    // 在 qsk 状态条内的同义落位（22px 全高，bottom bar 不再另分顶条）
+    // InProgress：qltox「顶部 4px 线性进度条」同义落位（细条不遮文案）
     if (item.downloadState == MediaDlInProgress && item.downloadProgress >= 0
         && item.downloadProgress <= 100) {
         p->fillRect(QRectF(barRect.x(), barRect.y(),
-            barRect.width() * item.downloadProgress / 100.0, barRect.height()),
-            QColor(255, 255, 255, 38));
+            barRect.width() * item.downloadProgress / 100.0, 4.0),
+            QColor(255, 255, 255, 160));
     }
     QString barText;
     QColor barColor = Qt::white;
@@ -873,6 +910,30 @@ static bool msgMentionSpanAt(const MessageItem& item, qreal viewW,
         }
     }
     return false;
+}
+
+// 媒体行真实条位（paint 与 updatePaintNode 双调用点同源公式，与
+// MessageRowNode::paint 的 mediaRect 推导一致：caption 偏移 + mm 几何）。
+// GUI 线程调用（updatePaintNode），热区转存无跨线程竞态
+QRectF mediaBodyBarRect(const MessageItem& item, qreal w)
+{
+    const MediaDisplayMetrics mm = measureMedia(item, w);
+    if (mm.type == MsgMediaType::Unknown || mm.type == MsgMediaType::Text
+        || mm.bubbleW <= 0 || item.isAudio) {
+        return QRectF();
+    }
+    QFont msgFont;
+    msgFont.setPixelSize(16);
+    const QString displayContent = bodyForPaint(item);
+    const qreal captionH = displayContent.isEmpty() ? 0.0 :
+        measureMessageText(displayContent, msgFont, mm.bubbleW).height
+            + BUBBLE_PADDING_V;
+    const qreal bubbleX = item.isSelf
+        ? w - (mm.bubbleW + BUBBLE_PADDING_H * 2) - SIDE_MARGIN
+        : SIDE_MARGIN + AVATAR_SIZE + AVATAR_SPACING;
+    return QRectF(bubbleX + BUBBLE_PADDING_H,
+        NAME_HEIGHT + BUBBLE_PADDING_V + captionH + mm.bubbleH - 22.0,
+        mm.bubbleW, 22.0);
 }
 
 // ── 自动翻译/链接预览扩展块（qltox 翻译/预览渲染移植口径）──
@@ -1626,6 +1687,19 @@ void MessageRowItem::setMessageData(const MessageItem& item)
     update();
 }
 
+void MessageRowItem::setMediaBarRects(const QRectF& downloadRect,
+                                      const QRectF& retryRect)
+{
+    m_mediaDownloadRect = downloadRect;
+    m_mediaRetryRect = retryRect;
+}
+
+void MessageRowItem::clearMediaBarRects()
+{
+    m_mediaDownloadRect = QRectF();
+    m_mediaRetryRect = QRectF();
+}
+
 void MessageRowItem::setMessageDataNoUpdate(const MessageItem& item)
 {
     const bool avatarChanged = (item.avatarUrl != m_item.avatarUrl);
@@ -1652,6 +1726,14 @@ QSGNode* MessageRowItem::updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*)
     auto* node = static_cast<MessageRowNode*>(oldNode);
     if (!node) {
         node = new MessageRowNode();
+    }
+    // 媒体状态条命中热区刷新（GUI 线程，tap 命中用；paint 同源公式）。
+    // 状态切换（点下载/重试后）setMessageDataNoUpdate 不触发 m_dirty 时，
+    // tap 已手动 clearMediaBarRects 兜底，此处按需重算
+    {
+        const QRectF barFull = mediaBodyBarRect(m_item, width());
+        const MediaBarRects br = mediaBarRectsSplitForBar(m_item, barFull);
+        setMediaBarRects(br.download, br.retry);
     }
     if (m_dirty) {
         node->setItem(m_item, m_avatarImage, m_avatarTick,
@@ -1789,30 +1871,49 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
                     return;
                 }
             }
-            // 媒体下载状态条命中：NotRequested/Failed → 发起/重试
-            //（qltox startMediaDownload mw:4114 口径；防重复由 MediaHost
-            //  m_pending/m_files/m_cache 与行状态双保险）
+            // 媒体下载状态条命中：下载/重试热区拆分（qltox downloadBtn/
+            // retryBtnRect 对位，paint 同源缓存矩形）；热区缺失时整条
+            // 兜底（行未绘制/布局切换窗口）。防重复由 MediaHost
+            //  m_pending/m_files/m_cache 与行状态双保险
             {
                 const int rowState = m_items[row].downloadState;
                 const bool rowIsAudio = m_items[row].isAudio;
                 const QString rowUrl = m_items[row].mediaUrl;
                 if (!rowIsAudio && !rowUrl.isEmpty()
                     && (rowState == MediaDlNotRequested
-                        || rowState == MediaDlFailed)
-                    && msgMediaBarRect(m_items[row], m_contentView->width())
-                        .contains(localPos)) {
-                    m_items[row].downloadState = MediaDlInProgress;
-                    m_items[row].downloadProgress = 0;
-                    m_items[row].downloadSpeedBps = 0;
-                    m_items[row].errorMsg = QString();
+                        || rowState == MediaDlFailed)) {
+                    // 热区齐全 → 只认热区（qltox 按钮口径）；
+                    // 热区缺失（行未绘制/布局切换窗口）→ 整条兜底
+                    bool haveHot = false;
+                    bool hitBar = false;
                     if (MessageRowItem* rowItem = m_visibleRows.value(row)) {
-                        rowItem->setMessageDataNoUpdate(m_items[row]);
-                        rowItem->update();
+                        const QRectF hotRect = (rowState == MediaDlFailed)
+                            ? rowItem->mediaRetryRect()
+                            : rowItem->mediaDownloadRect();
+                        if (!hotRect.isEmpty()) {
+                            haveHot = true;
+                            hitBar = hotRect.contains(localPos);
+                        }
                     }
-                    // 批5b：大文件（>1MB 状态条手动档）按 qltox 50KB/s 估算放权超时
-                    MediaHost::instance()->download(rowUrl,
-                        mediaDownloadTimeout(m_items[row].fileSizeBytes));
-                    return;
+                    if (!haveHot) {
+                        hitBar = msgMediaBarRect(m_items[row],
+                            m_contentView->width()).contains(localPos);
+                    }
+                    if (hitBar) {
+                        m_items[row].downloadState = MediaDlInProgress;
+                        m_items[row].downloadProgress = 0;
+                        m_items[row].downloadSpeedBps = 0;
+                        m_items[row].errorMsg = QString();
+                        if (MessageRowItem* rowItem = m_visibleRows.value(row)) {
+                            rowItem->clearMediaBarRects();
+                            rowItem->setMessageDataNoUpdate(m_items[row]);
+                            rowItem->update();
+                        }
+                        // 批5b：大文件（>1MB 状态条手动档）按 qltox 50KB/s 估算放权超时
+                        MediaHost::instance()->download(rowUrl,
+                            mediaDownloadTimeout(m_items[row].fileSizeBytes));
+                        return;
+                    }
                 }
             }
             // 媒体本体命中：单击即开（触摸端无 qltox 双击依赖；状态条段
@@ -1849,6 +1950,35 @@ MessageListWidget::MessageListWidget(QQuickItem* parent)
             QPointF localPos = mapFromScene(pos);
             int row = rowFromPosition(localPos);
             if (row >= 0 && row < m_items.size()) {
+                // 失败状态条长按：完整错误详情（qltox tooltip 的触摸端
+                // 改版；详情超长会被状态条单行裁剪）。坐标转换与
+                // singleTapped 🌐 分支同款（viewport→row 内容系）
+                if (!m_items[row].isAudio
+                    && m_items[row].downloadState == MediaDlFailed
+                    && !m_items[row].errorMsg.isEmpty()) {
+                    const auto vrTapL = viewContentsRect();
+                    const QPointF cPosL(localPos.x() - vrTapL.left(),
+                        localPos.y() - vrTapL.top() + scrollPos().y());
+                    bool hitBarL = false;
+                    if (MessageRowItem* rowItemL
+                        = m_visibleRows.value(row)) {
+                        const QRectF retryRect = rowItemL->mediaRetryRect();
+                        if (!retryRect.isEmpty()) {
+                            hitBarL = retryRect.contains(cPosL);
+                        } else {
+                            hitBarL = msgMediaBarRect(m_items[row],
+                                m_contentView->width()).contains(cPosL);
+                        }
+                    } else {
+                        hitBarL = msgMediaBarRect(m_items[row],
+                            m_contentView->width()).contains(cPosL);
+                    }
+                    if (hitBarL) {
+                        Q_EMIT mediaBarLongPressed(row,
+                            m_items[row].errorMsg, mapToScene(localPos));
+                        return;
+                    }
+                }
                 const auto vr = viewContentsRect();
                 const qreal contentX = localPos.x() - vr.left() + 0.0;
                 const qreal contentY = localPos.y() - vr.top()

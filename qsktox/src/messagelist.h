@@ -176,6 +176,13 @@ public:
     // 媒体真绘源解码 GUI 线程口径见 cpp；递增 mediaTick 参与 hash 保证重绘。
     void refreshMedia();
 
+    // 媒体下载状态条命中矩形（paint 与 tap 同源：paintMediaBody 写入，
+    // 空矩形=该状态无热区）。内容坐标系（与 msgMediaRect 同一基准）
+    void setMediaBarRects(const QRectF& downloadRect, const QRectF& retryRect);
+    QRectF mediaDownloadRect() const { return m_mediaDownloadRect; }
+    QRectF mediaRetryRect() const { return m_mediaRetryRect; }
+    void clearMediaBarRects();
+
 protected:
     QSGNode* updatePaintNode(QSGNode* oldNode, UpdatePaintNodeData*) override;
 
@@ -196,6 +203,8 @@ private:
     QBuffer* m_gifBuf = nullptr;
     QByteArray m_gifData;
     QString m_gifSrc;              // 当前动画源（相同则不重建）
+    QRectF m_mediaDownloadRect;    // ⬇ 下载热区（NotRequested）
+    QRectF m_mediaRetryRect;       // ↻ 重试热区（Failed）
 };
 
 class MessageRowItem;
@@ -261,6 +270,10 @@ Q_SIGNALS:
     // userId 为 token 原文，shownName 为绘制时的显示名
     void mentionTapped(int row, const QString& userId,
                        const QString& shownName);
+    // 媒体下载状态条长按（Failed 详情直显；qltox tooltip 思路的触摸端
+    // 改版：详情过长被状态条单行裁剪，长按弹完整原文菜单）
+    void mediaBarLongPressed(int row, const QString& errorMsg,
+                             const QPointF& scenePos);
     void avatarLongPressed(int row, const QPointF& scenePos);
     void retryRequested(int row);
 

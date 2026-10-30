@@ -157,6 +157,46 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             menu->open();
         });
 
+    // ── 媒体下载失败详情（长按状态条；qltox tooltip 的触摸端改版）──
+    connect(m_messageList, &MessageListWidget::mediaBarLongPressed,
+        this, [this](int row, const QString& errorMsg, const QPointF& pos) {
+            Q_UNUSED(row);
+            for (auto* old : findChildren<QskMenu*>())
+                old->deleteLater();
+            for (auto* old : findChildren<MenuOverlay*>())
+                old->deleteLater();
+
+            auto* menu = new QskMenu(this);
+            menu->setModal(true);
+            const int copyOption = menu->addOption(QskLabelData(
+                errorMsg.isEmpty()
+                    ? QString::fromUtf8("未知错误")
+                    : errorMsg));
+            menu->addOption(QskLabelData(QString::fromUtf8("关闭")));
+            const int closeOption = copyOption + 1;
+
+            menu->setOrigin(pos);
+
+            connect(menu, &QskMenu::triggered, this,
+                [this, errorMsg, closeOption](int index) {
+                    if (index != closeOption && !errorMsg.isEmpty()) {
+                        // 详情项即复制项（qltox toast 已复制同款反馈）
+                        QGuiApplication::clipboard()->setText(errorMsg);
+                        showAndroidToast(QString::fromUtf8("已复制"));
+                    }
+                    if (auto* m = qobject_cast<QskMenu*>(QObject::sender()))
+                        m->close();
+                });
+
+            {
+                auto* overlay = new MenuOverlay(menu);
+                connect(menu, &QObject::destroyed, overlay,
+                    &QObject::deleteLater);
+            }
+
+            menu->open();
+        });
+
     // ── Long press menu ──
     connect(m_messageList, &MessageListWidget::rowLongPressed,
         this, [this](int row, const QPointF& pos) {
