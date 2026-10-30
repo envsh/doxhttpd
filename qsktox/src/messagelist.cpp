@@ -589,14 +589,35 @@ static void paintMediaBody(QPainter* p, const MessageItem& item,
         barText = QString::fromUtf8("✓ 已下载");
         barColor = QColor(0x4C, 0xAF, 0x50);
         break;
-    case MediaDlFailed:
-        // 详情直出（qltox tooltip 文案 chatview.cpp:3706-3708 的触摸端改版；
-        // 详情空保持旧文案；单行 TextSingleLine 已兜裁剪）
-        barText = item.errorMsg.isEmpty()
-            ? QString::fromUtf8("✗ 失败 · 点按重试")
-            : QString::fromUtf8("✗ ") + item.errorMsg;
+    case MediaDlFailed: {
+        // 详情直出（qltox tooltip 文案 chatview.cpp:3706-3708 的触摸端改版：
+        // 左侧错误详情 + 右侧显式重试按钮 pill，热区同源 MEDIA_BAR_HOT_W）
         barColor = QColor(0xE5, 0x39, 0x35);
+        const QString err = item.errorMsg.isEmpty()
+            ? QString::fromUtf8("下载失败")   // 详情空保持旧兜底文案
+            : item.errorMsg;
+        QFont bf = baseFont;
+        bf.setPixelSize(10);
+        bf.setBold(true);
+        p->setFont(bf);
+        p->setPen(barColor);
+        const qreal btnW = MEDIA_BAR_HOT_W;
+        // 左侧错误文本，避开右侧按钮区域（TextSingleLine 兜裁剪）
+        p->drawText(barRect.adjusted(6.0, 0.0, -(btnW + 12.0), 0.0),
+            Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
+            QString::fromUtf8("✗ ") + err);
+        // 右侧重试按钮 pill（热区 mediaBarRectsSplitForBar 已覆盖该区域）
+        const QRectF retryBtn(barRect.right() - btnW - 4.0,
+            barRect.y() + 2.0, btnW, barRect.height() - 4.0);
+        p->setPen(Qt::NoPen);
+        p->setBrush(QColor(255, 255, 255, 48));
+        p->drawRoundedRect(retryBtn, 4.0, 4.0);
+        p->setPen(Qt::white);
+        p->drawText(retryBtn, Qt::AlignCenter,
+            QString::fromUtf8("↻ 重试"));
+        p->setFont(baseFont);
         break;
+    }
     default: {
         barText = QString::fromUtf8("⬇ 下载");
         QString sz = item.fileSizeStr;
