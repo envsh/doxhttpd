@@ -31,7 +31,8 @@ BUILD_DIR=build-android
     -DCMAKE_PREFIX_PATH="$QSK_ANDROID" \
     -DQSkinny_DIR="$QSK_ANDROID/lib/cmake/QSkinny" \
     -DQT_HOST_PATH="$QT_HOST" \
-    -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DCMAKE_STRIP=/bin/true
 
 # 2. build native .so only (not apk target)
 #cmake --build "$BUILD_DIR" -j$(nproc) --target qsktox
@@ -70,6 +71,13 @@ cp ../vendor/lib/${ANDROID_ABI:-arm64-v8a}/libcrypto_3.so "$LIB_DIR/"
 # （NDK 官方：libc++ 非系统库，"libc++_shared.so must be included in the APK"）
 STDCPP="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so"
 cp -f "$STDCPP" "$LIB_DIR/"
+
+# 禁止 Gradle strip：保留 .debug_info，便于 addr2line/ndk-stack 符号化崩溃
+# （androiddeployqt --aux-mode 不覆写已存在 build.gradle，每次注入并防重；
+#  模板含 packagingOptions.jniLibs 块，插入独立 packagingOptions 块前置）
+if ! grep -q 'doNotStrip' "$APK_DIR/build.gradle"; then
+    sed -i '0,/^android {/s//android {\n    packagingOptions {\n        doNotStrip "**\/*.so"\n    }/' "$APK_DIR/build.gradle"
+fi
 
 # 复制自定义 Java 源码到 Android 构建目录
 mkdir -p "$APK_DIR/src/main/java"
