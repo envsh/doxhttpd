@@ -24,6 +24,7 @@
 #include <QskComboBox.h>
 #include <QskSwitchButton.h>
 #include "loginpage.h"
+#include "crashreport.h"
 #include "mainpage.h"
 #include "settingspage.h"
 #include "aboutpage.h"
@@ -173,6 +174,9 @@ int main(int argc, char* argv[]) {
 
     QCoreApplication::setOrganizationName("fedlet");
     QCoreApplication::setApplicationName("qsktox");
+
+    // ── native crash handler：须在任何 native 崩溃可能发生前安装 ──
+    CrashReport::install();
 
     // ── 本地存储（虚拟频道消息持久化）──
     {

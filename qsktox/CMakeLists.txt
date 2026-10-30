@@ -47,6 +47,8 @@ set(QSKTOX_SOURCES
     src/page.cpp
     src/pagemanager.h
     src/pagemanager.cpp
+    src/crashreport.h
+    src/crashreport.cpp
     src/logmodel.h
     src/logmodel.cpp
     src/logpage.h
@@ -186,6 +188,12 @@ set(QSKTOX_INCLUDE_DIRS
 target_include_directories(qsktox PRIVATE ${QSKTOX_INCLUDE_DIRS})
 
 target_link_libraries(qsktox PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::Multimedia)
+
+# ── crashreport：arm64 NDK release 默认 -fomit-frame-pointer，会剥掉 fp 合法
+# 返址链（fp-chain 还原失效），Android 目标强制保留 frame pointer ──
+if(ANDROID)
+    target_compile_options(qsktox PRIVATE -fno-omit-frame-pointer)
+endif()
 
 # ── Android 多媒体插件裁剪：仅保留系统后端，排除 FFmpeg 媒体插件 ──
 # Qt 6.7 Android 上多媒体插件有两个默认插件：Qt6::QAndroidMediaPlugin（走系统
