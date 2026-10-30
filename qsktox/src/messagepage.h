@@ -26,6 +26,7 @@ protected:
                   const QVariantMap& savedState) override;
     void onNewIntent(const QVariantMap& launchArgs) override;
     void onPause() override;
+    void onResume() override;
     void geometryChangeEvent(QskGeometryChangeEvent*) override;
 
 private:

@@ -764,6 +764,15 @@ void MessagePage::onPause()
     // setOpacity 与场景图状态不一致导致白屏
     if (m_messageList) {
         m_messageList->stopFadeIn();
+        m_messageList->setMediaAnimationEnabled(false);
+    }
+}
+
+void MessagePage::onResume()
+{
+    // back 回到本页（缓存恢复路径不走 onNewIntent）→ 重建 GIF 动画
+    if (m_messageList) {
+        m_messageList->setMediaAnimationEnabled(true);
     }
 }
 

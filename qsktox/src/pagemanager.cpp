@@ -1,5 +1,6 @@
 #include "pagemanager.h"
 #include <QskStackBox.h>
+#include <QskStackBoxAnimator.h>
 #include <QSettings>
 #include <QDebug>
 
@@ -69,6 +70,15 @@ void PageManager::destroyPage(Page* page)
     page->setPageManager(nullptr);
 
     m_pages.remove(id);
+    // 转场 animator 仍在跑时 removeItem，done()/advanceIndex 会拿到重排后
+    // 的错位索引（QskStackBoxAnimator.cpp 源核对）。QskAnimator::stop() 会
+    // 同步按当前索引执行 done()（此时页面还在 box 内，索引有效），之后
+    // removeItem 才安全。
+    if (auto* animator = m_stackBox->animator()) {
+        if (animator->isRunning()) {
+            animator->stop();
+        }
+    }
     m_stackBox->removeItem(page);
     page->deleteLater();
 

@@ -176,6 +176,9 @@ public:
     // 媒体真绘源解码 GUI 线程口径见 cpp；递增 mediaTick 参与 hash 保证重绘。
     void refreshMedia();
 
+    // 转场/暂停时停 GIF 推帧（原 private，MessageListWidget 安静化需调用）
+    void stopGifMovie();
+
     // 媒体下载状态条命中矩形（paint 与 tap 同源：paintMediaBody 写入，
     // 空矩形=该状态无热区）。内容坐标系（与 msgMediaRect 同一基准）
     void setMediaBarRects(const QRectF& downloadRect, const QRectF& retryRect);
@@ -198,7 +201,6 @@ private:
     // GIF 逐帧动画（qltox QMovie 对位）：仅指针成员，头文件不引重头；
     // 帧变化只换 QImage+tick，渲染线程侧复用现有 hash 重绘门
     void setupGifMovie(const QString& src);
-    void stopGifMovie();
     QMovie* m_gifMovie = nullptr;
     QBuffer* m_gifBuf = nullptr;
     QByteArray m_gifData;
@@ -224,6 +226,8 @@ public:
     // 强制滚动到底部（切换频道后用于对齐 X14）
     void scrollToBottom();
     void stopFadeIn();
+    // 转场期媒体动画开关（MessagePage::onPause/onResume 接线）
+    void setMediaAnimationEnabled(bool on);
     int messageCount() const { return m_items.size(); }
     // 语音行内播放行状态（单实例语义：写 true 先清其他行 playing，行内⏸/🔊切换）
     void setAudioPlaying(const QString& url, bool on);

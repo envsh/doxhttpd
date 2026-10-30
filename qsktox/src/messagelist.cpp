@@ -2173,7 +2173,9 @@ MessageListWidget::~MessageListWidget()
     m_isScrolling = false;
     m_flushPending = false;
     for (auto* row : std::as_const(m_visibleRows)) {
-        delete row;
+        row->setParentItem(nullptr);   // 行未脱离父链时，~QObject 子级联
+        row->setParent(nullptr);       // 会同步 delete 可见 QQuickItem；
+        row->deleteLater();            // 摘除后延迟删除，避开场景图同步期
     }
     m_visibleRows.clear();
 }
@@ -2353,6 +2355,20 @@ void MessageListWidget::stopFadeIn()
         m_fadeAnimator = nullptr;
     }
     setOpacity(1.0);
+}
+
+void MessageListWidget::setMediaAnimationEnabled(bool on)
+{
+    // 转场期场景图安静化：onPause 停 GIF 推帧，onResume 重建动画。
+    // 重建走 refreshMedia()（stopGifMovie 已清 m_gifSrc → setupGifMovie
+    // 重新装载动画），行内 update() 触发重绘。
+    for (auto* row : std::as_const(m_visibleRows)) {
+        row->stopGifMovie();
+        if (on) {
+            row->refreshMedia();
+            row->update();
+        }
+    }
 }
 
 void MessageListWidget::kickMediaPrefetch(const MessageItem& item)
