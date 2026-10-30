@@ -5,6 +5,7 @@
 
 #include <QStringList>
 
+class QskGraphicLabel;
 class MessageListWidget;
 class MessageAttribBar;
 class QskTextField;
@@ -30,7 +31,10 @@ protected:
     void geometryChangeEvent(QskGeometryChangeEvent*) override;
 
 private:
-    // 标题按钮 👤 前缀 + 超宽 elide（geometryChangeEvent / 入口回填重算）
+    // 标题头像刷新（与联系人列表同源：chan_icon → AvatarManager；
+    // 无图/未下载 → 字母圆块 QImage；avatarUpdated 回调时重取）
+    void refreshTitleAvatar();
+    // 标题超宽 elide（geometryChangeEvent / 入口回填重算）
     void updateTitleElide();
     void openChatMenu(QskPushButton* optionsBtn);
     void openAvatarMenu(int row, const QPointF& pos);
@@ -59,13 +63,17 @@ private:
     MessageListWidget* m_messageList = nullptr;
     MessageAttribBar* m_attrBar = nullptr;
     QskTextField* m_input = nullptr;
-    QskPushButton* m_titleBtn = nullptr;   // 👤 图标前缀 + elide + 点击 toast
+    QskPushButton* m_titleBtn = nullptr;   // 名称 + elide + 点击 toast
+    QskGraphicLabel* m_titleAvatar = nullptr;   // 标题头像（skinlet 渲染）
     QStringList m_audioPendingUrls;   // 语音 pendingPlay 意图 → mediaUpdated 自动播
     QStringList m_filePendingUrls;    // 文件 pending 意图 → mediaUpdated 自动开
     QString m_chatId;
     QString m_chatType;
     QString m_protocol;
     QString m_chanId;
+    QString m_chanIcon;       // 与联系人列表同源（MainPage open 时传入）
+    QString m_chanLetter;     // 字母兜底（与联系人列表同源）
+    QString m_chanColor;      // 字母兜底色（#rrggbb，空=回退默认调色板）
    QString m_channelName;
 };
 

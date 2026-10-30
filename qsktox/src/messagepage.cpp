@@ -1,6 +1,9 @@
 #include "messagepage.h"
 #include "messageattribbar.h"
 #include "messagelist.h"
+#include "avatarhost.h"
+#include "avatar_manager.h"
+#include "avatarutil.h"
 #include "mediapreview.h"
 #include "mediahost.h"
 #include "audioplayer.h"
@@ -23,6 +26,7 @@
 #include "pagemanager.h"
 #include <QskLinearBox.h>
 #include <QskPushButton.h>
+#include <QskSizePolicy.h>
 #include <QskTextOptions.h>
 #include <QClipboard>
 #include <QskTextField.h>
@@ -37,6 +41,11 @@
 #include <QDir>
 #include <QStandardPaths>
 #include <QUrl>
+#include <QImage>
+#include <QPainter>
+#include <QPixmap>
+#include <QskGraphic.h>
+#include <QskGraphicLabel.h>
 
 // ── 媒体字节共用解析（P2/P4）——mediapreview 暴露的 resolveBytesFor ──
 //（原 resolveAudioBytes static 上移 → MediaPreview::resolveBytesFor，共用面）
@@ -45,6 +54,25 @@
 static QString mediaOpenPath(const MessageItem& item);
 static bool writeOpenFile(const MessageItem& item, const QString& path);
 static void openSavedFile(const QString& path, const QString& mime);
+
+// ── 标题头像（与联系人列表同图源）：chan_icon → AvatarManager 圆图；
+// 无 icon/未下载 → 字母圆块兜底（drawLetterAvatar 画到 QImage）。
+// 展示载体用 QskGraphicLabel（skinlet 原生渲染，QskLinearBox 布局用
+// QskControl 同一套 policy/preferredSize 机制），不走自定义 PaintedNode
+// —— QskItem::updatePaintNode / QskControl::updateItemPaintNode 均为
+// final，自定义钩子在本版 QSkinny 不可用（首版空白根因排查结论）──
+static QImage makeLetterAvatarImage(const QString& letter, const QColor& color,
+                                    const QString& name)
+{
+    QImage img(40, 40, QImage::Format_ARGB32_Premultiplied);
+    img.fill(Qt::transparent);
+    QPainter p(&img);
+    drawLetterAvatar(&p, QRectF(0, 0, 40, 40),
+        color.isValid() ? color : msgAvatarColorFor(name),
+        letter.isEmpty() ? msgAvatarLetterFor(name) : letter);
+    p.end();
+    return img;
+}
 
 MessagePage::MessagePage(QQuickItem* parent)
     : Page(parent)
@@ -60,6 +88,9 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     m_protocol = launchArgs.value("protocol").toString();
     m_chanId = launchArgs.value("chanId").toString();
     m_channelName = channelName;
+    m_chanIcon = launchArgs.value("chanIcon").toString();
+    m_chanLetter = launchArgs.value("chanLetter").toString();
+    m_chanColor = launchArgs.value("chanColor").toString();
 
     setAutoLayoutChildren(true);
     auto* layout = new QskLinearBox(Qt::Vertical, this);
@@ -77,9 +108,17 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
     connect(backBtn, &QskAbstractButton::clicked, this, &Page::finish);
 
-    // 标题按钮：👤 联系人图标前缀 + 超宽 elide + 点击 toast
+    // 标题按钮：头像 + 名称 + 超宽 elide + 点击 toast
     // （QskTextLabel 无点击信号 → QskPushButton 目标化；elide 手动
-    // QFontMetrics 口径 = channellist.cpp:231 先例）
+    // QFontMetrics 口径 = channellist.cpp:231 先例；头像独立 item 绘制，
+    // 图源与联系人列表同源 chan_icon）
+    m_titleAvatar = new QskGraphicLabel(topBar);
+    // QskControl 同一套布局机制：Fixed + preferredSize → QskLinearBox
+    // 分配确定区域（backBtn 同款口径）
+    m_titleAvatar->setSizePolicy(QskSizePolicy::Fixed, QskSizePolicy::Fixed);
+    m_titleAvatar->setPreferredSize(36, 36);
+    refreshTitleAvatar();
+
     m_titleBtn = new QskPushButton(topBar);
     m_titleBtn->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Preferred);
     m_titleBtn->setBoxShapeHint(QskPushButton::Panel,
@@ -94,6 +133,12 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
         showAndroidToast(QString::fromUtf8("联系人: ") + m_channelName);
     });
     updateTitleElide();
+
+    // chan_icon 下载完成 → 重复取头像（AvatarManager 缓存命中即真图；
+    // connect 一次随页面生命周期，onNewIntent 换频道由 refreshTitleAvatar
+    // 用新 m_chanIcon 重取）
+    connect(AvatarHost::instance(), &AvatarHost::avatarUpdated,
+        this, &MessagePage::refreshTitleAvatar);
 
     auto* optionsBtn = new QskPushButton(QString::fromUtf8("⋮"), topBar);
     optionsBtn->setPreferredSize(44, 44);
@@ -507,14 +552,40 @@ void MessagePage::openAvatarMenu(int row, const QPointF& pos)
     menu->open();
 }
 
-// 标题按钮 elide：👤 前缀整串计算（ElideRight 截尾，前缀永不断）；
+// 标题头像：与联系人列表同图源（chan_icon → AvatarManager 圆图；GUI 线程，
+// Android 等不支持 ThreadedPixmaps 的平台禁非 GUI 线程 QPixmap）。
+// 取不到 pixmap（无 icon/未下载）→ 字母圆块 QImage 兜底，永不为空白。
+// AvatarManager::get 无缓存时会生成 identicon —— 与 ChannelRowItem 同源。
+// 下载完成由 avatarUpdated 回调再次刷新（在途去重由 host/manager 双保险）
+void MessagePage::refreshTitleAvatar()
+{
+    if (!m_titleAvatar) {
+        return;
+    }
+    if (!m_chanIcon.isEmpty()) {
+        AvatarHost::instance()->download(m_chanIcon);
+    }
+    QPixmap pm;
+    if (!m_chanIcon.isEmpty()) {
+        pm = AvatarManager::inst().get(m_chanIcon, m_channelName, -1, 36);
+    }
+    if (!pm.isNull()) {
+        m_titleAvatar->setGraphic(QskGraphic::fromPixmap(pm));
+    } else {
+        m_titleAvatar->setGraphic(QskGraphic::fromImage(
+            makeLetterAvatarImage(m_chanLetter, QColor(m_chanColor),
+                                  m_channelName)));
+    }
+}
+
+// 标题按钮 elide：名称 elide（头像独立 item 绘制，不再用 👤 前缀）；
 // 宽度未定（构造初期）不过窄裁剪，保完整文本待 geometryChangeEvent 重算
 void MessagePage::updateTitleElide()
 {
     if (!m_titleBtn) {
         return;
     }
-    const QString full = QString::fromUtf8("👤 ") + m_channelName;
+    const QString full = m_channelName;
     const qreal availW = m_titleBtn->width() - 16;
     // 宽度信任门（修 init 偏小误裁）：onCreate 阶段布局未定稿，按钮
     // 宽度偏小（~80px）会把标题裁到 5-6 字符 → 阈值下保全文，等
@@ -785,7 +856,13 @@ void MessagePage::onNewIntent(const QVariantMap& launchArgs)
     m_protocol = launchArgs.value("protocol").toString();
     m_chanId = launchArgs.value("chanId").toString();
     m_channelName = channelName;
+    m_chanIcon = launchArgs.value("chanIcon").toString();
+    m_chanLetter = launchArgs.value("chanLetter").toString();
+    m_chanColor = launchArgs.value("chanColor").toString();
 
+    if (m_titleAvatar) {
+        refreshTitleAvatar();
+    }
     if (m_titleBtn) {
         updateTitleElide();
     }

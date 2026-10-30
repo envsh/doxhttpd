@@ -733,11 +733,17 @@ void MainPage::openChatForRow(int row)
     QString protocol = m_channelList->protocolForRow(row);
     QString chanId = m_channelList->chanIdForRow(row);
     m_channelList->markLocallyRead(protocol, chatId, chanId);
+    // 标题头像与联系人列表同源：chan_icon + 字母兜底一并传递
+    const auto& ch = m_channelList->channelItem(row);
     pageManager()->open("message",
         {{"channelIndex", row},
-         {"channelName", m_channelList->channelItem(row).title},
+         {"channelName", ch.title},
          {"chatId", chatId}, {"chatType", chatType},
-         {"protocol", protocol}, {"chanId", chanId}});
+         {"protocol", protocol}, {"chanId", chanId},
+         {"chanIcon", ch.chanIcon},
+         {"chanLetter", ch.avatarLetter},
+         {"chanColor", ch.avatarColor.isValid() ? ch.avatarColor.name()
+                                                : QString()}});
 }
 
 void MainPage::showContactAvatarMenu(int row, const QPointF& pos)
