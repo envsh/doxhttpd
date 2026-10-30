@@ -371,13 +371,30 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             // 同语义，qsktox 侧 push 载荷即含发送者全部字段，逐条顺手入缓存，
             // 供后续消息 mention token 解析昵称（绘制/点击同源）
             {
-                PeerInfo pi;
-                pi.publicKey    = msgItem.userId.toStdString();
-                pi.userName     = msgItem.username.toStdString();
-                pi.nickname     = msgItem.usernick.toStdString();
-                pi.iconUrl      = usericon.toStdString();
-                pi.userStatus   = obj.value("user_status").toString().toStdString();
-                //pi.userPresence = obj.value("user_presence").toString();
+                PeerInfo pi = PeerInfo();
+                pi.publicKey  = userId.toStdString();
+                pi.userName   = msgItem.username.toStdString();
+                pi.nickname   = msgItem.usernick.toStdString();
+                pi.iconUrl    = usericon.toStdString();
+                const QString pres = obj.value("user_presence").toString();
+                const QString ust  = obj.value("user_status").toString();
+                // usr_presence → PeerInfo::status（int）；usr_status → PeerInfo::userStatus
+                if (pres == QStringLiteral("busy")) {
+                    pi.status = 2;
+                    if (pi.statusStr.empty()) { pi.statusStr = pres.toStdString(); }
+                } else if (pres == QStringLiteral("away")
+                           || pres == QStringLiteral("idle")) {
+                    pi.status = 1;
+                    if (pi.statusStr.empty()) { pi.statusStr = pres.toStdString(); }
+                } else if (!pres.isEmpty()) {
+                    if (pi.status == 0) { pi.statusStr = pres.toStdString(); }
+                }
+                if (!ust.isEmpty()) {
+                    pi.userStatus = ust.toStdString();
+                } else if (!pres.isEmpty() && pi.userStatus.empty()) {
+                    // 兼容：如仅传 presence 且无 usr_status，仍可填入 userStatus 文本
+                    pi.userStatus = pres.toStdString();
+                }
                 PeerInfoCache::instance()->mergePeerInfo(pi);
             }
             msgItem.chanIcon    = obj.value("chan_icon").toString();
@@ -397,8 +414,8 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
                 msgItem.chatFederated = fedV.isBool()
                     ? (fedV.toBool() ? 1 : 0) : -1;
             }
-            msgItem.usrPresence = obj.value("usr_presence").toString();
-            msgItem.usrStatus   = obj.value("usr_status").toString();
+            msgItem.usrPresence = obj.value("user_presence").toString();
+            msgItem.usrStatus   = obj.value("user_status").toString();
             msgItem.msgId       = obj.value("msgid").toString();
             if (!msgItem.msgId.isEmpty()) {
                 qDebug() << "[push] msgid detected:"

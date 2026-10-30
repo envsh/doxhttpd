@@ -25,8 +25,8 @@ void PeerInfoCache::mergePeerInfo(const PeerInfo& src)
     if (src.publicKey.empty()) {
         return;
     }
-    const std::string key = keyFor(src.publicKey.c_str()).toStdString();
-    PeerInfo& dst = m_map[QString::fromStdString(key)];
+    const QString key = keyFor(QString::fromStdString(src.publicKey));
+    PeerInfo& dst = m_map[key];
     // 移植 qltox metavars_cache.cpp:138 mergePeerInfo
     if (src.peerNumber != 0) dst.peerNumber = src.peerNumber;
     if (!src.userName.empty()) dst.userName = src.userName;

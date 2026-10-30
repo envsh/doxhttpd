@@ -10,7 +10,7 @@
 // key 格式沿用 qltox —— "unknown_" + userId（mainwindow.cpp:2872 同款）。
 // mergePeerInfo 移植 qltox metavars_cache.cpp:138（空值/零值不覆盖）。
 // displayName 口径：nickname > userName（onReplyLinkActivated 对位）。
-// 用户敲定：usr_presence 与 usr_status 本版本统一为 userStatus（push 用 usr_status）。
+// 用户敲定：usr_presence → 转换为 PeerInfo::status（int）；usr_status → PeerInfo::userStatus。
 class PeerInfoCache
 {
 public:
