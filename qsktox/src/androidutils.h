@@ -13,5 +13,9 @@ void shareText(const QString& text);
 void openFile(const QString& path, const QString& mime);
 // 应用 cache 目录绝对路径（Android=JNI getCacheDir；桌面返回 "" 由调用方兜底）
 QString androidCacheDir();
+// Root 检测（MobUtil.isRooted）；非 Android 恒 false
+bool androidIsRooted();
+// 充电状态（BatteryManager.isCharging）；非 Android 恒 false
+bool androidIsCharging();
 
 #endif

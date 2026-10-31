@@ -30,6 +30,7 @@
 #include "aboutpage.h"
 #include "logpage.h"
 #include "messagepage.h"
+#include "phoneqpage.h"
 #include "keepalive.h"
 #include "networkmonitor.h"
 #include "pushhandler.h"
@@ -357,6 +358,10 @@ int main(int argc, char* argv[]) {
 
     pageManager->registerPage("message", []() -> Page* {
         return new MessagePage();
+    }, {CachePolicy::Transient, LaunchMode::Standard});
+
+    pageManager->registerPage("phoneq", []() -> Page* {
+        return new PhoneQPage();
     }, {CachePolicy::Transient, LaunchMode::Standard});
 
     // ── Window ──

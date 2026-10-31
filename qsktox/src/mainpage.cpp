@@ -4,6 +4,7 @@
 #include "channellist.h"
 #include "messagepage.h"
 #include "pushstatusbar.h"
+#include "phonesmsstatusbar.h"
 #include "pushhandler.h"
 #include "messagestore.h"
 #include "msgdb_bridge.h"
@@ -198,6 +199,9 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
 
     // ── Push Status Bar ──
     new PushStatusBar(layout);
+
+    // ── Phone/Sms Status Bar ──
+    new PhoneSmsStatusBar(layout);
 
     // ── 虚拟频道播种（bot 类需先落库：messages.chanid 外键引用 channels）──
     {

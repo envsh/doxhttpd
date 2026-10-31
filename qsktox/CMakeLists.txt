@@ -34,6 +34,7 @@ set(qlapp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qltox)
 set(qlappcom_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qlappcom)
 set(qlcomp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qlcomp)
 set(ql3rdparty_dir ${CMAKE_CURRENT_SOURCE_DIR}/../3rdparty)
+set(vendor_dir ${CMAKE_CURRENT_SOURCE_DIR}/../vendor)
 set(qskcomp_dir ${CMAKE_CURRENT_SOURCE_DIR}/../qskcomp)
 
 set(QSKTOX_SOURCES
@@ -113,6 +114,14 @@ set(QSKTOX_SOURCES
     src/messagestore.cpp
     src/pushstatusbar.h
     src/pushstatusbar.cpp
+    src/phonesmsstatusbar.h
+    src/phonesmsstatusbar.cpp
+    src/phonedb.h
+    src/phonedb.cpp
+    src/phoneqpage.h
+    src/phoneqpage.cpp
+    src/toastpopup.h
+    src/toastpopup.cpp
     src/phonemonitor.h
     src/phonemonitor.cpp
     src/mytaphandler.h
@@ -152,6 +161,7 @@ set(QSKTOX_SOURCES
     ${qlappcom_dir}/avatar_manager.cpp
     ${qlcomp_dir}/identicon.cpp
 
+    ${vendor_dir}/phoneloc/phoneloc.c
    ${ql3rdparty_dir}/barrust_bloom/bloom.c
 
     ${qlcomp_dir}/tagutil.cpp
@@ -177,6 +187,7 @@ qt_add_executable(qsktox
 set(QSKTOX_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/../vendor
+    ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/phoneloc
     ${CMAKE_CURRENT_SOURCE_DIR}/../vendor/include
     ${ql3rdparty_dir}/bloom
     ${ql3rdparty_dir}/barrust_bloom

@@ -29,6 +29,12 @@ public:
     quint64 sendNetState(const QString& state, const QString& netType,
                          QString* errorOut = nullptr);
 
+    // 事件广播（callstat/smsstat 等）：与 sendNetState 同管线（工作线程组包+
+    // encryptAndSign → 主线程 postRequest(notify=false) 纯静默）。
+    // fields 为业务字段对（不含信封 5 件套）；m_reqSeq 共用保证时序唯一。
+    quint64 sendMobEvent(const QString& action, const QMap<QString,QString>& fields,
+                         QString* errorOut = nullptr);
+
     void resume();
     void pause();
 

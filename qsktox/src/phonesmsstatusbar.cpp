@@ -1,0 +1,377 @@
+#include "phonesmsstatusbar.h"
+#include "phonemonitor.h"
+#include "phonedb.h"
+#include "androidutils.h"
+#include "toastpopup.h"
+
+#include <QskBox.h>
+#include <QskBoxShapeMetrics.h>
+#include <QskGradient.h>
+#include <QskLinearBox.h>
+#include <QskPopup.h>
+#include <QskPushButton.h>
+#include <QskSimpleListBox.h>
+#include <QskSizePolicy.h>
+#include <QskTabBar.h>
+#include <QskTextLabel.h>
+
+#include <QDateTime>
+#include <QCoreApplication>
+#include <QQuickWindow>
+#include <QTimer>
+#include <QKeyEvent>
+#include <QDebug>
+
+namespace
+{
+    // 面板不透明度：回读当前皮肤面板填充色，仅改 alpha（保留主题配色）
+    void applyPanelOpacity(QskBox* panel, qreal opacity)
+    {
+        QskGradient g = panel->fillGradient();
+        if (!g.isValid())
+            return;
+        g.setAlpha(qRound(qBound(0.0, opacity, 1.0) * 255.0));
+        panel->setFillGradient(g);
+    }
+
+    // 浮动框父级取窗口 content item：父坐标为窗口坐标，居中/定位不依赖宿主条位置
+    QQuickItem* popupParentItem(QQuickItem* item)
+    {
+        if (auto* w = item ? item->window() : nullptr)
+            return w->contentItem();
+        return item;
+    }
+}
+
+/* ── 电话/短信浮动框（私有实现：翻译串由宿主传入，保持上下文 PhoneSmsStatusBar）── */
+class PhoneSmsListPopup : public QskPopup
+{
+public:
+    PhoneSmsListPopup(const QString& tabCall, const QString& tabSms,
+                      const QString& closeText, QQuickItem* parent)
+        : QskPopup(parent)
+    {
+        setModal(true);
+        setOverlay(true);
+        setPopupFlag(QskPopup::DeleteOnClose, false);
+        setPolishOnResize(true);
+        setPolishOnParentResize(true);
+
+        m_panel = new QskBox(this);
+        m_panel->setBoxShapeHint(QskBox::Panel,
+            QskBoxShapeMetrics(14, Qt::AbsoluteSize));
+        applyPanelOpacity(m_panel, 0.9);   // 0.9 透明度浮动框
+
+        m_layout = new QskLinearBox(Qt::Vertical, m_panel);
+        m_layout->setMargins(16);
+        m_layout->setSpacing(10);
+
+        // ── 头部行（左：电话/短信 Tab / 右：✕ 关闭）──
+        auto* headerRow = new QskLinearBox(Qt::Horizontal, m_layout);
+        headerRow->setSpacing(8);
+
+        m_tabBar = new QskTabBar(Qt::TopEdge, headerRow);
+        m_tabBar->addTab(tabCall);
+        m_tabBar->addTab(tabSms);
+        m_tabBar->setAutoFitTabs(true);
+        m_tabBar->setSizePolicy(
+            QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+        m_cornerCloseBtn = new QskPushButton(QStringLiteral("✕"), headerRow);
+        connect(m_cornerCloseBtn, &QskAbstractButton::clicked,
+                this, &QskPopup::close);
+
+        m_listBox = new QskSimpleListBox(m_layout);
+        m_listBox->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
+        // Expanding 列表不贡献首选尺寸 → 显式给 hint（与同步窗口 setListPreferredHeight 同款）
+        // 500 保证 hint 恒 ≥ maxW(≤440)，340 与同步日志列表同款高度
+        m_listBox->setPreferredSize(QSizeF(500, 540));
+
+        m_closeBtn = new QskPushButton(closeText, m_layout);
+        m_closeBtn->setBoxShapeHint(QskPushButton::Panel,
+            QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+        connect(m_closeBtn, &QskAbstractButton::clicked, this, &QskPopup::close);
+
+        // Esc / 安卓返回键关闭：挂 QCoreApplication 全局过滤器（同一对象后装先跑），
+        // 抢在 main.cpp 的 BackButtonFilter 之前，window 级过滤器会被它先吞掉
+        connect(this, &QskPopup::opened, this, [this]() {
+            if (m_escFilterInstalled)
+                return;
+            if (auto* app = QCoreApplication::instance()) {
+                app->installEventFilter(this);
+                m_escFilterInstalled = true;
+            }
+        });
+        connect(this, &QskPopup::closed, this, [this]() {
+            if (!m_escFilterInstalled)
+                return;
+            if (auto* app = QCoreApplication::instance())
+                app->removeEventFilter(this);
+            m_escFilterInstalled = false;
+        });
+    }
+
+    QskTabBar* tabBar() const { return m_tabBar; }
+    QskSimpleListBox* listBox() const { return m_listBox; }
+
+    ~PhoneSmsListPopup() override
+    {
+        if (m_escFilterInstalled) {
+            if (auto* app = QCoreApplication::instance())
+                app->removeEventFilter(this);
+            m_escFilterInstalled = false;
+        }
+    }
+
+    bool eventFilter(QObject*, QEvent* ev) override
+    {
+        if (ev->type() == QEvent::KeyPress) {
+            const auto key = static_cast<QKeyEvent*>(ev)->key();
+            if (key == Qt::Key_Escape || key == Qt::Key_Back) {
+                close();      // 弹窗可随时关闭，无需门控
+                return true;  // 吞掉，禁止后续 BackButtonFilter 退出/翻页处理
+            }
+        }
+        return false;
+    }
+
+protected:
+    void updateLayout() override
+    {
+        updateGeometry();
+        m_layout->setGeometry(layoutRect());
+    }
+
+private:
+    void updateGeometry()
+    {
+        const QRectF parentRect = window()
+            ? QRectF(QPointF(), window()->size())
+            : QRectF();
+        if (parentRect.isEmpty())
+            return;
+
+        const auto hint = m_layout->effectiveSizeHint(Qt::PreferredSize, QSizeF());
+        const qreal maxW = qMin(0.92 * parentRect.width(), 440.0);
+        const qreal maxH = 0.9 * parentRect.height();
+        const qreal panelW = qBound(320.0, hint.width() + 36, maxW);
+        const qreal panelH = qBound(360.0, hint.height() + 36, maxH);
+
+        QRectF r(0, 0, panelW, panelH);
+        r.moveCenter(parentRect.center());
+        setGeometry(r);
+        m_panel->setGeometry(r.translated(-r.topLeft()));
+    }
+
+    QskBox* m_panel = nullptr;
+    QskLinearBox* m_layout = nullptr;
+    QskTabBar* m_tabBar = nullptr;
+    QskSimpleListBox* m_listBox = nullptr;
+    QskPushButton* m_cornerCloseBtn = nullptr;
+    QskPushButton* m_closeBtn = nullptr;
+    bool m_escFilterInstalled = false;
+};
+
+PhoneSmsStatusBar::PhoneSmsStatusBar(QQuickItem* parent)
+    : QskLinearBox(Qt::Horizontal, parent)
+{
+
+    setPreferredHeight(28);
+    setPanel(true);
+    setSpacing(4);
+
+    // 行首两项：Root 状态 · 充电状态（间隔点同状态行，Android 才刷新，桌面整行隐藏）
+    m_rootLabel = new QskTextLabel(this);
+    m_rootLabel->setAlignment(Qt::AlignCenter);
+    m_rootLabel->setPreferredWidth(52);
+    auto* sepDot = new QskTextLabel(this);
+    sepDot->setAlignment(Qt::AlignCenter);
+    sepDot->setText(QStringLiteral("·"));
+    m_chargeLabel = new QskTextLabel(this);
+    m_chargeLabel->setAlignment(Qt::AlignCenter);
+    m_chargeLabel->setPreferredWidth(64);
+
+    m_statusLabel = new QskTextLabel(this);
+    m_statusLabel->setAlignment(Qt::AlignCenter);
+    m_statusLabel->setSizePolicy(
+        QskSizePolicy::Expanding, QskSizePolicy::Preferred);
+
+    m_listBtn = new QskPushButton(QString::fromUtf8("列表"), this);
+    m_listBtn->setPreferredWidth(64);
+    m_listBtn->setBoxShapeHint(QskPushButton::Panel,
+        QskBoxShapeMetrics(8, Qt::AbsoluteSize));
+    connect(m_listBtn, &QskAbstractButton::clicked,
+        this, &PhoneSmsStatusBar::openListsPopup);
+
+    setVisible(false);
+
+#ifdef Q_OS_ANDROID
+    m_deviceTimer = new QTimer(this);
+    m_deviceTimer->setInterval(5000);
+    connect(m_deviceTimer, &QTimer::timeout, this, [this]() { updateDeviceStatus(); });
+    m_deviceTimer->start();
+    updateDeviceStatus();
+
+    if (PhoneMonitor::instance())
+        attachPhoneMonitor();
+    else
+        // 构造可能先于 PhoneMonitor::start()（main 尾部）执行，实例创建后再补连
+        QTimer::singleShot(0, this, [this]() { attachPhoneMonitor(); });
+#endif
+}
+
+// ── 挂接 PhoneMonitor：实例创建晚于本控件时也要能连上，避免计数永远停在 0 ──
+void PhoneSmsStatusBar::attachPhoneMonitor()
+{
+#ifdef Q_OS_ANDROID
+    auto* ph = PhoneMonitor::instance();
+    if (!ph || m_attached)
+        return;
+    m_attached = true;   // 只连一次（构造函数 + 延迟补连只命中一次）
+    connect(ph, &PhoneMonitor::countersChanged, this,
+        [this]() { updateStatus(); });
+    connect(ph, &PhoneMonitor::callRecorded, this, [this]() {
+        refreshList();
+        if (auto* p = PhoneMonitor::instance()) {
+            const auto& rec = p->callRecords().constLast();
+            const QString num = rec.number.isEmpty() ? QString::fromUtf8("未知") : rec.number;
+            const QString loc = attributionOf(rec.number);
+            ToastPopup::show(this, loc.isEmpty()
+                ? QString::fromUtf8("电话事件：%1 (%2)").arg(stateLabel(rec.state), num)
+                : QString::fromUtf8("电话事件：%1 (%2 · %3)").arg(
+                    stateLabel(rec.state), num, loc));
+        }
+    });
+    connect(ph, &PhoneMonitor::smsRecorded, this, [this]() {
+        refreshList();
+        if (auto* p = PhoneMonitor::instance()) {
+            const auto& rec = p->smsRecords().constLast();
+            const QString from = rec.sender.isEmpty()
+                ? QString::fromUtf8("未知") : rec.sender;
+            const QString loc = attributionOf(rec.sender);
+            ToastPopup::show(this, loc.isEmpty()
+                ? QString::fromUtf8("新短信：%1").arg(from)
+                : QString::fromUtf8("新短信：%1（%2）").arg(from, loc));
+        }
+    });
+    updateStatus();   // 连上后立即按当前计数刷新一次
+#endif
+}
+
+PhoneSmsStatusBar::~PhoneSmsStatusBar()
+{
+}
+
+void PhoneSmsStatusBar::retranslateUi()
+{
+    updateStatus();
+    updateDeviceStatus();
+    refreshList();
+}
+
+void PhoneSmsStatusBar::updateStatus()
+{
+#ifndef Q_OS_ANDROID
+    setVisible(false);
+    return;
+#else
+    auto* ph = PhoneMonitor::instance();
+    const int calls = ph ? ph->callCount() : 0;
+    const int sms = ph ? ph->smsCount() : 0;
+    m_statusLabel->setText(QString::fromUtf8("电话 %1 · 短信 %2").arg(calls).arg(sms));
+    setVisible(true);
+#endif
+}
+
+void PhoneSmsStatusBar::updateDeviceStatus()
+{
+    if (m_rootLabel)
+        m_rootLabel->setText(androidIsRooted() ? QString::fromUtf8("已Root") : QString::fromUtf8("未Root"));
+    if (m_chargeLabel)
+        m_chargeLabel->setText(androidIsCharging() ? QString::fromUtf8("充电中") : QString::fromUtf8("未充电"));
+}
+
+QString PhoneSmsStatusBar::stateLabel(const QString& state) const
+{
+    if (state == "RINGING") return QString::fromUtf8("来电");
+    if (state == "OFFHOOK") return QString::fromUtf8("通话");
+    if (state == "IDLE")    return QString::fromUtf8("挂断");
+    return state;
+}
+
+QString PhoneSmsStatusBar::attributionOf(const QString& number) const
+{
+    const auto r = PhoneDb::instance()->lookup(number);
+    if (!r.ok)
+        return QString();
+    return QString::fromUtf8("%1 %2（%3）").arg(r.province, r.city, r.operatorName);
+}
+
+void PhoneSmsStatusBar::openListsPopup()
+{
+    if (m_popup) {
+        m_popup->open();
+        return;
+    }
+
+    if (PhoneMonitor::instance())
+        PhoneMonitor::requestPermissions(true);   // 用到时再请求一次权限
+
+    auto* popup = new PhoneSmsListPopup(QString::fromUtf8("电话"), QString::fromUtf8("短信"), QString::fromUtf8("关闭"),
+        popupParentItem(this));
+    connect(popup->tabBar(), &QskTabBar::currentIndexChanged,
+        this, [this](int) { refreshList(); });
+    connect(popup, &QskPopup::closed, popup, &QObject::deleteLater);
+    connect(popup, &QObject::destroyed, this, [this]() { m_popup = nullptr; });
+
+    m_popup = popup;
+    refreshList();
+
+    QTimer::singleShot(0, popup, [popup]() {
+        popup->open();
+        popup->update();   // 触发 polish，走 updateGeometry 定位
+    });
+}
+
+void PhoneSmsStatusBar::refreshList()
+{
+    if (!m_popup)
+        return;
+
+    auto* ph = PhoneMonitor::instance();
+    QStringList entries;
+    if (ph) {
+        if (m_popup->tabBar()->currentIndex() == 1) {
+            const auto& sms = ph->smsRecords();
+            for (auto it = sms.crbegin(); it != sms.crend(); ++it) {
+                const QString t = QDateTime::fromMSecsSinceEpoch(
+                    it->timestamp).toString("HH:mm");
+                const QString from = it->sender.isEmpty()
+                    ? QString::fromUtf8("未知") : it->sender;
+                const QString loc = attributionOf(it->sender);
+                entries.append(loc.isEmpty()
+                    ? QString::fromUtf8("%1 %2：%3").arg(t, from, it->body.left(60))
+                    : QString::fromUtf8("%1 %2（%3）：%4").arg(t, from, loc, it->body.left(60)));
+            }
+        } else {
+            const auto& calls = ph->callRecords();
+            for (auto it = calls.crbegin(); it != calls.crend(); ++it) {
+                const QString t = QDateTime::fromMSecsSinceEpoch(
+                    it->timestamp).toString("HH:mm");
+                const QString num = it->number.isEmpty()
+                    ? QString::fromUtf8("未知") : it->number;
+                const QString loc = attributionOf(it->number);
+                entries.append(loc.isEmpty()
+                    ? QString::fromUtf8("%1 [%2] %3").arg(t, stateLabel(it->state), num)
+                    : QString::fromUtf8("%1 [%2] %3（%4）").arg(
+                        t, stateLabel(it->state), num, loc));
+            }
+        }
+        if (entries.isEmpty())
+            entries.append(QString::fromUtf8("暂无记录"));
+    }
+
+    m_popup->listBox()->setEntries(entries);
+}
+
+#include "moc_phonesmsstatusbar.cpp"

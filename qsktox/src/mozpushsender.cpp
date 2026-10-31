@@ -321,6 +321,65 @@ quint64 MozpushSender::sendNetState(const QString& state, const QString& netType
     return reqseq;
 }
 
+quint64 MozpushSender::sendMobEvent(const QString& action,
+                                    const QMap<QString,QString>& fields,
+                                    QString* errorOut)
+{
+    reloadSettings();
+    if (m_uaid.isEmpty() || m_endpoint.isEmpty()) {
+        qWarning() << "[mozpush] sendMobEvent: uaid/endpoint 未配置";
+        if (errorOut) { *errorOut = QStringLiteral("未配置推送端点"); }
+        return 0;
+    }
+
+    const quint64 reqseq = m_reqSeq++;
+
+    const QString deriveUaid = m_uaid;
+    const QString endpoint = m_endpoint;
+    MozpushSender* self = this;
+    // 组包(JNI)与加密(VAPID/e2e)为重活 → 全放工作线程；POST 派回主线程；
+    // postRequest notify=false：只日志、不 emit messageSent（纯静默）。
+    std::thread([self, deriveUaid, endpoint, reqseq, action, fields]() {
+        const QString deviceName = androidDeviceName();
+        cJSON* o = cJSON_CreateObject();
+        if (!o) {
+            qWarning() << "[mozpush] sendMobEvent: alloc failed";
+            return;
+        }
+        cJSON_AddStringToObject(o, "action", action.toUtf8().constData());
+        cJSON_AddStringToObject(o, "proto_type", "mobsub");
+        for (QMap<QString,QString>::ConstIterator mit = fields.constBegin();
+             mit != fields.constEnd(); ++mit) {
+            cJSON_AddStringToObject(o, mit.key().toUtf8().constData(),
+                mit.value().toUtf8().constData());
+        }
+        cJSON_AddStringToObject(o, "peerid7", deviceName.toUtf8().constData());
+        cJSON_AddNumberToObject(o, "seq", static_cast<double>(reqseq));
+        cJSON_AddNumberToObject(o, "ts",
+            static_cast<double>(QDateTime::currentSecsSinceEpoch()));
+        char* js = cJSON_PrintUnformatted(o);
+        cJSON_Delete(o);
+        if (!js) {
+            qWarning() << "[mozpush] sendMobEvent: print failed";
+            return;
+        }
+        const QByteArray pload(js);
+        cJSON_free(js);
+        qDebug() << "[mozpush]" << action << "payload:" << pload;
+        QByteArray body;
+        QString authz;
+        if (!encryptAndSign(deriveUaid, endpoint, pload, &body, &authz)) {
+            qWarning() << "[mozpush] sendMobEvent: encrypt failed";
+            return;
+        }
+        QMetaObject::invokeMethod(self, [self, body, authz, endpoint, reqseq]() {
+            self->postRequest(body, authz, endpoint, reqseq, false);
+        }, Qt::QueuedConnection);
+    }).detach();
+
+    return reqseq;
+}
+
 void MozpushSender::postRequest(const QByteArray& body, const QString& authz,
                                 const QString& endpoint, quint64 reqseq, bool notify)
 {

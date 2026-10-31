@@ -18,6 +18,8 @@ public class PermissionHelper {
     private static final int REQ_NOTIFICATION = 9001;
     private static final int REQ_MEDIA = 9002;
     private static final int REQ_PHONE_CALL = 9003;
+    private static final int REQ_CALL_SMS = 9006;
+
     private static final int REQ_BLUETOOTH = 9004;
 
     public static boolean hasNotificationPermission(Activity activity) {
@@ -156,5 +158,44 @@ public class PermissionHelper {
 
         String model = Build.MODEL;
         return (model != null && !model.isEmpty()) ? model : "";
+    }
+
+    // READ_CALL_LOG 自 API 23 起为危险权限；低版本安装即授权
+    public static boolean hasSmsReceivePermission(Activity activity) {
+        if (Build.VERSION.SDK_INT < 19)
+            return true;
+        return ContextCompat.checkSelfPermission(activity,
+            Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    public static boolean hasReadCallLogPermission(Activity activity) {
+        if (Build.VERSION.SDK_INT < 23)
+            return true;
+        return ContextCompat.checkSelfPermission(activity,
+            Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    // auto=true（启动自动请求）：弹过一次就不再自动弹（SharedPreferences 防重）；
+    // auto=false（点「列表」按钮触发）：强制再请求（系统已永久拒绝则不弹窗）。
+    public static void requestCallSmsPermission(Activity activity, boolean auto) {
+        if (hasReadPhoneStatePermission(activity) && hasSmsReceivePermission(activity)
+                && hasReadCallLogPermission(activity))
+            return;
+        if (auto && activity.getSharedPreferences("qsktox_prefs", Context.MODE_PRIVATE)
+                .getBoolean("permCallSmsAsked", false))
+            return;
+        java.util.List<String> perms = new java.util.ArrayList<>();
+        if (!hasReadPhoneStatePermission(activity))
+            perms.add(Manifest.permission.READ_PHONE_STATE);
+        if (!hasSmsReceivePermission(activity))
+            perms.add(Manifest.permission.RECEIVE_SMS);
+        if (!hasReadCallLogPermission(activity))
+            perms.add(Manifest.permission.READ_CALL_LOG);
+        if (perms.isEmpty())
+            return;
+        activity.getSharedPreferences("qsktox_prefs", Context.MODE_PRIVATE).edit()
+            .putBoolean("permCallSmsAsked", true).apply();
+        ActivityCompat.requestPermissions(activity,
+            perms.toArray(new String[0]), REQ_CALL_SMS);
     }
 }

@@ -22,6 +22,26 @@ static void logHandler(QtMsgType type, const QMessageLogContext &ctx, const QStr
     }
     __android_log_print(prio, "qsktox", "%s:%d %s", file, line, msg.toUtf8().constData());
 }
+bool androidIsRooted()
+{
+    return QJniObject::callStaticMethod<jboolean>(
+        "io/fedlet/mobutil/MobUtil",
+        "isRooted",
+        "()Z");
+}
+
+bool androidIsCharging()
+{
+    QJniObject context = QNativeInterface::QAndroidApplication::context();
+    if (!context.isValid())
+        return false;
+    return QJniObject::callStaticMethod<jboolean>(
+        "io/fedlet/mobutil/MobUtil",
+        "isCharging",
+        "(Landroid/content/Context;)Z",
+        context.object());
+}
+
 #else
 #include <cstdio>
 
@@ -222,4 +242,14 @@ void shareText(const QString& text)
     Q_UNUSED(text)
 }
 
+
+bool androidIsRooted()
+{
+    return false;   // 非 Android 无 Root 概念
+}
+
+bool androidIsCharging()
+{
+    return false;   // 非 Android 不走 Android 电池服务
+}
 #endif

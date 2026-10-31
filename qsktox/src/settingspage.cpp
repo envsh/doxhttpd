@@ -136,6 +136,19 @@ SettingsPage::SettingsPage(QQuickItem* parent)
 
     new QskSeparator(Qt::Horizontal, layout);
 
+    // ── Row 6.5: Phone/Sms Attribution Query ──
+    {
+        auto* phoneQueryRow = new QskLinearBox(Qt::Horizontal, layout);
+        phoneQueryRow->setSpacing(12);
+        auto* phoneQueryLabel = new QskTextLabel("Phone Sms Attribution", phoneQueryRow);
+        phoneQueryLabel->setPreferredWidth(160);
+        auto* phoneQueryBtn = new QskPushButton("Open", phoneQueryRow);
+        phoneQueryBtn->setPreferredSize(64, 44);
+        connect(phoneQueryBtn, &QskAbstractButton::clicked, this, [this]() {
+            pageManager()->open("phoneq");
+        });
+    }
+
     // ── Row 7: Push Notification ──
     auto* row7 = new QskLinearBox(Qt::Horizontal, layout);
     row7->setSpacing(12);
