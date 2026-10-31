@@ -23,6 +23,12 @@ public:
                         const QMap<QString,QString>& attributes = QMap<QString,QString>(),
                         QString* errorOut = nullptr);
 
+    // 网络状态变化广播（netstat）：静默发送（不 emit messageSent）。
+    // 返回 reqseq（0 = 未配置 uaid/endpoint 或构造失败）；失败写入 *errorOut。
+    // 去重（lastSent 首次必广播）由 NetworkMonitor 一侧负责，本方法不做去重。
+    quint64 sendNetState(const QString& state, const QString& netType,
+                         QString* errorOut = nullptr);
+
     void resume();
     void pause();
 

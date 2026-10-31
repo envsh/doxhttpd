@@ -1,5 +1,35 @@
 #include "networkmonitor.h"
+#include "mozpushsender.h"
 #include <QDebug>
+#include <QCoreApplication>
+#include <QMutex>
+#include <QMutexLocker>
+
+// netstat 去重锁 + lastSent（lastKey 初始为空 → 首个真实回调必广播；
+// 无启动预写，符合"只在变化时发送"）
+static QMutex s_netStateMutex;
+static QString s_lastNetStateKey;
+
+void NetworkMonitor::onNetworkChanged(bool connected, const QString& netType) {
+    const QString state = connected ? QStringLiteral("connected")
+                                    : QStringLiteral("disconnected");
+    const QString key = state + QLatin1Char('/') + netType;
+    {
+        QMutexLocker lock(&s_netStateMutex);
+        if (!s_lastNetStateKey.isEmpty() && key == s_lastNetStateKey) {
+            qDebug() << "[NetworkMonitor] netstat dedup, skip:" << key;
+            return;
+        }
+        s_lastNetStateKey = key;
+    }
+    // sendNetState 碰 QSettings 与 NAM → 一律编组回主线程（qApp 上下文）
+    QCoreApplication* app = QCoreApplication::instance();
+    if (!app) { return; }
+    QMetaObject::invokeMethod(app, [state, netType]() {
+        MozpushSender::instance()->sendNetState(state, netType);
+    }, Qt::QueuedConnection);
+    qDebug() << "[NetworkMonitor] netstat queued:" << key;
+}
 
 #if defined(Q_OS_ANDROID)
 
@@ -23,6 +53,7 @@ Java_io_fedlet_mobutil_NetworkMonitor_onNetworkChanged(
         msg = "网络已断开";
     }
     qDebug() << "[NetworkMonitor]" << msg;
+    NetworkMonitor::onNetworkChanged(isConnected, networkType);
     showAndroidToast(msg);
 }
 
@@ -73,6 +104,13 @@ static void showDesktopNotification(const QString& title, const QString& message
     QProcess::startDetached("notify-send", {"-t", "7000", title, message});
 }
 
+static QString transportMediumLabel(QNetworkInformation::TransportMedium tm) {
+    if (tm == QNetworkInformation::TransportMedium::WiFi) { return QStringLiteral("wifi"); }
+    if (tm == QNetworkInformation::TransportMedium::Cellular) { return QStringLiteral("cellular"); }
+    if (tm == QNetworkInformation::TransportMedium::Ethernet) { return QStringLiteral("ethernet"); }
+    return QString();
+}
+
 static QNetworkInformation* s_netInfo = nullptr;
 
 void NetworkMonitor::start()
@@ -88,10 +126,13 @@ void NetworkMonitor::start()
             QString msg;
             if (r == QNetworkInformation::Reachability::Online) {
                 msg = "网络已连接";
+                onNetworkChanged(true, transportMediumLabel(s_netInfo->transportMedium()));
             } else if (r == QNetworkInformation::Reachability::Disconnected) {
                 msg = "网络已断开";
+                onNetworkChanged(false, QString());
             } else {
                 msg = "网络状态未知";
+                // Unknown 不广播（仅本地通知保持原状）
             }
             qDebug() << "[NetworkMonitor]" << msg;
             showDesktopNotification("qsktox", msg);
@@ -125,6 +166,13 @@ static void showDesktopNotification(const QString& title, const QString& message
     QProcess::startDetached("powershell", {"-Command", psScript});
 }
 
+static QString transportMediumLabel(QNetworkInformation::TransportMedium tm) {
+    if (tm == QNetworkInformation::TransportMedium::WiFi) { return QStringLiteral("wifi"); }
+    if (tm == QNetworkInformation::TransportMedium::Cellular) { return QStringLiteral("cellular"); }
+    if (tm == QNetworkInformation::TransportMedium::Ethernet) { return QStringLiteral("ethernet"); }
+    return QString();
+}
+
 static QNetworkInformation* s_netInfo = nullptr;
 
 void NetworkMonitor::start()
@@ -140,10 +188,13 @@ void NetworkMonitor::start()
             QString msg;
             if (r == QNetworkInformation::Reachability::Online) {
                 msg = "网络已连接";
+                onNetworkChanged(true, transportMediumLabel(s_netInfo->transportMedium()));
             } else if (r == QNetworkInformation::Reachability::Disconnected) {
                 msg = "网络已断开";
+                onNetworkChanged(false, QString());
             } else {
                 msg = "网络状态未知";
+                // Unknown 不广播（仅本地通知保持原状）
             }
             qDebug() << "[NetworkMonitor]" << msg;
             showDesktopNotification("qsktox", msg);
@@ -170,6 +221,13 @@ static void showDesktopNotification(const QString& title, const QString& message
     QProcess::startDetached("osascript", {"-e", script});
 }
 
+static QString transportMediumLabel(QNetworkInformation::TransportMedium tm) {
+    if (tm == QNetworkInformation::TransportMedium::WiFi) { return QStringLiteral("wifi"); }
+    if (tm == QNetworkInformation::TransportMedium::Cellular) { return QStringLiteral("cellular"); }
+    if (tm == QNetworkInformation::TransportMedium::Ethernet) { return QStringLiteral("ethernet"); }
+    return QString();
+}
+
 static QNetworkInformation* s_netInfo = nullptr;
 
 void NetworkMonitor::start()
@@ -185,10 +243,13 @@ void NetworkMonitor::start()
             QString msg;
             if (r == QNetworkInformation::Reachability::Online) {
                 msg = "网络已连接";
+                onNetworkChanged(true, transportMediumLabel(s_netInfo->transportMedium()));
             } else if (r == QNetworkInformation::Reachability::Disconnected) {
                 msg = "网络已断开";
+                onNetworkChanged(false, QString());
             } else {
                 msg = "网络状态未知";
+                // Unknown 不广播（仅本地通知保持原状）
             }
             qDebug() << "[NetworkMonitor]" << msg;
             showDesktopNotification("qsktox", msg);
