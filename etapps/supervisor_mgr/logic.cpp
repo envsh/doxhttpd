@@ -20,8 +20,14 @@ static QString rmTrim(const QString& s) {
 }
 #ifdef QT3_BUILD
 static void rmSetText(QTextEdit* e, const QString& s) { e->setText(s); }
+static QString rmGetText(QTextEdit* e) { return e->text(); }
+static int rmComboCount(QComboBox* c) { return (int)c->count(); }
+static QString rmComboText(QComboBox* c, int i) { return c->text(i); }
 #else
 static void rmSetText(QTextEdit* e, const QString& s) { e->setPlainText(s); }
+static QString rmGetText(QTextEdit* e) { return e->toPlainText(); }
+static int rmComboCount(QComboBox* c) { return c->count(); }
+static QString rmComboText(QComboBox* c, int i) { return c->itemText(i); }
 #endif
 static QByteArray rmUtf8(const QString& s) {
 #ifdef QT3_BUILD
@@ -42,6 +48,13 @@ static int sFindQ(const QString& s, const QString& sub, int from) {
     return s.find(sub, from);
 #else
     return s.indexOf(sub, from);
+#endif
+}
+static const char* rmCs(const QString& s) {
+#ifdef QT3_BUILD
+    return s.latin1();
+#else
+    return s.toLatin1().constData();
 #endif
 }
 static QString rmPathJoin(const QString& a, const QString& b) {
@@ -85,8 +98,7 @@ SupervisorMgrLogic::SupervisorMgrLogic(QWidget* parent)
       m_host(0), m_port(0), m_user(0), m_pass(0),
       m_procTable(0), m_statusLabel(0),
       m_refreshBtn(0), m_startBtn(0), m_stopBtn(0), m_restartBtn(0), m_clearLogBtn(0),
-      m_logEdit(0), m_selected(-1) {
-    m_procs.setAutoDelete(true);
+      m_logEdit(0), procCount(0), m_selected(-1) {
 }
 
 void SupervisorMgrLogic::setWidgets(QLineEdit* host, QLineEdit* port, QLineEdit* user, QLineEdit* pass,
@@ -194,7 +206,7 @@ void SupervisorMgrLogic::appendLog(const QString& msg) {
     if (!m_logEdit) { return; }
     QString ts = QDateTime::currentDateTime().toString("hh:mm:ss");
     QString line = "[" + ts + "] [Supervisor] " + msg + "\n";
-    rmSetText(m_logEdit, m_logEdit->text() + line);
+    rmSetText(m_logEdit, rmGetText(m_logEdit) + line);
 }
 
 void SupervisorMgrLogic::onConnect() {
@@ -304,7 +316,7 @@ void SupervisorMgrLogic::onProcDone() {
         setStatusColor(QColor(200, 0, 0));
         if (m_statusLabel) { m_statusLabel->setText(qFromUtf8("连接失败：") + errHit); }
         clearProcTable();
-        m_procs.clear();
+        procCount = 0;
         disableOps();
         proc->deleteLater();
         return;
@@ -315,7 +327,7 @@ void SupervisorMgrLogic::onProcDone() {
         setStatusColor(QColor(200, 0, 0));
         if (m_statusLabel) { m_statusLabel->setText(qFromUtf8("认证失败：用户名/密码错误")); }
         clearProcTable();
-        m_procs.clear();
+        procCount = 0;
         disableOps();
         proc->deleteLater();
         return;
@@ -325,7 +337,7 @@ void SupervisorMgrLogic::onProcDone() {
         setStatusColor(QColor(200, 0, 0));
         if (m_statusLabel) { m_statusLabel->setText(qFromUtf8("RPC 路径错误：请确认使用 /RPC2")); }
         clearProcTable();
-        m_procs.clear();
+        procCount = 0;
         disableOps();
         proc->deleteLater();
         return;
@@ -382,7 +394,7 @@ static QString extractMemberValue(const QString& mblk) {
 void SupervisorMgrLogic::parseProcList(const QString& xml) {
     if (!m_procTable) { return; }
     clearProcTable();
-    m_procs.clear();
+    procCount = 0;
     int pos = 0;
     while (true) {
         int s = sFindQ(xml, "<struct>", pos);
@@ -413,21 +425,22 @@ void SupervisorMgrLogic::parseProcList(const QString& xml) {
             pos = e + 9;
             continue;
         }
-        SupProcInfo* info = new SupProcInfo();
+        if (procCount >= 512) { break; }
+        SupProcInfo* info = &procs[procCount];
         info->name = kv["name"];
         info->group = kv["group"];
-        info->pid = kv.contains("pid") ? atoi(kv["pid"].latin1()) : 0;
-        info->state = kv.contains("state") ? atoi(kv["state"].latin1()) : -1;
+        info->pid = kv.contains("pid") ? atoi(rmCs(kv["pid"])) : 0;
+        info->state = kv.contains("state") ? atoi(rmCs(kv["state"])) : -1;
         info->statename = kv.contains("statename") ? kv["statename"] : QString("");
         info->description = kv["description"];
-        info->start = kv.contains("start") ? atol(kv["start"].latin1()) : 0;
-        info->stop = kv.contains("stop") ? atol(kv["stop"].latin1()) : 0;
-        info->now = kv.contains("now") ? atol(kv["now"].latin1()) : 0;
-        m_procs.append(info);
-        addProcRow(info, (int)m_procs.count() - 1);
+        info->start = kv.contains("start") ? atol(rmCs(kv["start"])) : 0;
+        info->stop = kv.contains("stop") ? atol(rmCs(kv["stop"])) : 0;
+        info->now = kv.contains("now") ? atol(rmCs(kv["now"])) : 0;
+        procCount++;
+        addProcRow(info, procCount - 1);
         pos = e + 9;
     }
-    int n = (int)m_procs.count();
+    int n = procCount;
     if (n > 0) {
         setStatusColor(QColor(0, 128, 0));
         if (m_statusLabel) { m_statusLabel->setText(qFromUtf8("已连接　进程数：") + QString::number(n)); }
@@ -513,39 +526,39 @@ void SupervisorMgrLogic::onRefresh() {
 void SupervisorMgrLogic::onProcSelected() {
     if (!m_procTable) { return; }
     m_selected = m_procTable->currentRow();
-    if (m_selected < 0 || m_selected >= (int)m_procs.count()) {
+    if (m_selected < 0 || m_selected >= procCount) {
         disableOps();
         return;
     }
-    const SupProcInfo* p = m_procs.at(m_selected);
+    const SupProcInfo* p = &procs[m_selected];
     if (m_startBtn) { m_startBtn->setEnabled(p->state != 20); }
     if (m_stopBtn) { m_stopBtn->setEnabled(p->state == 20 || p->state == 10 || p->state == 40); }
     if (m_restartBtn) { m_restartBtn->setEnabled(true); }
 }
 
 void SupervisorMgrLogic::onStart() {
-    if (m_selected < 0 || m_selected >= (int)m_procs.count()) { return; }
+    if (m_selected < 0 || m_selected >= procCount) { return; }
     QStringList params;
-    params << m_procs.at(m_selected)->name << "true";
+    params << procs[m_selected].name << "true";
     sendRpc("supervisor.startProcess", params, "start");
-    appendLog(qFromUtf8("启动：") + m_procs.at(m_selected)->name);
+    appendLog(qFromUtf8("启动：") + procs[m_selected].name);
     QTimer::singleShot(1500, this, SLOT(onRefresh()));
 }
 
 void SupervisorMgrLogic::onStop() {
-    if (m_selected < 0 || m_selected >= (int)m_procs.count()) { return; }
+    if (m_selected < 0 || m_selected >= procCount) { return; }
     QStringList params;
-    params << m_procs.at(m_selected)->name << "true";
+    params << procs[m_selected].name << "true";
     sendRpc("supervisor.stopProcess", params, "stop");
-    appendLog(qFromUtf8("停止：") + m_procs.at(m_selected)->name);
+    appendLog(qFromUtf8("停止：") + procs[m_selected].name);
     QTimer::singleShot(1500, this, SLOT(onRefresh()));
 }
 
 void SupervisorMgrLogic::onRestart() {
-    if (m_selected < 0 || m_selected >= (int)m_procs.count()) { return; }
+    if (m_selected < 0 || m_selected >= procCount) { return; }
     /* supervisord 无单进程 restartProcess API；restart() 是全量重启。
        两阶段：stop → 延时 → start */
-    QString name = m_procs.at(m_selected)->name;
+    QString name = procs[m_selected].name;
     QStringList params;
     params << name << "true";
     sendRpc("supervisor.stopProcess", params, "restart-stop");
@@ -555,8 +568,8 @@ void SupervisorMgrLogic::onRestart() {
 }
 
 void SupervisorMgrLogic::onRestartPhase2() {
-    if (m_selected < 0 || m_selected >= (int)m_procs.count()) { return; }
-    QString name = m_procs.at(m_selected)->name;
+    if (m_selected < 0 || m_selected >= procCount) { return; }
+    QString name = procs[m_selected].name;
     QStringList params;
     params << name << "true";
     sendRpc("supervisor.startProcess", params, "restart-start");

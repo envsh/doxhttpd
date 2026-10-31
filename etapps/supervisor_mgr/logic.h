@@ -12,13 +12,6 @@
 #include <qtextedit.h>
 #include <qlabel.h>
 #include <qpushbutton.h>
-#ifdef QT3_BUILD
-#include <q3ptrlist.h>
-typedef Q3PtrList<SupProcInfo> SupProcList;
-#else
-#include <qlist.h>
-typedef QList<SupProcInfo*> SupProcList;
-#endif
 #include <qmap.h>
 
 #ifdef QT3_BUILD
@@ -91,7 +84,8 @@ private:
     QPushButton* m_restartBtn;
     QPushButton* m_clearLogBtn;
     QTextEdit* m_logEdit;
-    SupProcList m_procs;
+    SupProcInfo procs[512];  /* 固定数组 + 计数（同 v2ray_suber 规范） */
+    int procCount;
     int m_selected;
     QMap<QProcess*, QString> m_rpcTags;
 };

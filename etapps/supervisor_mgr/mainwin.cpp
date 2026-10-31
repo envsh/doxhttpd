@@ -25,11 +25,11 @@ QWidget* createSupervisorMgrMainWindow(void* parent) {
 #endif
     w->resize(820, 580);
 
-    QVBoxLayout* mainLayout = new QVBoxLayout(w, 6, 4);
+    QBoxLayout* mainLayout = qNewBoxLayout(w, QBoxLayout::TopToBottom, 6, 4);
 
     /* 连接区 */
     QGroupBox* connGroup = new QGroupBox(qFromUtf8("连接"), w);
-    QHBoxLayout* connLayout = new QHBoxLayout(connGroup, 6, 4);
+    QBoxLayout* connLayout = qNewBoxLayout(connGroup, QBoxLayout::LeftToRight, 6, 4);
     QLabel* hostLbl = new QLabel(qFromUtf8("主机:"), connGroup);
     QLineEdit* hostEdit = new QLineEdit(connGroup);
     hostEdit->setText("127.0.0.1");
@@ -60,11 +60,11 @@ QWidget* createSupervisorMgrMainWindow(void* parent) {
     mainLayout->addWidget(connGroup);
 
     /* 中部 */
-    QHBoxLayout* midRow = new QHBoxLayout(0, 4, 4);
+    QBoxLayout* midRow = qNewBoxLayout(0, QBoxLayout::LeftToRight, 0, 4);
     mainLayout->addLayout(midRow, 1);
 
     /* 左：进程列表（多列 QTable） */
-    QVBoxLayout* leftCol = new QVBoxLayout(0, 0, 2);
+    QBoxLayout* leftCol = qNewBoxLayout(0, QBoxLayout::TopToBottom, 0, 2);
     midRow->addLayout(leftCol, 2);
     QLabel* procLbl = new QLabel(qFromUtf8("进程列表"), w);
     leftCol->addWidget(procLbl);
@@ -98,9 +98,9 @@ QWidget* createSupervisorMgrMainWindow(void* parent) {
     leftCol->addWidget(procTable, 1);
 
     /* 右：操作 + 日志 */
-    QVBoxLayout* rightCol = new QVBoxLayout(0, 0, 2);
+    QBoxLayout* rightCol = qNewBoxLayout(0, QBoxLayout::TopToBottom, 0, 2);
     midRow->addLayout(rightCol, 3);
-    QHBoxLayout* opRow = new QHBoxLayout(0, 4, 4);
+    QBoxLayout* opRow = qNewBoxLayout(0, QBoxLayout::LeftToRight, 0, 4);
     QPushButton* startBtn = new QPushButton(qFromUtf8("启动"), w);
     QPushButton* stopBtn = new QPushButton(qFromUtf8("停止"), w);
     QPushButton* restartBtn = new QPushButton(qFromUtf8("重启"), w);
@@ -114,7 +114,9 @@ QWidget* createSupervisorMgrMainWindow(void* parent) {
     QLabel* logLbl = new QLabel(qFromUtf8("日志"), w);
     rightCol->addWidget(logLbl);
     QTextEdit* logEdit = new QTextEdit(w);
+#ifdef QT3_BUILD
     logEdit->setTextFormat(Qt::PlainText);
+#endif
     logEdit->setReadOnly(true);
     rightCol->addWidget(logEdit, 1);
 
