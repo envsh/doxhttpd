@@ -4,12 +4,20 @@
 #include <qfile.h>
 #include <qdir.h>
 #include <qtextstream.h>
+#include <qpainter.h>
+#include <qstringlist.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <errno.h>
 
-static QString rmTrim(const QString& s) { return s.stripWhiteSpace(); }
+static QString rmTrim(const QString& s) {
+#ifdef QT3_BUILD
+    return s.stripWhiteSpace();
+#else
+    return s.trimmed();
+#endif
+}
 #ifdef QT3_BUILD
 static void rmSetText(QTextEdit* e, const QString& s) { e->setText(s); }
 #else
@@ -22,31 +30,91 @@ static QByteArray rmUtf8(const QString& s) {
     return s.toUtf8();
 #endif
 }
+static int sFind(const QString& s, const char* sub, int from) {
+#ifdef QT3_BUILD
+    return s.find(sub, from);
+#else
+    return s.indexOf(QString::fromLatin1(sub), from);
+#endif
+}
+static int sFindQ(const QString& s, const QString& sub, int from) {
+#ifdef QT3_BUILD
+    return s.find(sub, from);
+#else
+    return s.indexOf(sub, from);
+#endif
+}
 static QString rmPathJoin(const QString& a, const QString& b) {
     if (a.endsWith("/")) { return a + b; }
     return a + "/" + b;
 }
 
+/* 前置声明：在整段 XML 中取 <tag>…</tag> 内容 */
+static QString extractTag(const QString& xml, const QString& tag, int start);
+
+/* ── 状态颜色（官方状态码映射） ── */
+static QColor stateColor(int code) {
+    if (code == 20) { return QColor(0, 150, 0); }        /* RUNNING 绿 */
+    if (code == 10) { return QColor(200, 120, 0); }      /* STARTING 橙 */
+    if (code == 30) { return QColor(200, 120, 0); }      /* BACKOFF 橙 */
+    if (code == 40) { return QColor(220, 140, 0); }      /* STOPPING 亮橙 */
+    if (code == 100) { return QColor(190, 70, 0); }      /* EXITED 橙红 */
+    if (code == 200) { return QColor(210, 0, 0); }       /* FATAL 红 */
+    if (code == 0) { return QColor(120, 120, 120); }     /* STOPPED 灰 */
+    return QColor(150, 150, 150);                        /* UNKNOWN/其它 */
+}
+
+#ifdef QT3_BUILD
+/* 单元格文字着色：重写 QTableItem::paint（Qt3 标准做法） */
+class ColorTableItem : public QTableItem {
+public:
+    ColorTableItem(QTable* t, const QString& txt, const QColor& c)
+        : QTableItem(t, QTableItem::Never, txt), m_color(c) {}
+    void paint(QPainter* p, const QColorGroup& cg, const QRect& cr, bool selected) {
+        QColorGroup g(cg);
+        g.setColor(QColorGroup::Text, m_color);
+        QTableItem::paint(p, g, cr, selected);
+    }
+private:
+    QColor m_color;
+};
+#endif
+
 SupervisorMgrLogic::SupervisorMgrLogic(QWidget* parent)
     : QObject(parent), m_parent(parent),
       m_host(0), m_port(0), m_user(0), m_pass(0),
-      m_procList(0), m_statusLabel(0),
+      m_procTable(0), m_statusLabel(0),
       m_refreshBtn(0), m_startBtn(0), m_stopBtn(0), m_restartBtn(0), m_clearLogBtn(0),
       m_logEdit(0), m_selected(-1) {
+    m_procs.setAutoDelete(true);
 }
 
 void SupervisorMgrLogic::setWidgets(QLineEdit* host, QLineEdit* port, QLineEdit* user, QLineEdit* pass,
-                                    QListBox* procList, QLabel* statusLabel,
+                                    RmProcTable* procTable, QLabel* statusLabel,
                                     QPushButton* refreshBtn, QPushButton* startBtn, QPushButton* stopBtn, QPushButton* restartBtn, QPushButton* clearLogBtn,
                                     QTextEdit* logEdit) {
     m_host = host; m_port = port; m_user = user; m_pass = pass;
-    m_procList = procList; m_statusLabel = statusLabel;
+    m_procTable = procTable; m_statusLabel = statusLabel;
     m_refreshBtn = refreshBtn; m_startBtn = startBtn; m_stopBtn = stopBtn; m_restartBtn = restartBtn; m_clearLogBtn = clearLogBtn;
     m_logEdit = logEdit;
     loadConfig();
+    disableOps();
+    clearProcTable();
+}
+
+void SupervisorMgrLogic::disableOps() {
     if (m_startBtn) { m_startBtn->setEnabled(false); }
     if (m_stopBtn) { m_stopBtn->setEnabled(false); }
     if (m_restartBtn) { m_restartBtn->setEnabled(false); }
+}
+
+void SupervisorMgrLogic::setStatusColor(const QColor& c) {
+    if (!m_statusLabel) { return; }
+#ifdef QT3_BUILD
+    m_statusLabel->setPaletteForegroundColor(c);
+#else
+    m_statusLabel->setStyleSheet(QString("color:%1").arg(c.name()));
+#endif
 }
 
 QString SupervisorMgrLogic::configPath() {
@@ -59,22 +127,26 @@ QString SupervisorMgrLogic::configPath() {
     return rmPathJoin(base, "config.json");
 }
 
-void SupervisorMgrLogic::loadConfig() {
-    QFile f(configPath());
-    if (!f.open(IO_ReadOnly)) { return; }
-    QByteArray ba;
-    char buf[4096];
-    while (f.readBlock(buf, sizeof(buf)) > 0) { /* read */ }
-    /* 简化：用 cJSON 读取更稳妥，这里先按行方式跳过 */
-    f.close();
-    /* 改用 cJSON */
+static QString readUtf8File(const QString& path) {
     QString data;
-    FILE* fp = fopen(QFile::encodeName(configPath()).data(), "rb");
-    if (!fp) { return; }
+    FILE* fp = fopen(QFile::encodeName(path).data(), "rb");
+    if (!fp) { return data; }
     char b2[4096];
     size_t n;
     while ((n = fread(b2, 1, sizeof(b2), fp)) > 0) { data += QString::fromLocal8Bit(b2, (int)n); }
     fclose(fp);
+    return data;
+}
+
+static void writeUtf8File(const QString& path, const char* data, int len) {
+    FILE* fp = fopen(QFile::encodeName(path).data(), "wb");
+    if (!fp || !data || len <= 0) { if (fp) { fclose(fp); } return; }
+    fwrite(data, 1, (size_t)len, fp);
+    fclose(fp);
+}
+
+void SupervisorMgrLogic::loadConfig() {
+    QString data = readUtf8File(configPath());
     if (data.isEmpty()) { return; }
     QByteArray bd = rmUtf8(data);
     cJSON* root = cJSON_Parse(bd.data());
@@ -103,11 +175,7 @@ void SupervisorMgrLogic::saveConfig() {
     cJSON_AddStringToObject(root, "pass", rmUtf8(m_pass ? m_pass->text() : QString("")).data());
     char* out = cJSON_Print(root);
     if (out) {
-        FILE* fp = fopen(QFile::encodeName(configPath()).data(), "wb");
-        if (fp) {
-            fwrite(out, 1, strlen(out), fp);
-            fclose(fp);
-        }
+        writeUtf8File(configPath(), out, (int)strlen(out));
         free(out);
     }
     cJSON_Delete(root);
@@ -120,20 +188,6 @@ QString SupervisorMgrLogic::rpcUrl() {
     if (h.isEmpty()) { h = "127.0.0.1"; }
     if (p.isEmpty()) { p = "9001"; }
     return "http://" + h + ":" + p + "/RPC2";
-}
-
-QString SupervisorMgrLogic::authArgs() {
-    QString u = m_user ? m_user->text() : QString("");
-    QString pw = m_pass ? m_pass->text() : QString("");
-    u = rmTrim(u); pw = rmTrim(pw);
-    if (!u.isEmpty() && !pw.isEmpty()) {
-        QString up = u + ":" + pw;
-        return " -u " + up;
-    }
-    if (!u.isEmpty() && pw.isEmpty()) {
-        return " -u " + u + ":";
-    }
-    return "";
 }
 
 void SupervisorMgrLogic::appendLog(const QString& msg) {
@@ -169,6 +223,7 @@ void SupervisorMgrLogic::sendRpc(const QString& method, const QStringList& param
     }
     body += "</params>\n</methodCall>\n";
     QProcess* proc = new QProcess(this);
+#ifdef QT3_BUILD
     proc->addArgument("curl");
     proc->addArgument("-sSk");
     proc->addArgument("-i");
@@ -192,16 +247,28 @@ void SupervisorMgrLogic::sendRpc(const QString& method, const QStringList& param
     proc->addArgument("-d");
     proc->addArgument(body);
     proc->addArgument(rpcUrl());
+    proc->start();
+#else
+    QStringList args;
+    args << "curl" << "-sSk" << "-i" << "--connect-timeout" << "10" << "--max-time" << "30"
+         << "-H" << "Content-Type: text/xml";
+    QString u2 = m_user ? rmTrim(m_user->text()) : QString("");
+    QString pw2 = m_pass ? rmTrim(m_pass->text()) : QString("");
+    if (!u2.isEmpty() && !pw2.isEmpty()) { args << "--user" << (u2 + ":" + pw2); }
+    else if (!u2.isEmpty() && pw2.isEmpty()) { args << "--user" << (u2 + ":"); }
+    args << "-X" << "POST" << "-d" << body << rpcUrl();
+    proc->start("curl", args);
+#endif
 #ifdef QT3_BUILD
     connect(proc, SIGNAL(processExited()), this, SLOT(onProcDone()));
 #else
-    connect(proc, SIGNAL(processExited(int,QProcess::ExitStatus)), this, SLOT(onProcDone()));
+    /* Qt 官方规则：slot 可比 signal 签名短（忽略多余参数），无参槽两端通用 */
+    connect(proc, SIGNAL(finished(int,QProcess::ExitStatus)), this, SLOT(onProcDone()));
 #endif
     if (!tag.isEmpty()) {
         m_rpcTags.insert(proc, tag);
     }
     appendLog(qFromUtf8("RPC[") + tag + qFromUtf8("] ") + method);
-    proc->start();
 }
 
 void SupervisorMgrLogic::onProcDone() {
@@ -209,94 +276,221 @@ void SupervisorMgrLogic::onProcDone() {
     if (!proc) { return; }
     QString tag = m_rpcTags[proc];
     m_rpcTags.remove(proc);
-    QByteArray out = proc->readStdout();
-    QString raw = QString::fromLocal8Bit(out);
-    /* 粗略：若含 getAllProcessInfo 结果，解析 */
-    if (raw.find("getAllProcessInfo") >= 0 || raw.find("<name>name</name>") >= 0 || raw.find("statename") >= 0) {
+#ifdef QT3_BUILD
+    QString raw = QString::fromLocal8Bit(proc->readStdout());
+    raw += QString::fromLocal8Bit(proc->readStderr());
+#else
+    QString raw = QString::fromLocal8Bit(proc->readAllStandardOutput());
+    raw += QString::fromLocal8Bit(proc->readAllStandardError());
+#endif
+    /* 1) 连接错误检测（curl 错误走 stderr） */
+    static const char* conErrs[] = {
+        "Connection refused", "Failed to connect", "Couldn't connect",
+        "Could not connect", "Connection timed out",
+        "Name or service not known", "Could not resolve host",
+        "Empty reply from server", "Timeout was reached",
+        "Connection reset by peer", "Unknown protocol", 0 };
+    bool isConErr = false;
+    const char* errHit = 0;
+    for (int i = 0; conErrs[i]; ++i) {
+        if (sFind(raw, conErrs[i], 0) >= 0) {
+            isConErr = true;
+            errHit = conErrs[i];
+            break;
+        }
+    }
+    if (isConErr) {
+        appendLog(qFromUtf8("[连接失败] ") + errHit);
+        setStatusColor(QColor(200, 0, 0));
+        if (m_statusLabel) { m_statusLabel->setText(qFromUtf8("连接失败：") + errHit); }
+        clearProcTable();
+        m_procs.clear();
+        disableOps();
+        proc->deleteLater();
+        return;
+    }
+    /* 2) HTTP 状态错误 */
+    if (sFind(raw, "HTTP/1.0 401", 0) >= 0 || sFind(raw, "HTTP/1.1 401", 0) >= 0) {
+        appendLog(qFromUtf8("[认证失败] HTTP 401"));
+        setStatusColor(QColor(200, 0, 0));
+        if (m_statusLabel) { m_statusLabel->setText(qFromUtf8("认证失败：用户名/密码错误")); }
+        clearProcTable();
+        m_procs.clear();
+        disableOps();
+        proc->deleteLater();
+        return;
+    }
+    if (sFind(raw, "HTTP/1.0 404", 0) >= 0 || sFind(raw, "HTTP/1.1 404", 0) >= 0) {
+        appendLog(qFromUtf8("[RPC路径错误] HTTP 404"));
+        setStatusColor(QColor(200, 0, 0));
+        if (m_statusLabel) { m_statusLabel->setText(qFromUtf8("RPC 路径错误：请确认使用 /RPC2")); }
+        clearProcTable();
+        m_procs.clear();
+        disableOps();
+        proc->deleteLater();
+        return;
+    }
+    /* 3) XML-RPC fault 显式提示 */
+    if (sFind(raw, "<fault>", 0) >= 0) {
+        QString fs = extractTag(raw, "string", 0);
+        appendLog(qFromUtf8("[RPC Fault] ") + fs);
+        setStatusColor(QColor(200, 120, 0));
+        if (m_statusLabel) { m_statusLabel->setText(qFromUtf8("RPC Fault：") + fs); }
+        proc->deleteLater();
+        return;
+    }
+    /* 4) 正常解析 */
+    if (sFind(raw, "<methodResponse>", 0) >= 0 || sFind(raw, "<struct>", 0) >= 0) {
         parseProcList(raw);
     } else {
-        appendLog(qFromUtf8("响应：") + (raw.length() > 200 ? raw.left(200) + "..." : raw));
-        if (m_statusLabel) {
-            m_statusLabel->setText(qFromUtf8("完成"));
-        }
+        appendLog(qFromUtf8("[未知响应] ") + (raw.length() > 180 ? raw.left(180) + "..." : raw));
+        setStatusColor(QColor(200, 120, 0));
+        if (m_statusLabel) { m_statusLabel->setText(qFromUtf8("无有效 RPC 响应")); }
     }
     proc->deleteLater();
 }
 
+/* 在整段 XML 中取 <tag>…</tag> 内容 */
 static QString extractTag(const QString& xml, const QString& tag, int start) {
     QString open = "<" + tag + ">";
     QString close = "</" + tag + ">";
-    int i = xml.find(open, start);
+    int i = sFindQ(xml, open, start);
     if (i < 0) { return QString(""); }
     i += open.length();
-    int j = xml.find(close, i);
+    int j = sFindQ(xml, close, i);
     if (j < 0) { return QString(""); }
     return xml.mid(i, j - i);
 }
 
+/* 从单个 <member>…</member> 块的 <value>…</value> 内取标量（int/i4 优先，再 string） */
+static QString extractMemberValue(const QString& mblk) {
+    int vs = sFindQ(mblk, "<value>", 0);
+    if (vs < 0) { return QString(""); }
+    vs += 7;
+    int ve = sFindQ(mblk, "</value>", vs);
+    if (ve < 0) { return QString(""); }
+    QString inner = mblk.mid(vs, ve - vs);
+    QString t = extractTag(inner, "int", 0);
+    if (!t.isEmpty()) { return t; }
+    t = extractTag(inner, "i4", 0);
+    if (!t.isEmpty()) { return t; }
+    t = extractTag(inner, "string", 0);
+    if (!t.isEmpty()) { return t; }
+    return rmTrim(inner);
+}
+
 void SupervisorMgrLogic::parseProcList(const QString& xml) {
-    if (!m_procList) { return; }
-    m_procList->clear();
+    if (!m_procTable) { return; }
+    clearProcTable();
     m_procs.clear();
-    /* 简单遍历 <struct> 块 */
     int pos = 0;
     while (true) {
-        int s = xml.find("<struct>", pos);
+        int s = sFindQ(xml, "<struct>", pos);
         if (s < 0) { break; }
-        int e = xml.find("</struct>", s);
+        int e = sFindQ(xml, "</struct>", s);
         if (e < 0) { break; }
         QString blk = xml.mid(s, e - s);
-        /* 判断是否是进程信息（包含 name 和 statename） */
-        if (blk.find("<name>statename</name>") < 0 && blk.find("statename") < 0) {
-            pos = e + 9;
-            continue;
-        }
-        SupProcInfo info;
-        info.pid = 0; info.statename = -1;
-        /* 提取成员 */
+        /* 遍历成员，收集 key=value */
+        QMap<QString, QString> kv;
+        bool hasName = false;
         int mp = 0;
         while (true) {
-            int ms = blk.find("<member>", mp);
+            int ms = sFindQ(blk, "<member>", mp);
             if (ms < 0) { break; }
-            int me = blk.find("</member>", ms);
+            int me = sFindQ(blk, "</member>", ms);
             if (me < 0) { break; }
             QString mblk = blk.mid(ms, me - ms);
             QString mname = extractTag(mblk, "name", 0);
-            /* value 可能是 string/int/i4 */
-            QString vstr = extractTag(mblk, "string", 0);
-            if (vstr.isEmpty()) {
-                vstr = extractTag(mblk, "int", 0);
+            if (!mname.isEmpty()) {
+                if (mname == "name") { hasName = true; }
+                if (!kv.contains(mname)) { kv.insert(mname, extractMemberValue(mblk)); }
             }
-            if (vstr.isEmpty()) {
-                vstr = extractTag(mblk, "i4", 0);
-            }
-            if (mname == "name") { info.name = vstr; }
-            else if (mname == "group") { info.group = vstr; }
-            else if (mname == "pid") { info.pid = atoi(vstr.latin1()); }
-            else if (mname == "state") { info.state = vstr; }
-            else if (mname == "statename") { info.statename = atoi(vstr.latin1()); info.state = vstr == "20" ? "RUNNING" : (vstr == "0" ? "STOPPED" : vstr); }
-            else if (mname == "description") { info.description = vstr; }
             mp = me + 9;
         }
-        if (!info.name.isEmpty()) {
-            m_procs.append(new SupProcInfo(info));
-            QString disp = info.name;
-            if (!info.group.isEmpty() && info.group != info.name) { disp = info.group + ":" + info.name; }
-            QString st = stateText(info.statename);
-            if (st.isEmpty()) { st = info.state; }
-            if (info.pid > 0) {
-                disp = disp + "  [" + st + "]  pid=" + QString::number(info.pid);
-            } else {
-                disp = disp + "  [" + st + "]";
-            }
-            m_procList->insertItem(disp);
+        if (!hasName) { pos = e + 9; continue; }
+        /* 判定为进程信息：有 name 且含 state/statename/pid 字段 */
+        if (!kv.contains("state") && !kv.contains("statename") && !kv.contains("pid")) {
+            pos = e + 9;
+            continue;
         }
+        SupProcInfo* info = new SupProcInfo();
+        info->name = kv["name"];
+        info->group = kv["group"];
+        info->pid = kv.contains("pid") ? atoi(kv["pid"].latin1()) : 0;
+        info->state = kv.contains("state") ? atoi(kv["state"].latin1()) : -1;
+        info->statename = kv.contains("statename") ? kv["statename"] : QString("");
+        info->description = kv["description"];
+        info->start = kv.contains("start") ? atol(kv["start"].latin1()) : 0;
+        info->stop = kv.contains("stop") ? atol(kv["stop"].latin1()) : 0;
+        info->now = kv.contains("now") ? atol(kv["now"].latin1()) : 0;
+        m_procs.append(info);
+        addProcRow(info, (int)m_procs.count() - 1);
         pos = e + 9;
     }
-    if (m_statusLabel) {
-        m_statusLabel->setText(qFromUtf8("进程：") + QString::number(m_procs.count()));
+    int n = (int)m_procs.count();
+    if (n > 0) {
+        setStatusColor(QColor(0, 128, 0));
+        if (m_statusLabel) { m_statusLabel->setText(qFromUtf8("已连接　进程数：") + QString::number(n)); }
+    } else {
+        setStatusColor(QColor(100, 100, 100));
+        if (m_statusLabel) { m_statusLabel->setText(qFromUtf8("已连接（无进程）")); }
     }
-    appendLog(qFromUtf8("刷新完成：") + QString::number(m_procs.count()) + qFromUtf8(" 个进程"));
+    appendLog(qFromUtf8("刷新完成：") + QString::number(n) + qFromUtf8(" 个进程"));
+}
+
+void SupervisorMgrLogic::clearProcTable() {
+    if (!m_procTable) { return; }
+#ifdef QT3_BUILD
+    /* QTable 不拥有 item，需手动释放自建 item */
+    for (int r = (int)m_procTable->numRows() - 1; r >= 0; --r) {
+        for (int c = (int)m_procTable->numCols() - 1; c >= 0; --c) {
+            QTableItem* it = m_procTable->item(r, c);
+            if (it) {
+                delete it;
+                m_procTable->setItem(r, c, 0);
+            }
+        }
+    }
+    m_procTable->setNumRows(0);
+    m_procTable->setNumCols(4);
+    m_procTable->horizontalHeader()->setLabel(0, qFromUtf8("进程名"));
+    m_procTable->horizontalHeader()->setLabel(1, qFromUtf8("状态"));
+    m_procTable->horizontalHeader()->setLabel(2, qFromUtf8("PID"));
+    m_procTable->horizontalHeader()->setLabel(3, qFromUtf8("描述"));
+#else
+    m_procTable->setRowCount(0);
+    m_procTable->setColumnCount(4);
+    QStringList labels;
+    labels << qFromUtf8("进程名") << qFromUtf8("状态") << qFromUtf8("PID") << qFromUtf8("描述");
+    m_procTable->setHorizontalHeaderLabels(labels);
+#endif
+}
+
+void SupervisorMgrLogic::addProcRow(const SupProcInfo* info, int row) {
+    if (!m_procTable || !info) { return; }
+    QString disp = info->name;
+    if (!info->group.isEmpty() && info->group != info->name) { disp = info->group + ":" + info->name; }
+    QString st = info->statename.isEmpty() ? stateText(info->state) : info->statename;
+    QString pidStr = (info->pid > 0) ? QString::number(info->pid) : QString("-");
+    QColor c = stateColor(info->state);
+#ifdef QT3_BUILD
+    if ((int)m_procTable->numRows() <= row) { m_procTable->setNumRows(row + 1); }
+    m_procTable->setItem(row, 0, new ColorTableItem(m_procTable, disp, QColor(60, 60, 60)));
+    m_procTable->setItem(row, 1, new ColorTableItem(m_procTable, st, c));
+    m_procTable->setItem(row, 2, new ColorTableItem(m_procTable, pidStr, QColor(60, 60, 60)));
+    m_procTable->setItem(row, 3, new ColorTableItem(m_procTable, info->description, QColor(100, 100, 255)));
+#else
+    if (m_procTable->rowCount() <= row) { m_procTable->setRowCount(row + 1); }
+    QTableWidgetItem* i0 = new QTableWidgetItem(disp);
+    QTableWidgetItem* i1 = new QTableWidgetItem(st);
+    QTableWidgetItem* i2 = new QTableWidgetItem(pidStr);
+    QTableWidgetItem* i3 = new QTableWidgetItem(info->description);
+    i1->setForeground(QBrush(c));
+    m_procTable->setItem(row, 0, i0);
+    m_procTable->setItem(row, 1, i1);
+    m_procTable->setItem(row, 2, i2);
+    m_procTable->setItem(row, 3, i3);
+#endif
 }
 
 QString SupervisorMgrLogic::stateText(int code) {
@@ -317,17 +511,15 @@ void SupervisorMgrLogic::onRefresh() {
 }
 
 void SupervisorMgrLogic::onProcSelected() {
-    if (!m_procList) { return; }
-    m_selected = m_procList->currentItem();
+    if (!m_procTable) { return; }
+    m_selected = m_procTable->currentRow();
     if (m_selected < 0 || m_selected >= (int)m_procs.count()) {
-        if (m_startBtn) { m_startBtn->setEnabled(false); }
-        if (m_stopBtn) { m_stopBtn->setEnabled(false); }
-        if (m_restartBtn) { m_restartBtn->setEnabled(false); }
+        disableOps();
         return;
     }
-    const SupProcInfo& p = *m_procs.at(m_selected);
-    if (m_startBtn) { m_startBtn->setEnabled(p.statename != 20); }
-    if (m_stopBtn) { m_stopBtn->setEnabled(p.statename == 20 || p.statename == 10 || p.statename == 40); }
+    const SupProcInfo* p = m_procs.at(m_selected);
+    if (m_startBtn) { m_startBtn->setEnabled(p->state != 20); }
+    if (m_stopBtn) { m_stopBtn->setEnabled(p->state == 20 || p->state == 10 || p->state == 40); }
     if (m_restartBtn) { m_restartBtn->setEnabled(true); }
 }
 
@@ -351,14 +543,22 @@ void SupervisorMgrLogic::onStop() {
 
 void SupervisorMgrLogic::onRestart() {
     if (m_selected < 0 || m_selected >= (int)m_procs.count()) { return; }
+    /* supervisord 无单进程 restartProcess API；restart() 是全量重启。
+       两阶段：stop → 延时 → start */
     QString name = m_procs.at(m_selected)->name;
-    /* 尝试直接 restartProcess */
-    {
-        QStringList params;
-        params << name << "true";
-        sendRpc("supervisor.restartProcess", params, "restart");
-    }
-    appendLog(qFromUtf8("重启：") + name);
-    QTimer::singleShot(2000, this, SLOT(onRefresh()));
+    QStringList params;
+    params << name << "true";
+    sendRpc("supervisor.stopProcess", params, "restart-stop");
+    appendLog(qFromUtf8("重启第1阶段：") + name);
+    QTimer::singleShot(2000, this, SLOT(onRestartPhase2()));
+    QTimer::singleShot(4500, this, SLOT(onRefresh()));
 }
 
+void SupervisorMgrLogic::onRestartPhase2() {
+    if (m_selected < 0 || m_selected >= (int)m_procs.count()) { return; }
+    QString name = m_procs.at(m_selected)->name;
+    QStringList params;
+    params << name << "true";
+    sendRpc("supervisor.startProcess", params, "restart-start");
+    appendLog(qFromUtf8("重启第2阶段：") + name);
+}

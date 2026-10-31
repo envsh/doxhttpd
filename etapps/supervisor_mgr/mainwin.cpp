@@ -7,6 +7,12 @@
 #include <qcombobox.h>
 #include <qlineedit.h>
 #include <qgroupbox.h>
+#ifdef QT3_BUILD
+#include <qtable.h>
+#include <qheader.h>
+#else
+#include <qtablewidget.h>
+#endif
 
 extern "C"
 QWidget* createSupervisorMgrMainWindow(void* parent) {
@@ -57,13 +63,39 @@ QWidget* createSupervisorMgrMainWindow(void* parent) {
     QHBoxLayout* midRow = new QHBoxLayout(0, 4, 4);
     mainLayout->addLayout(midRow, 1);
 
-    /* 左：进程列表 */
+    /* 左：进程列表（多列 QTable） */
     QVBoxLayout* leftCol = new QVBoxLayout(0, 0, 2);
     midRow->addLayout(leftCol, 2);
     QLabel* procLbl = new QLabel(qFromUtf8("进程列表"), w);
     leftCol->addWidget(procLbl);
-    RmListBox* procList = new RmListBox(w);
-    leftCol->addWidget(procList, 1);
+#ifdef QT3_BUILD
+    QTable* procTable = new QTable(0, 4, w);
+    procTable->horizontalHeader()->setLabel(0, qFromUtf8("进程名"));
+    procTable->horizontalHeader()->setLabel(1, qFromUtf8("状态"));
+    procTable->horizontalHeader()->setLabel(2, qFromUtf8("PID"));
+    procTable->horizontalHeader()->setLabel(3, qFromUtf8("描述"));
+    procTable->setColumnWidth(0, 160);
+    procTable->setColumnWidth(1, 100);
+    procTable->setColumnWidth(2, 70);
+    procTable->setColumnWidth(3, 280);
+    procTable->setColumnReadOnly(0, true);
+    procTable->setColumnReadOnly(1, true);
+    procTable->setColumnReadOnly(2, true);
+    procTable->setColumnReadOnly(3, true);
+    procTable->setSorting(false);
+#else
+    QTableWidget* procTable = new QTableWidget(0, 4, w);
+    QStringList tblLabels;
+    tblLabels << qFromUtf8("进程名") << qFromUtf8("状态") << qFromUtf8("PID") << qFromUtf8("描述");
+    procTable->setHorizontalHeaderLabels(tblLabels);
+    procTable->setColumnWidth(0, 160);
+    procTable->setColumnWidth(1, 100);
+    procTable->setColumnWidth(2, 70);
+    procTable->setColumnWidth(3, 280);
+    procTable->setSortingEnabled(false);
+    procTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+#endif
+    leftCol->addWidget(procTable, 1);
 
     /* 右：操作 + 日志 */
     QVBoxLayout* rightCol = new QVBoxLayout(0, 0, 2);
@@ -89,7 +121,7 @@ QWidget* createSupervisorMgrMainWindow(void* parent) {
     /* 逻辑 */
     SupervisorMgrLogic* logic = new SupervisorMgrLogic(w);
     logic->setWidgets(hostEdit, portEdit, userEdit, passEdit,
-                      procList, statusLabel,
+                      procTable, statusLabel,
                       refreshBtn, startBtn, stopBtn, restartBtn, clearLogBtn,
                       logEdit);
     QObject::connect(refreshBtn, SIGNAL(clicked()), logic, SLOT(onConnect()));
@@ -97,7 +129,12 @@ QWidget* createSupervisorMgrMainWindow(void* parent) {
     QObject::connect(stopBtn, SIGNAL(clicked()), logic, SLOT(onStop()));
     QObject::connect(restartBtn, SIGNAL(clicked()), logic, SLOT(onRestart()));
     QObject::connect(clearLogBtn, SIGNAL(clicked()), logic, SLOT(onClearLog()));
-    QObject::connect(procList, SIGNAL(selected(int)), logic, SLOT(onProcSelected()));
+#ifdef QT3_BUILD
+    QObject::connect(procTable, SIGNAL(selectionChanged()), logic, SLOT(onProcSelected()));
+#else
+    QObject::connect(procTable, SIGNAL(itemSelectionChanged()), logic, SLOT(onProcSelected()));
+    QObject::connect(procTable, SIGNAL(cellClicked(int,int)), logic, SLOT(onProcSelected()));
+#endif
 
     return w;
 }
