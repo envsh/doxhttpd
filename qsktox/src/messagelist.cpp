@@ -234,6 +234,15 @@ static QString mediaDurationLabel(int durationSec) {
     return QString::asprintf("%d:%02d", durationSec / 60, durationSec % 60);
 }
 
+// 统一大小显示（单一口径）：fileSizeStr 优先（ingest 时 fmtMediaSize 已格式化），
+// 回退 mediaBarSizeText 依 fileSizeBytes 现算；两者皆无返回空串（调用方跳过绘制）。
+// 仅本文件使用；mainpage/msgdb_bridge 副本维持现状。
+static QString mediaBarSizeText(qint64 bytes);
+static QString mediaSizeText(const MessageItem& item) {
+    if (!item.fileSizeStr.isEmpty()) { return item.fileSizeStr; }
+    return mediaBarSizeText(item.fileSizeBytes);
+}
+
 static MediaDisplayMetrics measureMedia(const MessageItem& item, qreal availW) {
     MediaDisplayMetrics m;
     m.type = msgMediaTypeOf(item);
@@ -258,6 +267,7 @@ static MediaDisplayMetrics measureMedia(const MessageItem& item, qreal availW) {
         m.bubbleH = h;
         m.label = (m.type == MsgMediaType::Gif)
             ? QString::fromUtf8("GIF 🖼") : QString::fromUtf8("图片 🖼");
+        m.subLabel = mediaSizeText(item);   // 独立信息行；中心仍 W × H
         break;
     }
     case MsgMediaType::Video: {
@@ -276,6 +286,13 @@ static MediaDisplayMetrics measureMedia(const MessageItem& item, qreal availW) {
         m.label = QString::fromUtf8("视频");
         if (item.durationSec > 0) {
             m.subLabel = mediaDurationLabel(item.durationSec);
+            const QString sz = mediaSizeText(item);
+            if (!sz.isEmpty()) {
+                m.subLabel += QString::fromUtf8(" · ") + sz;
+            }
+        } else {
+            // 无时长元数据时仍显示大小
+            m.subLabel = mediaSizeText(item);
         }
         break;
     }
@@ -292,7 +309,7 @@ static MediaDisplayMetrics measureMedia(const MessageItem& item, qreal availW) {
         m.bubbleH = 84.0;
         m.label = item.fileName.isEmpty()
             ? QString::fromUtf8("文件") : item.fileName;
-        m.subLabel = item.fileSizeStr;
+        m.subLabel = mediaSizeText(item);   // File tile 补 fallback（str 空而 bytes 有）
         break;
     }
     default:
@@ -489,12 +506,19 @@ static void paintMediaBody(QPainter* p, const MessageItem& item,
             mediaRect.right() - iconR.right() - 12.0, 22.0),
             Qt::AlignLeft | Qt::AlignVCenter, dur);
         p->setFont(baseFont);
-        if (!item.fileName.isEmpty()) {
+        // 第二行 = 文件名 · 大小（72px tile 内不加行；TextSingleLine 兜底截断）
+        const QString audioSz = mediaSizeText(item);
+        QString audioLine2 = item.fileName;
+        if (!audioSz.isEmpty()) {
+            audioLine2 = audioLine2.isEmpty()
+                ? audioSz : (audioLine2 + QString::fromUtf8(" · ") + audioSz);
+        }
+        if (!audioLine2.isEmpty()) {
             p->setPen(subColor);
             p->drawText(QRectF(iconR.right() + 12.0, mediaRect.y() + 36.0,
                 mediaRect.right() - iconR.right() - 12.0, 16.0),
                 Qt::AlignLeft | Qt::AlignVCenter | Qt::TextSingleLine,
-                item.fileName);
+                audioLine2);
         }
         return;
     }
@@ -587,6 +611,12 @@ static void paintMediaBody(QPainter* p, const MessageItem& item,
         break;
     case MediaDlCompleted:
         barText = QString::fromUtf8("✓ 已下载");
+        {   // 真图（localPath）已加载后大小的唯一可见处
+            const QString sz = mediaSizeText(item);
+            if (!sz.isEmpty()) {
+                barText += QString::fromUtf8(" · ") + sz;
+            }
+        }
         barColor = QColor(0x4C, 0xAF, 0x50);
         break;
     case MediaDlFailed: {
@@ -620,10 +650,7 @@ static void paintMediaBody(QPainter* p, const MessageItem& item,
     }
     default: {
         barText = QString::fromUtf8("⬇ 下载");
-        QString sz = item.fileSizeStr;
-        if (sz.isEmpty()) {
-            sz = mediaBarSizeText(item.fileSizeBytes);
-        }
+        const QString sz = mediaSizeText(item);   // 与 tile/Completed 同口径
         if (!sz.isEmpty()) {
             barText += QLatin1Char(' ') + sz;
         }
