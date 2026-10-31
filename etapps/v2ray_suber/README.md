@@ -24,7 +24,8 @@ https://gh-proxy.com/https://github.com/v2fly/v2ray-core/releases/download/v5.35
 ### 1. 订阅管理
 - 添加订阅（校验 `http://` / `https://` 前缀）
 - 删除订阅（选中条目后删除）
-- 更新订阅（curl 下载 → base64 解码 → 解析节点列表）
+- 更新选中订阅 / **更新全部订阅**（串行队列，逐条下载解析，全程异步不阻塞 UI）
+- **订阅定时自动更新**：默认每 60 分钟自动“更新全部”（`QTimer`，可改 `logic.cpp` 中 `autoUpdateIntervalMin`）
 - 订阅列表持久化存储于 `~/.config/v2ray_suber/subscriptions.txt`
 - 最近一次订阅原始内容保存于 `~/.config/v2ray_suber/sub_last.txt`
 
@@ -34,7 +35,11 @@ https://gh-proxy.com/https://github.com/v2fly/v2ray-core/releases/download/v5.35
   - `vless://`（URI 方式解析 uuid@addr:port + 查询参数 type/path/host/security）
   - `trojan://`（URI 解析 password@addr:port + 查询参数）
   - `ss://`（仅展示原始链接，暂不支持一键生成配置）
-- 节点列表展示：名称 / 协议 / 地址端口
+- 节点列表展示：名称 / 协议 / 地址端口 / 延迟
+- **节点延迟测试**（curl TCP 实连）：
+  - 选中节点后点击“测试延迟（选中）”入队，队列串行执行、全程异步不阻塞 UI
+  - 实现方式：`curl -sSv --connect-timeout 3 --max-time 4 -o /dev/null telnet://addr:port`
+  - 从 curl -v 输出捕获 `Connected to` 即采样耗时并终止进程，列表显示 `[xxms]`；失败显示 `[超时]` 并在日志给出原因（解析失败/连接被拒/超时）
 - 复制节点原始分享链接（QClipboard）
 - 选中节点后一键 START/STOP
 
@@ -42,14 +47,25 @@ https://gh-proxy.com/https://github.com/v2fly/v2ray-core/releases/download/v5.35
 - 状态检测：未安装 / 已安装 / 运行中
 - 下载流程：
   1. 构造 gh-proxy.com 加速 URL（锁定 v5.35.0 包）
-  2. `curl -L -o` 由 QProcess 后台执行，不阻塞 UI
-  3. `unzip -o` 解压至 `~/.config/v2ray_suber/core/`
-  4. `chmod 0755` 设置 `v2ray` 可执行
-  5. 清理临时 zip
+  2. `curl -S -# -L -o` 由 QProcess 后台执行，不阻塞 UI
+  3. 进度显示：解析 `-#` 进度条百分比，日志按 ≥10% 间隔输出“下载进度约 xx%”
+  4. 错误提示：实时捕获 stderr 中 `curl: (...)` 行并落日志；完成后校验 zip 有效性（<1MB 视为不完整）
+  5. `unzip -o` 解压至 `~/.config/v2ray_suber/core/`（**geoip.dat / geosite.dat 随包一同解压，无需单独下载**）
+  6. `chmod 0755` 设置 `v2ray` 可执行，清理临时 zip
 - 启停管理：
   - `启动核心`：选中节点生成 `config_run.json` → `QProcess` 执行 `v2ray run -c config_run.json`
   - `停止核心`：发送 `tryTerminate()`，由 UI 状态栏同步显示
 - 运行日志同步到“日志”标签页
+
+### 3.1 路由（绕过中国大陆）
+- “核心”页复选框 `绕过中国大陆`，启动核心生成配置时生效
+- 生成 `routing.rules`：
+  - `geosite:cn` → direct（直连）
+  - `geoip:cn`、`geoip:private` → direct
+  - 其余 `tcp,udp` → proxy（走当前选中节点）
+- `domainStrategy`：`IPIfNonMatch`
+- 依赖随核心包解压的 `core/geoip.dat`、`core/geosite.dat`：**不单独下载**；若文件缺失则仅在日志警告且不注入路由
+- 多路日志前缀：`[订阅]` `[核心下载]` `[核心]` `[延迟测试]` `[节点]`，均带 `HH:MM:SS` 时间戳；核心运行 stderr 亦捕获（`(err)` 标记）
 
 ### 4. 本地接入
 - SOCKS 监听：`127.0.0.1:10808`（config 默认入口）
@@ -112,15 +128,16 @@ cd etapps/v2ray_suber
 
 | Tab | 控件 | 说明 |
 |---|---|---|
-| 订阅 | `QLineEdit` + 增删更按钮 + `QListBox` | 订阅 URL 管理与刷新 |
-| 节点 | `QListBox` + 复制按钮 | 展示解析节点，支持选中→启动核心 |
-| 核心 | 状态 `QLabel` + 下载/启动/停止按钮 | 核心 v5.35.0 管理入口 |
-| 日志 | `QTextEdit`（只读追加） | 输出订阅、下载、核心运行日志 |
+| 订阅 | `QLineEdit` + 添加/删除/更新选中/更新全部按钮 + `QListBox` | 订阅 URL 管理与刷新（每小时自动更新） |
+| 节点 | `QListBox` + 复制链接/测试延迟按钮 | 展示解析节点与延迟，支持选中→启动核心 |
+| 核心 | 状态 `QLabel` + 下载/启动/停止按钮 + 绕过大陆复选框 | 核心 v5.35.0 管理入口与简易路由 |
+| 日志 | `QTextEdit`（只读追加，带时间戳前缀） | 输出订阅、下载、延迟、核心运行日志 |
 
 ## 技术要点
 
 ### 1. 订阅解析
-- base64 全文可能使用了多行、去空忽略的策略（custom `b64Decode`）
+- base64 复用 `qlcomp` 的 `base64Decode()`（经 `compat34.cpp` 内嵌 `compatcore34.cpp` 链入，qltox 同款，Qt3/Qt4 双端一致；支持 `=` padding、URL-safe `-_`、自动跳过空白/非法字符）
+- 订阅整包 base64 自动识别：内容无 `vmess://`/`vless://`/`trojan://`/`ss://` 时先 base64 解码并校验，解码结果含分享链接则采用，否则原文返回
 - `vmess://` 用 `cJSON`（qlcomp 内置）解析 JSON
 - `vless://`/`trojan://` 用手写 URI 切分（`@`、`:`、`/`、`?`、`#` 定位）
 - 还原 URL 参数到 V2Node 结构体字段（net/path/host/tls）
