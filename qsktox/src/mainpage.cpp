@@ -106,8 +106,6 @@ MainPage::MainPage(QQuickItem* parent)
 
 void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
 {
-    registerMainPage(this);
-
     QString url = launchArgs.value("url").toString();
     if (!url.isEmpty()) {
         qDebug() << "[MainPage] connecting to:" << url;
@@ -839,30 +837,6 @@ void MainPage::showChannelMenu(int row, const QPointF& pos) {
     }
     menu->open();
 }
-void MainPage::handleShareIntent(const QString& action, const QString& mimeType,
-                                   const QString& text, const QString& urisJson)
-{
-    qDebug() << "[MainPage] handleShareIntent:" << action << mimeType;
-
-    if (action == "android.intent.action.SEND") {
-        if (mimeType == "text/plain" && !text.isEmpty()) {
-            showAndroidToast("Shared text: " + text);
-        } else {
-            QJsonDocument doc = QJsonDocument::fromJson(urisJson.toUtf8());
-            QJsonArray arr = doc.array();
-            if (!arr.isEmpty()) {
-                showAndroidToast("Shared file: " + mimeType + "\n" + arr[0].toString());
-            } else {
-                showAndroidToast("Shared: " + mimeType);
-            }
-        }
-    } else if (action == "android.intent.action.SEND_MULTIPLE") {
-        QJsonDocument doc = QJsonDocument::fromJson(urisJson.toUtf8());
-        int count = doc.array().size();
-        showAndroidToast(QString("Shared %1 files").arg(count));
-    }
-}
-
 void MainPage::setKeepScreenOn(bool on) {
     if (m_keepScreenOn == on) return;
     m_keepScreenOn = on;

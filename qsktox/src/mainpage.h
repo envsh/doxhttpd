@@ -15,8 +15,6 @@ public:
     MainPage(QQuickItem* parent = nullptr);
 
     void showToast(const QString& msg, int durationMs = 2000);
-    void handleShareIntent(const QString& action, const QString& mimeType,
-                           const QString& text, const QString& urisJson);
     bool keepScreenOn() const { return m_keepScreenOn; }
     void setKeepScreenOn(bool on);
     ChannelListWidget* channelList() const { return m_channelList; }
@@ -49,7 +47,5 @@ private:
     NavTab m_navTabs[4];
     int m_activeTab = 0;
 };
-
-void registerMainPage(MainPage* page);
 
 #endif

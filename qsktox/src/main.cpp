@@ -30,6 +30,8 @@
 #include "aboutpage.h"
 #include "logpage.h"
 #include "messagepage.h"
+#include "sharepickpage.h"
+#include "shareintentreceiver.h"
 #include "phoneqpage.h"
 #include "keepalive.h"
 #include "networkmonitor.h"
@@ -365,6 +367,10 @@ int main(int argc, char* argv[]) {
         return new PhoneQPage();
     }, {CachePolicy::Transient, LaunchMode::Standard});
 
+    pageManager->registerPage("sharepick", []() -> Page* {
+        return new SharePickPage();
+    }, {CachePolicy::Transient, LaunchMode::Standard});
+
     // ── Window ──
     QskWindow window;
     window.setTitle("qsktox");
@@ -382,6 +388,12 @@ int main(int argc, char* argv[]) {
 
     // ── Start with login page ──  (window 已就绪，控件可正常解析 skin hint)
     pageManager->open("login");
+
+    // 分享扫描 → 联系人选择页（冷启动收口：Java receiver 可能已先落盘）
+    registerShareReceiverHost([&pageManager](const PendingShareMeta& meta) {
+        pageManager->open("sharepick", {{"shareMeta", shareMetaToLaunchArgs(meta)}});
+    });
+    scanPendingShareDir();
 
 #ifdef Q_OS_ANDROID
     window.update();

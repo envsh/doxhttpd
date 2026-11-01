@@ -108,6 +108,9 @@ set(QSKTOX_SOURCES
     src/aboutpage.h
     src/aboutpage.cpp
     src/shareintentreceiver.cpp
+    src/shareintentreceiver.h
+    src/sharepickpage.h
+    src/sharepickpage.cpp
     src/pushhandler.h
     src/pushhandler.cpp
     src/messagestore.h

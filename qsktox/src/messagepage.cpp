@@ -26,6 +26,7 @@
 #include "pagemanager.h"
 #include <QskLinearBox.h>
 #include <QskPushButton.h>
+#include <QTimer>
 #include <QskSizePolicy.h>
 #include <QskTextOptions.h>
 #include <QClipboard>
@@ -91,6 +92,18 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     m_chanIcon = launchArgs.value("chanIcon").toString();
     m_chanLetter = launchArgs.value("chanLetter").toString();
     m_chanColor = launchArgs.value("chanColor").toString();
+
+    // 分享 → 联系人选择 → 本页：pendingSend 非空 = 自动发送一次
+    const QString pendingSend = launchArgs.value("pendingSend").toString();
+    if (!pendingSend.isEmpty()) {
+        QTimer::singleShot(0, this, [this, pendingSend]() {
+            if (!m_input) {
+                return;
+            }
+            m_input->setText(pendingSend);
+            sendMessage();
+        });
+    }
 
     setAutoLayoutChildren(true);
     auto* layout = new QskLinearBox(Qt::Vertical, this);
@@ -859,6 +872,18 @@ void MessagePage::onNewIntent(const QVariantMap& launchArgs)
     m_chanIcon = launchArgs.value("chanIcon").toString();
     m_chanLetter = launchArgs.value("chanLetter").toString();
     m_chanColor = launchArgs.value("chanColor").toString();
+
+    // 分享自动发送（onNewIntent 复用同款口径）
+    const QString pendingSend = launchArgs.value("pendingSend").toString();
+    if (!pendingSend.isEmpty()) {
+        QTimer::singleShot(0, this, [this, pendingSend]() {
+            if (!m_input) {
+                return;
+            }
+            m_input->setText(pendingSend);
+            sendMessage();
+        });
+    }
 
     if (m_titleAvatar) {
         refreshTitleAvatar();
