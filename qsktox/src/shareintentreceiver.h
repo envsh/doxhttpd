@@ -24,6 +24,9 @@ struct PendingShareMeta {
 // 文件名/个数/总大小元信息，不携带内容本身）
 QString shareMetaToMessage(const PendingShareMeta& meta);
 
+// 人类可读字节数（B/KB/MB/GB，与导入确认框、消息里的大小文本同一口径）
+QString formatShareBytes(qint64 n);
+
 // meta → 联系人选择页 launchArgs（kind/sourceApp/displayName/mime/
 // totalBytes/imageCount/messageText）
 QVariantMap shareMetaToLaunchArgs(const PendingShareMeta& meta);

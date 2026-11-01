@@ -32,7 +32,9 @@ void runOnMainThread(std::function<void()> fn)
     }
 }
 
-QString fmtBytes(qint64 n)
+} // namespace
+
+QString formatShareBytes(qint64 n)
 {
     if (n < 1024) {
         return QStringLiteral("%1 B").arg(n);
@@ -45,8 +47,6 @@ QString fmtBytes(qint64 n)
     }
     return QStringLiteral("%1 GB").arg(n / (1024.0 * 1024 * 1024), 0, 'f', 2);
 }
-
-} // namespace
 
 QString shareMetaToMessage(const PendingShareMeta& meta)
 {
@@ -68,7 +68,7 @@ QString shareMetaToMessage(const PendingShareMeta& meta)
         msg += QString::fromUtf8(" 等 %1 个").arg(count);
     }
     if (meta.totalBytes > 0) {
-        msg += QString::fromUtf8(" · %1").arg(fmtBytes(meta.totalBytes));
+        msg += QString::fromUtf8(" · %1").arg(formatShareBytes(meta.totalBytes));
     }
     return msg;
 }
@@ -91,6 +91,7 @@ QVariantMap shareMetaToLaunchArgs(const PendingShareMeta& meta)
     out.insert(QStringLiteral("mime"), meta.mime);
     out.insert(QStringLiteral("totalBytes"), meta.totalBytes);
     out.insert(QStringLiteral("imageCount"), meta.imageCount);
+    out.insert(QStringLiteral("receivedAt"), meta.receivedAt);
     out.insert(QStringLiteral("messageText"), shareMetaToMessage(meta));
     return out;
 }
