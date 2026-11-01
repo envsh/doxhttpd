@@ -124,6 +124,8 @@ set(QSKTOX_SOURCES
     src/toastpopup.cpp
     src/phonemonitor.h
     src/phonemonitor.cpp
+    src/devstatmonitor.h
+    src/devstatmonitor.cpp
     src/mytaphandler.h
     src/mytaphandler.cpp
     src/myscrollarea.h

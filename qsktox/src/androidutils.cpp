@@ -42,6 +42,32 @@ bool androidIsCharging()
         context.object());
 }
 
+QString androidBatteryLevel()
+{
+    QJniObject context = QNativeInterface::QAndroidApplication::context();
+    if (!context.isValid())
+        return QStringLiteral("-1");
+    const int level = QJniObject::callStaticMethod<jint>(
+        "io/fedlet/mobutil/MobUtil",
+        "getBatteryLevel",
+        "(Landroid/content/Context;)I",
+        context.object());
+    return QString::number(level);
+}
+
+QString androidBatteryTemperature()
+{
+    QJniObject context = QNativeInterface::QAndroidApplication::context();
+    if (!context.isValid())
+        return QStringLiteral("-1");
+    const int temp = QJniObject::callStaticMethod<jint>(
+        "io/fedlet/mobutil/MobUtil",
+        "getBatteryTemperature",
+        "(Landroid/content/Context;)I",
+        context.object());
+    return QString::number(temp);
+}
+
 #else
 #include <cstdio>
 
@@ -251,5 +277,15 @@ bool androidIsRooted()
 bool androidIsCharging()
 {
     return false;   // 非 Android 不走 Android 电池服务
+}
+
+QString androidBatteryLevel()
+{
+    return QString();   // 非 Android 无电池概念
+}
+
+QString androidBatteryTemperature()
+{
+    return QString();   // 非 Android 无电池概念
 }
 #endif

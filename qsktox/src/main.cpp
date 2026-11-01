@@ -35,6 +35,7 @@
 #include "networkmonitor.h"
 #include "pushhandler.h"
 #include "phonemonitor.h"
+#include "devstatmonitor.h"
 #include "androidutils.h"
 #include "mozpushsender.h"
 #include "eventpoller.h"
@@ -427,6 +428,7 @@ int main(int argc, char* argv[]) {
     NetworkMonitor::start();
     PushHandler::start();
     PhoneMonitor::start();
+    DevStatMonitor::start();
 
     // distributor 选择对话框（仅启动时、多于1个分发器时弹出）
     QObject::connect(PushHandler::instance(), &PushHandler::distributorsFound,

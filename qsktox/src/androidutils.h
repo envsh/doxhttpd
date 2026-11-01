@@ -17,5 +17,9 @@ QString androidCacheDir();
 bool androidIsRooted();
 // 充电状态（BatteryManager.isCharging）；非 Android 恒 false
 bool androidIsCharging();
+// 电量百分数字符串（"0"-"100" / "-1"=未知）；非 Android 恒 ""
+QString androidBatteryLevel();
+// 电池温度字符串（0.1℃ 整数，"-1"=未知）；非 Android 恒 ""
+QString androidBatteryTemperature();
 
 #endif
