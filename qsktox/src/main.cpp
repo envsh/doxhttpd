@@ -390,8 +390,33 @@ int main(int argc, char* argv[]) {
     pageManager->open("login");
 
     // 分享扫描 → 联系人选择页（冷启动收口：Java receiver 可能已先落盘）
-    registerShareReceiverHost([&pageManager](const PendingShareMeta& meta) {
-        pageManager->open("sharepick", {{"shareMeta", shareMetaToLaunchArgs(meta)}});
+    // - 栈顶是 login（未登录）→ deferShare() 暂存，待 MainPage 建好 flush
+    //   （replace() 只换栈顶，直接 open 会被随后的 replace(main) 吞掉）
+    // - PageManager busy（页面切换动画 ≤250ms）→ open 被吞（pagemanager.cpp
+    //   的 m_busy 分支）→ 300ms 退避重试 2 次
+    registerShareReceiverHost([&pageManager](const QVariantMap& args) {
+        if (pageManager->currentPageId() == QLatin1String("login")) {
+            deferShare(args);
+            return;
+        }
+        auto openOrRetry = [&pageManager, args]() {
+            if (!pageManager->isBusy()) {
+                pageManager->open("sharepick", args);
+                return;
+            }
+            QTimer::singleShot(300, [&pageManager, args]() {
+                if (!pageManager->isBusy()) {
+                    pageManager->open("sharepick", args);
+                    return;
+                }
+                QTimer::singleShot(300, [&pageManager, args]() {
+                    if (!pageManager->isBusy()) {
+                        pageManager->open("sharepick", args);
+                    }
+                });
+            });
+        };
+        openOrRetry();
     });
     scanPendingShareDir();
 

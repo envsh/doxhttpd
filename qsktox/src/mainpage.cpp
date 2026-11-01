@@ -1,5 +1,6 @@
 #include "mainpage.h"
 #include "pagemanager.h"
+#include "shareintentreceiver.h"
 #include "menuoverlay.h"
 #include "channellist.h"
 #include "messagepage.h"
@@ -665,6 +666,10 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     }
 
     setActiveTab(0);
+
+    // 分享延迟呈现：冷启动未登录时 deferShare() 已把 args 存 QSettings；
+    // singleShot(0) 等本 replace(main) 返回、m_busy 复位后再弹 sharepick
+    QTimer::singleShot(0, flushDeferredShare);
 
 #ifdef Q_OS_ANDROID
     // auto* safeSpacer = new QskLinearBox(Qt::Horizontal, layout);

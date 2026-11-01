@@ -10,13 +10,14 @@
 #include <QJsonParseError>
 #include <QJsonValue>
 #include <QMetaObject>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QThread>
 #include <functional>
 
 namespace {
 
-std::function<void(const PendingShareMeta&)> s_host;
+std::function<void(const QVariantMap& args)> s_host;
 
 void runOnMainThread(std::function<void()> fn)
 {
@@ -94,9 +95,28 @@ QVariantMap shareMetaToLaunchArgs(const PendingShareMeta& meta)
     return out;
 }
 
-void registerShareReceiverHost(std::function<void(const PendingShareMeta&)> host)
+void registerShareReceiverHost(std::function<void(const QVariantMap& args)> host)
 {
     s_host = std::move(host);
+}
+
+void deferShare(const QVariantMap& args)
+{
+    QSettings().setValue(QStringLiteral("share_deferred"), args);
+    qDebug() << "[shareintentreceiver] deferred until main page is up";
+}
+
+void flushDeferredShare()
+{
+    const QVariantMap args =
+        QSettings().value(QStringLiteral("share_deferred")).toMap();
+    if (args.isEmpty()) {
+        return;
+    }
+    QSettings().remove(QStringLiteral("share_deferred"));
+    if (s_host) {
+        s_host(args);
+    }
 }
 
 void scanPendingShareDir()
@@ -182,7 +202,7 @@ void scanPendingShareDir()
     PendingShareMeta ready = std::move(meta);
     runOnMainThread([ready]() {
         if (s_host) {
-            s_host(ready);
+            s_host(shareMetaToLaunchArgs(ready));
         }
     });
 }

@@ -28,8 +28,16 @@ QString shareMetaToMessage(const PendingShareMeta& meta);
 // totalBytes/imageCount/messageText）
 QVariantMap shareMetaToLaunchArgs(const PendingShareMeta& meta);
 
-// 注册"打开联系人选择页"回调（分享扫描命中后在主线程调用）
-void registerShareReceiverHost(std::function<void(const PendingShareMeta&)> host);
+// 注册"打开联系人选择页"回调（args = shareMetaToLaunchArgs 产出；
+// scan 命中与 flushDeferredShare 两条路径共用）
+void registerShareReceiverHost(std::function<void(const QVariantMap& args)> host);
+
+// 冷启动 defer：当前栈顶是 login（未完成登录）时由 main.cpp host 调用，
+// 暂存到 QSettings("share_deferred")；MainPage::onCreate 收尾调
+// flushDeferredShare() 在 login→main replace 完成后补弹（规避
+// pagemanager.cpp replace() 只替换栈顶、把 login 之上的 sharepick 吞掉）
+void deferShare(const QVariantMap& args);
+void flushDeferredShare();
 
 // 扫描 pending_shares 的 pending_meta.json（冷启动 main.cpp 直调、热启动
 // ShareActivity onNewIntent → notifyPendingShare 共用收口）：命中 → 解析 →

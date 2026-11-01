@@ -17,9 +17,26 @@ SharePickPage::SharePickPage(QQuickItem* parent)
 void SharePickPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
 {
     setAutoLayoutChildren(true);
-    auto* layout = new QskLinearBox(Qt::Vertical, this);
-    layout->setPanel(true);
+    rebuildFrom(launchArgs);
+}
 
+void SharePickPage::onNewIntent(const QVariantMap& launchArgs)
+{
+    // 二连分享：Transient 缓存命中走 onNewIntent（pagemanager.cpp 缓存分支），
+    // 不清空重建就会显示上一份分享的 meta
+    rebuildFrom(launchArgs);
+}
+
+void SharePickPage::rebuildFrom(const QVariantMap& launchArgs)
+{
+    if (m_layout) {
+        m_layout->deleteLater();
+        m_layout = nullptr;
+    }
+    m_layout = new QskLinearBox(Qt::Vertical, this);
+    m_layout->setPanel(true);
+
+    auto* layout = m_layout;
     layout->addStretch(1);
 
     const QVariantMap meta = launchArgs.value("shareMeta").toMap();

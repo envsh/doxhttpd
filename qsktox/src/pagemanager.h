@@ -61,6 +61,7 @@ public:
     int     depth() const { return m_history.size(); }
     Page*   currentPage() const;
     QString currentPageId() const;
+    bool    isBusy() const { return m_busy; }
     // 查找页面（活跃+缓存，不包括已销毁的）
     Page*   findPage(const QString& id) const;
 
