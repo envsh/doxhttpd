@@ -12,6 +12,8 @@
 #include "androidutils.h"
 #include "menuoverlay.h"
 #include "mozpushsender.h"
+#include "pickmedianav.h"
+#include "toastpopup.h"
 #include "msgdb_bridge.h"
 #include "virtualcontacts.h"
 #include "virtualbothost.h"
@@ -104,6 +106,20 @@ void MessagePage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
             sendMessage();
         });
     }
+
+    // 📎 附件 → PickMediaActivity(SAF) → notifyFilePicked：元信息文案填入
+    // 输入框（可再补正文），发送仍走 sendMessage() 普通文本管线
+    registerPickNotifyHost([this](const PendingPickMeta& meta) {
+        if (!m_input) {
+            return;
+        }
+        const QString metaText = pickMetaToMessage(meta);
+        if (metaText.isEmpty()) {
+            return;
+        }
+        const QString cur = m_input->text().trimmed();
+        m_input->setText(cur.isEmpty() ? metaText : cur + "\n" + metaText);
+    });
 
     setAutoLayoutChildren(true);
     auto* layout = new QskLinearBox(Qt::Vertical, this);
@@ -354,11 +370,10 @@ auto* inputBar = new QskLinearBox(Qt::Horizontal, layout);
     attachBtn->setBoxShapeHint(QskPushButton::Panel,
         QskBoxShapeMetrics(8, Qt::AbsoluteSize));
     connect(attachBtn, &QskAbstractButton::clicked, this, [this, attachBtn]() {
-        // 附件菜单（矩阵 CS msgtype 全集，网搜核对 spec
-        // instant_messaging.md + matrix-js-sdk MsgType）：
-        //   🖼 m.image 📹 m.video 🎵 m.audio 📄 m.file 📍 m.location
-        // 全部占位空响应：triggered 只收尾 close（与长按菜单"本地删除/
-        // 撤回消息"空操作同款"不取 index、不进分支"口径；逐项实装另批）
+        // 附件菜单（矩阵 CS msgtype 全集 → 菜单文案与 msgtype 同序）：
+        // i0-i3 附件元信息选择（SAF 只取 名字/类型/大小，零内容拷贝；
+        // 元信息文案 share 外发同款，发送走普通文本管线 —— "发送时
+        // 像接收的 share 一样只发送元信息"）；i4 📍位置仍占位
         for (auto* old : findChildren<QskMenu*>()) {
             old->deleteLater();
         }
@@ -375,10 +390,23 @@ auto* inputBar = new QskLinearBox(Qt::Horizontal, layout);
         menu->setOrigin(attachBtn->mapToItem(this,
             QPointF(0.0, attachBtn->height())));
         connect(menu, &QskMenu::triggered, this, [this](int index) {
-            Q_UNUSED(index);   // 响应为空（占位）
+            (void)index;   // 桌面分支不读 index；Android 分支用于 i0-i3 分流
             if (auto* m = qobject_cast<QskMenu*>(QObject::sender())) {
                 m->close();
             }
+#if defined(Q_OS_ANDROID)
+            if (index < 0 || index > 3) {
+                return;    // 📍位置继续占位
+            }
+            // kind 与 PickMediaActivity.java mime 映射同表
+            static const char* const kPickKinds[] = {
+                "image", "video", "audio", "file"
+            };
+            startFilePick(QString::fromLatin1(kPickKinds[index]));
+#else
+            ToastPopup::show(this,
+                QString::fromUtf8("📎 附件选择未实装（桌面端待实装）"));
+#endif
         });
         {
             auto* overlay = new MenuOverlay(menu);

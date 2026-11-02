@@ -95,6 +95,13 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name="io.fedlet.mobutil.PickMediaActivity"
+            android:exported="false"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.qtprovider"

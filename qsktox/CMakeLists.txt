@@ -109,6 +109,8 @@ set(QSKTOX_SOURCES
     src/aboutpage.cpp
     src/shareintentreceiver.cpp
     src/shareintentreceiver.h
+    src/pickmedianav.h
+    src/pickmedianav.cpp
     src/sharepickpage.h
     src/sharepickpage.cpp
     src/pushhandler.h
