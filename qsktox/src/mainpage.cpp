@@ -14,6 +14,7 @@
 #include <QskLinearBox.h>
 #include <QskTextLabel.h>
 #include <QskPushButton.h>
+#include <QskTextField.h>
 #include <QskMenu.h>
 #include <QskBoxShapeMetrics.h>
 #include <QskLabelData.h>
@@ -202,6 +203,33 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     // ── Phone/Sms Status Bar ──
     new PhoneSmsStatusBar(layout);
 
+    // ── 列表过滤行（参考 qltox ContactListWidget 搜索行：
+    // countLabel + 搜索框 + 类型按钮）──
+    {
+        auto* filterRow = new QskLinearBox(Qt::Horizontal, layout);
+        filterRow->setSpacing(8);
+
+        m_listCountLabel = new QskTextLabel("0", filterRow);
+        m_listCountLabel->setPreferredWidth(44);
+
+        m_listSearchField = new QskTextField(filterRow);
+        m_listSearchField->setPlaceholderText(QString::fromUtf8("搜索联系人"));
+        m_listSearchField->setSizePolicy(QskSizePolicy::Expanding,
+                                         QskSizePolicy::Preferred);
+        m_listSearchField->setPreferredHeight(40);
+        connect(m_listSearchField, &QskTextInput::textChanged,
+            this, [this]() {
+                if (m_channelList) {
+                    m_channelList->setSearchText(m_listSearchField->text());
+                }
+            });
+
+        auto* typeBtn = new QskPushButton(QString::fromUtf8("类型"), filterRow);
+        typeBtn->setPreferredSize(56, 40);
+        connect(typeBtn, &QskPushButton::clicked, this,
+            [this, typeBtn]() { showListTypeFilterMenu(typeBtn); });
+    }
+
     // ── 虚拟频道播种（bot 类需先落库：messages.chanid 外键引用 channels）──
     {
         const QVector<VirtualContact>& vcs = virtualContacts();
@@ -225,6 +253,13 @@ void MainPage::onCreate(const QVariantMap& launchArgs, const QVariantMap&)
     // ── ChannelList (频道列表) ──
     m_channelList = new ChannelListWidget(layout);
     m_channelList->setSizePolicy(QskSizePolicy::Expanding, QskSizePolicy::Expanding);
+    // 计数先连再 populate：populateData 内 applyFilter 会 emit
+    connect(m_channelList, &ChannelListWidget::listCountChanged,
+        this, [this](int visibleCount) {
+            if (m_listCountLabel) {
+                m_listCountLabel->setText(QString::number(visibleCount));
+            }
+        });
     m_channelList->populateData();
 
     connect(m_channelList, &ChannelListWidget::rowClicked,
@@ -698,6 +733,51 @@ void MainPage::onResume()
     if (m_channelList) {
         m_channelList->reloadUnreadFromDb();
     }
+}
+
+void MainPage::showListTypeFilterMenu(QskPushButton* anchor)
+{
+    if (!m_channelList) {
+        return;
+    }
+    for (auto* old : findChildren<QskMenu*>()) {
+        old->deleteLater();
+    }
+    for (auto* old : findChildren<MenuOverlay*>()) {
+        old->deleteLater();
+    }
+
+    QVector<QPair<QString, QString>> types;
+    m_channelList->distinctProtocols(types);
+
+    auto* menu = new QskMenu(this);
+    menu->setModal(true);
+    // “全部” + 各类型（qltox onTypeFilterMenuClicked 口径，选中加 ✓ 前缀）
+    const QString cur = m_channelList->filterType();
+    menu->addOption(QskLabelData(cur.isEmpty()
+        ? QString::fromUtf8("✓ 全部") : QString::fromUtf8("  全部")));
+    for (int i = 0; i < types.size(); ++i) {
+        menu->addOption(QskLabelData(
+            (types[i].first == cur ? QString::fromUtf8("✓ ")
+                                   : QString::fromUtf8("  "))
+            + types[i].second));
+    }
+    {
+        auto* overlay = new MenuOverlay(menu);
+        connect(menu, &QObject::destroyed, overlay, &QObject::deleteLater);
+    }
+    connect(menu, &QskMenu::triggered, this, [this, types](int index) {
+        if (m_channelList) {
+            m_channelList->setTypeFilter(
+                index <= 0 ? QString() : types[index - 1].first);
+        }
+        if (auto* m = qobject_cast<QskMenu*>(sender())) {
+            m->close();
+        }
+    });
+    QPointF btnPos = anchor->mapToItem(this, QPointF(0, 0));
+    menu->setOrigin(QPointF(btnPos.x(), btnPos.y() + anchor->height()));
+    menu->open();
 }
 
 void MainPage::setActiveTab(int index)

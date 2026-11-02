@@ -5,6 +5,7 @@
 
 class QskTextLabel;
 class QskPushButton;
+class QskTextField;
 class QTimer;
 class ChannelListWidget;
 
@@ -34,10 +35,13 @@ private:
     void showContactAvatarMenu(int row, const QPointF& pos);
     void openChatForRow(int row);
     void setActiveTab(int index);
+    void showListTypeFilterMenu(QskPushButton* anchor);
 
     QskTextLabel* m_toastLabel = nullptr;
     QTimer* m_toastTimer = nullptr;
     ChannelListWidget* m_channelList = nullptr;
+    QskTextLabel* m_listCountLabel = nullptr;
+    QskTextField* m_listSearchField = nullptr;
     bool m_keepScreenOn = true;
 
     struct NavTab {

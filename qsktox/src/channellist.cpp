@@ -17,6 +17,7 @@
 #include "avatar_manager.h"
 #include <QDateTime>
 #include <algorithm>
+#include <pureconsts.hpp>
 
 static constexpr qreal ROW_HEIGHT = 68;
 static constexpr int MAX_CHANNELS = 200;
@@ -387,13 +388,12 @@ ChannelListWidget::ChannelListWidget(QQuickItem* parent)
     // chan_icon 下载完成 → 刷新可见行（照 messagelist.cpp 的 user icon 范式）
     connect(AvatarHost::instance(), &AvatarHost::avatarUpdated, this, [this]() {
         for (auto it = m_visibleRows.begin(); it != m_visibleRows.end(); ++it) {
-            const int idx = it.key();
-            if (idx < 0 || idx >= m_items.size()
-                || m_items[idx].chanIcon.isEmpty()) {
+            const int src = toSourceRow(it.key());
+            if (src < 0 || m_items[src].chanIcon.isEmpty()) {
                 continue;
             }
             it.value()->refreshAvatar();
-            queueVisibleRefresh(idx);
+            queueVisibleRefresh(src);
         }
     });
 
@@ -415,8 +415,9 @@ ChannelListWidget::ChannelListWidget(QQuickItem* parent)
     connect(tapHandler, &QQuickTapHandler::singleTapped, this,
         [this](QEventPoint point, Qt::MouseButton) {
             QPointF pos = point.position();
-            int row = qFloor(pos.y() / ROW_HEIGHT);
-            if (row >= 0 && row < m_items.size()) {
+            // 命中按显示行号计算，转源索引后再访问数据（过滤态安全）
+            int row = toSourceRow(qFloor(pos.y() / ROW_HEIGHT));
+            if (row >= 0) {
                 // 头像单击：弹头像菜单（与联系人行单击区分）
                 if (isAvatarHit(row, pos)) {
                     Q_EMIT avatarClicked(row, this->mapToScene(pos));
@@ -429,8 +430,8 @@ ChannelListWidget::ChannelListWidget(QQuickItem* parent)
         [this]() {
             QPointF pos = static_cast<MyScrollArea*>(this)->lastTouchScenePos();
             QPointF localPos = m_contentView->mapFromScene(pos);
-            int row = qFloor(localPos.y() / ROW_HEIGHT);
-            if (row >= 0 && row < m_items.size()) {
+            int row = toSourceRow(qFloor(localPos.y() / ROW_HEIGHT));
+            if (row >= 0) {
                 // 头像长按：弹头像菜单（与联系人行长按区分）
                 if (isAvatarHit(row, localPos)) {
                     Q_EMIT avatarLongPressed(row, pos);
@@ -491,7 +492,7 @@ void ChannelListWidget::queueVisibleRefresh(int idx)
     if (idx < 0 || idx >= m_items.size()) {
         return;
     }
-    if (!m_visibleRows.contains(idx)) {
+    if (displayRowOf(idx) < 0) {
         return;
     }
     m_coalescedRefresh.insert(idx);
@@ -522,7 +523,7 @@ void ChannelListWidget::flushPendingVisibleRefresh()
         if (idx < 0 || idx >= m_items.size()) {
             continue;
         }
-        auto it = m_visibleRows.find(idx);
+        auto it = m_visibleRows.find(displayRowOf(idx));
         if (it == m_visibleRows.end() || !it.value()) {
             continue;
         }
@@ -550,7 +551,7 @@ void ChannelListWidget::flushCoalescedRefresh()
         if (idx < 0 || idx >= m_items.size()) {
             continue;
         }
-        auto it = m_visibleRows.find(idx);
+        auto it = m_visibleRows.find(displayRowOf(idx));
         if (it == m_visibleRows.end() || !it.value()) {
             continue;
         }
@@ -621,7 +622,7 @@ void ChannelListWidget::populateData()
 
     qreal viewW = viewContentsRect().width();
     if (viewW <= 0) viewW = width();
-    m_contentView->setSize(QSizeF(viewW, m_items.size() * ROW_HEIGHT));
+    m_contentView->setSize(QSizeF(viewW, displayCount() * ROW_HEIGHT));
     update();
     updateVisibleRows();
     startFadeIn();
@@ -777,12 +778,12 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
         if (viewW <= 0) viewW = width();
         sortChannels();
         rebuildIndexes();
-        m_contentView->setSize(QSizeF(viewW, m_items.size() * ROW_HEIGHT));
+        m_contentView->setSize(QSizeF(viewW, displayCount() * ROW_HEIGHT));
         update();
         updateVisibleRows();
         // 排序位移后按身份重取新下标，排队刷的是“新排序后的行”
         const int newIdx = indexOfChannel(item.protocol, chatId, item.chanId);
-        if (newIdx >= 0 && m_visibleRows.contains(newIdx)) {
+        if (newIdx >= 0 && displayRowOf(newIdx) >= 0) {
             queueVisibleRefresh(newIdx);
         }
         return;
@@ -825,12 +826,12 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
         if (viewW <= 0) viewW = width();
         sortChannels();
         rebuildIndexes();
-        m_contentView->setSize(QSizeF(viewW, m_items.size() * ROW_HEIGHT));
+        m_contentView->setSize(QSizeF(viewW, displayCount() * ROW_HEIGHT));
         update();
         updateVisibleRows();
         // 排序位移后按身份重取新下标，排队刷的是“新排序后的行”
         const int newIdx = indexOfChannel(item.protocol, chatId, item.chanId);
-        if (newIdx >= 0 && m_visibleRows.contains(newIdx)) {
+        if (newIdx >= 0 && displayRowOf(newIdx) >= 0) {
             queueVisibleRefresh(newIdx);
         }
         return;
@@ -864,7 +865,7 @@ void ChannelListWidget::insertOrUpdateChannel(const QString& chatId, const Chann
 
     qreal viewW = viewContentsRect().width();
     if (viewW <= 0) viewW = width();
-    m_contentView->setSize(QSizeF(viewW, m_items.size() * ROW_HEIGHT));
+    m_contentView->setSize(QSizeF(viewW, displayCount() * ROW_HEIGHT));
     update();
     updateVisibleRows();
 }
@@ -897,6 +898,9 @@ void ChannelListWidget::rebuildIndexes()
         m_chanKeyIndex[m_items[j].protocol + QLatin1Char('_') + m_items[j].chatId] = j;
         m_chatIdRows[m_items[j].chatId].append(j);
     }
+
+    // 索引重排后过滤映射同步重建（无过滤时为空 = 恒等映射）
+    applyFilter();
 }
 
 void ChannelListWidget::markChannelActive(const QString& protocol,
@@ -918,7 +922,7 @@ void ChannelListWidget::markChannelActive(const QString& protocol,
         viewW = width();
     }
     if (m_contentView) {
-        m_contentView->setSize(QSizeF(viewW, m_items.size() * ROW_HEIGHT));
+        m_contentView->setSize(QSizeF(viewW, displayCount() * ROW_HEIGHT));
     }
     update();
     updateVisibleRows();
@@ -1084,20 +1088,247 @@ QString ChannelListWidget::protocolForRow(int row) const
     return {};
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// 列表过滤（参考 qltox ContactListWidget：搜索框 + 类型菜单）
+// ═══════════════════════════════════════════════════════════════════
+
+// 类型 → 中文标签（qltox combinesearchwindow.cpp:36 contactTypeLabel 对位；
+// qsktox 无翻译器层，硬编码中文，未收录类型回落原始 protocol 串）
+static QString channelTypeLabel(const QString& type)
+{
+    if (type == QLatin1String("friend")) {
+        return QString::fromUtf8("好友");
+    }
+    if (type == QLatin1String("group")) {
+        return QString::fromUtf8("群组");
+    }
+    if (type == QLatin1String("conference")) {
+        return QString::fromUtf8("语音会议");
+    }
+    if (type == QLatin1String(kUnknownType)) {
+        return QString::fromUtf8("未知");
+    }
+    if (type == QLatin1String(kSyseventType)) {
+        return QString::fromUtf8("系统事件");
+    }
+    if (type == QLatin1String(kTopicType)) {
+        return QString::fromUtf8("主题");
+    }
+    if (type == QLatin1String(kFilesyncType)) {
+        return QString::fromUtf8("文件同步");
+    }
+    if (type == QLatin1String(kClipboardType)) {
+        return QString::fromUtf8("剪贴板");
+    }
+    if (type == QLatin1String(kGomuksRoomType)) {
+        return QString::fromUtf8("Gomuks");
+    }
+    if (type == QLatin1String(kMtxliteRoomType)) {
+        return QString::fromUtf8("Matrix");
+    }
+    if (type == QLatin1String(kImapMailType)) {
+        return QString::fromUtf8("邮件");
+    }
+    if (type == QLatin1String(kBookmarkType)) {
+        return QString::fromUtf8(kBookmarkName);
+    }
+    if (type == QLatin1String(kAichatType)) {
+        return QString::fromUtf8(kAichatName);
+    }
+    if (type == QLatin1String(kWebsearchType)) {
+        return QString::fromUtf8(kWebsearchName);
+    }
+    if (type == QLatin1String(kTtsbotType)) {
+        return QString::fromUtf8(kTtsbotName);
+    }
+    if (type == QLatin1String(kPastebinType)) {
+        return QString::fromUtf8(kPastebinName);
+    }
+    if (type == QLatin1String(kTranslateType)) {
+        return QString::fromUtf8(kTranslateName);
+    }
+    if (type == QLatin1String(kMobPushType)) {
+        return QString::fromUtf8(kMobPushName);
+    }
+    if (type == QLatin1String(kSnapType)) {
+        return QString::fromUtf8(kSnapName);
+    }
+    if (type == QLatin1String(kUnktoxFriendType)) {
+        return QString::fromUtf8("未知协议·好友");
+    }
+    if (type == QLatin1String(kUnktoxGroupType)) {
+        return QString::fromUtf8("未知协议·群组");
+    }
+    if (type == QLatin1String(kUnktoxConferenceType)) {
+        return QString::fromUtf8("未知协议·会议");
+    }
+    if (type == QLatin1String(kMisskeyType)) {
+        return QString::fromUtf8("Misskey");
+    }
+    if (type == QLatin1String(kToutiaoHotnewsType)) {
+        return QString::fromUtf8("头条热闻");
+    }
+    if (type == QLatin1String(kZhihuNotifyType)) {
+        return QString::fromUtf8("知乎通知");
+    }
+    if (type == QLatin1String(kZhihuHotnewsType)) {
+        return QString::fromUtf8("知乎热闻");
+    }
+    if (type == QLatin1String(kBiliNotifyType)) {
+        return QString::fromUtf8("哔哩动态");
+    }
+    if (type == QLatin1String(kWeiboHotnewsType)) {
+        return QString::fromUtf8("微博热闻");
+    }
+    if (type == QLatin1String(kXiaohongshuNotifyType)) {
+        return QString::fromUtf8("小红书通知");
+    }
+    if (type == QLatin1String(kXiaohongshuRecommendType)) {
+        return QString::fromUtf8("小红书推荐");
+    }
+    if (type == QLatin1String(kXiaohongshuHotnewsType)) {
+        return QString::fromUtf8("小红书热闻");
+    }
+    if (type == QLatin1String(kXiaohongshuNoteType)) {
+        return QString::fromUtf8("小红书笔记");
+    }
+    if (type == QLatin1String(kCoolapkTimelineType)) {
+        return QString::fromUtf8("酷安时线");
+    }
+    if (type == QLatin1String(kHongguoHotlistType)) {
+        return QString::fromUtf8("红果热榜");
+    }
+    if (type == QLatin1String(kSysinfoBoardType)) {
+        return QString::fromUtf8(kSysinfoBoardName);
+    }
+    return type;
+}
+
+bool ChannelListWidget::matchesFilter(const ChannelItem& item) const
+{
+    if (!m_filterType.isEmpty() && item.protocol != m_filterType) {
+        return false;
+    }
+    if (m_searchText.isEmpty()) {
+        return true;
+    }
+    return item.title.toUpper().contains(m_searchText.toUpper());
+}
+
+int ChannelListWidget::displayCount() const
+{
+    return isFilterActive() ? m_filterMap.size() : m_items.size();
+}
+
+int ChannelListWidget::toSourceRow(int displayRow) const
+{
+    if (displayRow < 0) {
+        return -1;
+    }
+    if (isFilterActive()) {
+        return (displayRow < m_filterMap.size()) ? m_filterMap.at(displayRow) : -1;
+    }
+    return (displayRow < m_items.size()) ? displayRow : -1;
+}
+
+int ChannelListWidget::displayRowOf(int srcRow) const
+{
+    if (srcRow < 0 || srcRow >= m_items.size()) {
+        return -1;
+    }
+    if (isFilterActive()) {
+        return m_filterMap.indexOf(srcRow);
+    }
+    return srcRow;
+}
+
+void ChannelListWidget::applyFilter()
+{
+    if (isFilterActive()) {
+        m_filterMap.clear();
+        m_filterMap.reserve(m_items.size());
+        for (int i = 0; i < m_items.size(); ++i) {
+            if (matchesFilter(m_items[i])) {
+                m_filterMap.append(i);
+            }
+        }
+    } else {
+        m_filterMap.clear();
+    }
+    Q_EMIT listCountChanged(displayCount());
+}
+
+void ChannelListWidget::setSearchText(const QString& text)
+{
+    if (text == m_searchText) {
+        return;
+    }
+    m_searchText = text;
+    applyFilter();
+    setScrollPos(QPointF(0, 0));
+    update();
+    updateVisibleRows();
+}
+
+void ChannelListWidget::setTypeFilter(const QString& type)
+{
+    if (type == m_filterType) {
+        return;
+    }
+    m_filterType = type;
+    applyFilter();
+    setScrollPos(QPointF(0, 0));
+    update();
+    updateVisibleRows();
+}
+
+void ChannelListWidget::distinctProtocols(
+    QVector<QPair<QString, QString>>& types) const
+{
+    types.clear();
+    QVector<QString> seen;
+    for (int i = 0; i < m_items.size(); ++i) {
+        const QString& pt = m_items[i].protocol;
+        if (pt.isEmpty()) {
+            continue;
+        }
+        if (!seen.contains(pt)) {
+            seen.append(pt);
+        }
+    }
+    // 按 qltox contactlist.cpp:1074 口径：按中文标签（emoji 前缀）排序展示
+    std::sort(seen.begin(), seen.end(),
+        [](const QString& a, const QString& b) {
+            return channelTypeLabel(a) < channelTypeLabel(b);
+        });
+    for (int j = 0; j < seen.size(); ++j) {
+        types.append(qMakePair(
+            seen[j],
+            QString::fromUtf8(typeToEmojiUtf8(seen[j]))
+                + QString::fromUtf8(" ") + channelTypeLabel(seen[j])));
+    }
+}
+
 void ChannelListWidget::updateVisibleRows()
 {
-    if (!m_contentView || m_items.isEmpty()) {
+    if (!m_contentView) {
         return;
     }
 
     const qreal scrollY = scrollPos().y();
     const qreal viewH = viewContentsRect().height();
 
-    int rowMin = qMax(0, qFloor(scrollY / ROW_HEIGHT) - 2);
-    int rowMax = qMin(m_items.size() - 1,
-        qCeil((scrollY + viewH) / ROW_HEIGHT) + 2);
+    // 过滤态：可视范围按 显示行号 ∈ [0, displayCount) 计算
+    const int total = displayCount();
+    int rowMin = 0;
+    int rowMax = -1;
+    if (total > 0) {
+        rowMin = qMax(0, qFloor(scrollY / ROW_HEIGHT) - 2);
+        rowMax = qMin(total - 1,
+            qCeil((scrollY + viewH) / ROW_HEIGHT) + 2);
+    }
 
-    // 回收超出范围的行
+    // 回收超出范围/不再命中的行（键 = 显示行号）
     auto it = m_visibleRows.begin();
     while (it != m_visibleRows.end()) {
         if (it.key() < rowMin || it.key() > rowMax) {
@@ -1111,14 +1342,19 @@ void ChannelListWidget::updateVisibleRows()
     }
 
     // 创建新进入可见范围的行；已存在的行同步刷新，避免 prepend/removeAt
-    // 导致 m_items 下标位移后，可见行显示的数据与下标错位
+    // 导致 m_items 下标位移后，可见行显示的数据与下标错位。
+    // 显示行号 i → 源数据下标 src（过滤映射，无过滤时 i 即 src）
     for (int i = rowMin; i <= rowMax; ++i) {
+        const int src = toSourceRow(i);
+        if (src < 0) {
+            continue;
+        }
         if (!m_visibleRows.contains(i)) {
             auto* row = new ChannelRowItem(m_contentView);
             row->setX(0);
             row->setY(i * ROW_HEIGHT);
             row->setWidth(m_contentView->width());
-            row->setChannelData(m_items[i]);
+            row->setChannelData(m_items[src]);
             m_visibleRows[i] = row;
         } else {
             ChannelRowItem* row = m_visibleRows[i];
@@ -1129,10 +1365,10 @@ void ChannelListWidget::updateVisibleRows()
                 continue;
             }
             // 已在合并队列中的行交给 flushCoalescedRefresh 统一刷新
-            if (m_coalescedRefresh.contains(i) || m_pendingVisibleRefresh.contains(i)) {
+            if (m_coalescedRefresh.contains(src) || m_pendingVisibleRefresh.contains(src)) {
                 continue;
             }
-            row->setChannelDataNoUpdate(m_items[i]);
+            row->setChannelDataNoUpdate(m_items[src]);
             row->update();
         }
     }
@@ -1144,7 +1380,7 @@ void ChannelListWidget::geometryChangeEvent(QskGeometryChangeEvent* event)
     if (event->isResized() && m_contentView) {
         qreal viewW = viewContentsRect().width();
         if (viewW <= 0) viewW = width();
-        m_contentView->setSize(QSizeF(viewW, m_items.size() * ROW_HEIGHT));
+        m_contentView->setSize(QSizeF(viewW, displayCount() * ROW_HEIGHT));
         for (auto* row : std::as_const(m_visibleRows)) {
             row->setWidth(m_contentView->width());
         }

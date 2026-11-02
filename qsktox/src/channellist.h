@@ -123,11 +123,23 @@ public:
     void markChannelActive(const QString& protocol, const QString& chatId,
                            qint64 lastActive);
 
+    // ── 列表过滤（参考 qltox ContactListWidget：搜索框 + 类型菜单）──
+    void setSearchText(const QString& text);
+    void setTypeFilter(const QString& type);
+    QString filterType() const { return m_filterType; }
+    // 当前过滤态下可见行数（未过滤 = m_items.size()）
+    int displayCount() const;
+    // 动态收集列表中出现过的 protocol：{类型, "emoji+中文标签"}，
+    // 按中文标签排序（qltox contactlist.cpp:1074 口径）
+    void distinctProtocols(QVector<QPair<QString, QString>>& types) const;
+
 Q_SIGNALS:
     void rowClicked(int row, const QString& chatName);
     void rowLongPressed(int row, const QPointF& scenePos);
     void avatarClicked(int row, const QPointF& scenePos);
     void avatarLongPressed(int row, const QPointF& scenePos);
+    // 过滤映射重建后发射（visibleCount = displayCount()）
+    void listCountChanged(int visibleCount);
 
 protected:
     void geometryChangeEvent(QskGeometryChangeEvent*) override;
@@ -154,6 +166,15 @@ private:
     void queueVisibleRefresh(int idx);
     void forceClipRefresh();
 
+    // ── 过滤层：显示行号 ↔ 源索引（qltox matchesFilter/refreshView 对位）──
+    void applyFilter();
+    bool matchesFilter(const ChannelItem& item) const;
+    bool isFilterActive() const {
+        return !m_searchText.isEmpty() || !m_filterType.isEmpty();
+    }
+    int toSourceRow(int displayRow) const;
+    int displayRowOf(int srcRow) const;
+
     QQuickItem* m_contentView = nullptr;
     QVector<ChannelItem> m_items;
     // chan_icon 进程内缓存（protocol_chatId → mxc/直链）：populateData 会清空
@@ -162,6 +183,11 @@ private:
     QHash<QString, int> m_chanKeyIndex;
     // chatId → 行号列表（同一 chatId 可能出现在多个 protocol 下）
     QHash<QString, QVector<int>> m_chatIdRows;
+    // 过滤状态（qltox m_searchText/m_filterType 对位）：m_filterMap 为
+    // 过滤后顺序的源索引；无过滤时保持空 = 恒等映射（显示行号即源下标）
+    QString m_searchText;
+    QString m_filterType;
+    QVector<int> m_filterMap;
     QMap<int, ChannelRowItem*> m_visibleRows;
     StaggerFadeAnimator* m_fadeAnimator = nullptr;
     // 淡入延迟计时器：可被 stopFadeIn() 取消，避免页面切走后仍启动动画
