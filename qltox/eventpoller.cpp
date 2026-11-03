@@ -1,1 +1,0 @@
-../qlappcom/eventpoller.cpp

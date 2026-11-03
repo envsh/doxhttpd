@@ -1,1 +1,0 @@
-../qlappcom/sticker_db.cpp

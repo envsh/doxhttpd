@@ -1,1 +1,0 @@
-../qlappcom/channel_db.h
