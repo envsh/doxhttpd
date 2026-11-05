@@ -11,6 +11,12 @@
 #include <qfiledialog.h>
 #include <qclipboard.h>
 #include <qapplication.h>
+#include <qinputdialog.h>
+#ifdef QT3_BUILD
+#include <qpopupmenu.h>
+#else
+#include <qmenu.h>
+#endif
 #include <qdir.h>
 #include <qdatetime.h>
 #include <qregexp.h>
@@ -154,6 +160,46 @@ static QString comboCurrentTextOf(QComboBox* cb) {
     return cb->currentText();
 }
 
+static void comboAdd(QComboBox* cb, const QString& s) {
+    if (!cb) { return; }
+#ifdef QT3_BUILD
+    cb->insertItem(s);
+#else
+    cb->addItem(s);
+#endif
+}
+
+static int qFindRev(const QString& s, const QChar& ch) {
+#ifdef QT3_BUILD
+    return s.findRev(ch);
+#else
+    return s.lastIndexOf(ch);
+#endif
+}
+
+static QString dirOfPath(const QString& path) {
+    int i = qFindRev(path, '/');
+    if (i <= 0) { return QString(); }
+    return path.left(i);
+}
+
+static QString qInputText(QObject* parent, const QString& title,
+                          const QString& label, const QString& def) {
+#ifdef QT3_BUILD
+    bool ok = false;
+    QString v = QInputDialog::getText(title, label,
+        QLineEdit::Normal, def, &ok, (QWidget*)parent);
+    if (!ok) { return QString(); }
+    return v;
+#else
+    bool ok = false;
+    QString v = QInputDialog::getText((QWidget*)parent, title, label,
+        QLineEdit::Normal, def, &ok);
+    if (!ok) { return QString(); }
+    return v;
+#endif
+}
+
 static int qPos(const QString& s, const char* needle) {
     QString ns = QString(needle);       /* 仅 ASCII needle，Latin-1 构造安全 */
 #ifdef QT3_BUILD
@@ -196,6 +242,14 @@ static void yTableClearRows(YtdlpTable* t) {
 #endif
 }
 
+static void yTableRemoveRow(YtdlpTable* t, int row) {
+#ifdef QT3_BUILD
+    t->removeRow(row);
+#else
+    t->removeRow(row);
+#endif
+}
+
 static double getDbl(const cJSON* obj, const char* key, double fallback) {    if (!obj) { return fallback; }
     cJSON* j = cJSON_GetObjectItem(const_cast<cJSON*>(obj), key);
     if (!j) { return fallback; }
@@ -219,9 +273,10 @@ YtdlpUi::YtdlpUi()
     : urlsEdit(0), presetH(0), heightCap(0), fmtCustom(0),
       extractAudio(0), audioFmt(0), audioQual(0),
       dirEdit(0), dirPick(0), useArchive(0), archiveEdit(0), archivePick(0),
-      itemsSpec(0), btnStart(0), btnStop(0),
+      itemsSpec(0), presetCombo(0), btnPresetSave(0), btnPresetDel(0),
+      btnStart(0), btnStop(0),
       cookieEdit(0), cookiePick(0), userEdit(0), passEdit(0),
-      proxyEdit(0), rateEdit(0), retriesSpin(0), concSpin(0),
+      proxyEdit(0), rateEdit(0), retriesSpin(0), concSpin(0), dlExt(0),
       embedSubs(0), embedThumb(0), embedMeta(0), embedChapters(0),
       subLangsEdit(0), convertSubs(0), mergeFmt(0),
       sbRemove(0), sbCatsEdit(0), ppaEdit(0),
@@ -247,6 +302,7 @@ YtdlpLogic::YtdlpLogic(QObject* parent)
     m_procParent = 0;
     m_ytdlpOk = false;
     m_loading = false;
+    m_presetLoaded = false;
     m_curProc = 0;
     m_curIdx = -1;
     m_cancelling = false;
@@ -270,12 +326,92 @@ void YtdlpLogic::setWidgets(YtdlpUi* ui) {
     m_loading = true;
     loadConfig();
     connectAll();
+    loadPresetList();
+    m_presetLoaded = true;
+    loadHistory();
     m_loading = false;
     updateCmdPreview();
     probeYtdlp();
 }
 
 /* ═══════════ 配置 ═══════════ */
+
+/* config.json 与 presets.json 共用同一份字段映射 */
+static void addStr(cJSON* root, const char* key, const QString& s) {
+    QByteArray u = qUtf8Bytes(s);
+    cJSON_AddStringToObject(root, key, u.data());
+}
+
+static void cfgToJson(const YtdlpConfig& c, cJSON* root) {
+    cJSON_AddNumberToObject(root, "format_preset", c.formatPreset);
+    cJSON_AddNumberToObject(root, "height", c.height);
+    addStr(root, "fmt_custom", c.fmtCustom);
+    cJSON_AddBoolToObject(root, "extract_audio", c.extractAudio ? 1 : 0);
+    addStr(root, "audio_fmt", c.audioFmt);
+    addStr(root, "audio_qual", c.audioQual);
+    addStr(root, "dir", c.dir);
+    cJSON_AddBoolToObject(root, "use_archive", c.useArchive ? 1 : 0);
+    addStr(root, "archive", c.archive);
+    addStr(root, "items", c.items);
+    addStr(root, "cookie", c.cookie);
+    addStr(root, "username", c.username);
+    addStr(root, "password", c.password);
+    addStr(root, "proxy", c.proxy);
+    addStr(root, "rate", c.rate);
+    cJSON_AddNumberToObject(root, "retries", c.retries);
+    cJSON_AddNumberToObject(root, "conc", c.conc);
+    cJSON_AddBoolToObject(root, "embed_subs", c.embedSubs ? 1 : 0);
+    cJSON_AddBoolToObject(root, "embed_thumb", c.embedThumb ? 1 : 0);
+    cJSON_AddBoolToObject(root, "embed_meta", c.embedMeta ? 1 : 0);
+    cJSON_AddBoolToObject(root, "embed_chapters", c.embedChapters ? 1 : 0);
+    addStr(root, "sub_langs", c.subLangs);
+    addStr(root, "convert_subs", c.convertSubs);
+    addStr(root, "merge_fmt", c.mergeFmt);
+    cJSON_AddBoolToObject(root, "sb_remove", c.sbRemove ? 1 : 0);
+    addStr(root, "sb_cats", c.sbCats);
+    addStr(root, "ppa", c.ppa);
+    addStr(root, "downloader", c.downloader);
+}
+
+static void cfgFromJson(YtdlpConfig* c, const cJSON* root,
+                        const YtdlpConfig& def, const QString& archiveDefault) {
+    const YtdlpConfig& d = def;
+    c->formatPreset = getInt(root, "format_preset", d.formatPreset);
+    c->height = getInt(root, "height", d.height);
+    c->fmtCustom = getStr(root, "fmt_custom", d.fmtCustom);
+    c->extractAudio = getBool(root, "extract_audio", d.extractAudio);
+    c->audioFmt = getStr(root, "audio_fmt", d.audioFmt);
+    c->audioQual = getStr(root, "audio_qual", d.audioQual);
+    c->dir = getStr(root, "dir", d.dir);
+    c->useArchive = getBool(root, "use_archive", d.useArchive);
+    c->archive = getStr(root, "archive", archiveDefault);
+    c->items = getStr(root, "items", d.items);
+    c->cookie = getStr(root, "cookie", d.cookie);
+    c->username = getStr(root, "username", d.username);
+    c->password = getStr(root, "password", d.password);
+    c->proxy = getStr(root, "proxy", d.proxy);
+    c->rate = getStr(root, "rate", d.rate);
+    c->retries = getInt(root, "retries", d.retries);
+    c->conc = getInt(root, "conc", d.conc);
+    c->embedSubs = getBool(root, "embed_subs", d.embedSubs);
+    c->embedThumb = getBool(root, "embed_thumb", d.embedThumb);
+    c->embedMeta = getBool(root, "embed_meta", d.embedMeta);
+    c->embedChapters = getBool(root, "embed_chapters", d.embedChapters);
+    c->subLangs = getStr(root, "sub_langs", d.subLangs);
+    c->convertSubs = getStr(root, "convert_subs", d.convertSubs);
+    c->mergeFmt = getStr(root, "merge_fmt", d.mergeFmt);
+    c->sbRemove = getBool(root, "sb_remove", d.sbRemove);
+    c->sbCats = getStr(root, "sb_cats", d.sbCats);
+    c->ppa = getStr(root, "ppa", d.ppa);
+    c->downloader = getStr(root, "downloader", d.downloader);
+}
+
+static bool toolInstalled(const QString& tool) {
+    if (tool.isEmpty()) { return true; }
+    QString err;
+    int rc = qRuncmdCaptureOuterr(tool, QStringList("version"), &err);
+    return rc >= 0;
+}
 
 QString YtdlpLogic::baseDir() const {
 #ifdef QT3_BUILD
@@ -292,46 +428,21 @@ void YtdlpLogic::ensureDirs() const {
 
 void YtdlpLogic::loadConfig() {
     YtdlpConfig def;
+    QString archiveDef = baseDir() + "/archive.txt";
     QString json = readUtf8File(baseDir() + "/config.json");
     if (json.isEmpty()) {
         applyConfig(def);
-        m_ui->archiveEdit->setText(baseDir() + "/archive.txt");
+        m_ui->archiveEdit->setText(archiveDef);
         return;
     }
     cJSON* root = cJSON_Parse(qUtf8Bytes(json).data());
     if (!root) {
         applyConfig(def);
-        m_ui->archiveEdit->setText(baseDir() + "/archive.txt");
+        m_ui->archiveEdit->setText(archiveDef);
         return;
     }
     YtdlpConfig c;
-    c.formatPreset = getInt(root, "format_preset", def.formatPreset);
-    c.height = getInt(root, "height", def.height);
-    c.fmtCustom = getStr(root, "fmt_custom", def.fmtCustom);
-    c.extractAudio = getBool(root, "extract_audio", def.extractAudio);
-    c.audioFmt = getStr(root, "audio_fmt", "best");
-    c.audioQual = getStr(root, "audio_qual", def.audioQual);
-    c.dir = getStr(root, "dir", def.dir);
-    c.useArchive = getBool(root, "use_archive", def.useArchive);
-    c.archive = getStr(root, "archive", baseDir() + "/archive.txt");
-    c.items = getStr(root, "items", def.items);
-    c.cookie = getStr(root, "cookie", def.cookie);
-    c.username = getStr(root, "username", def.username);
-    c.password = getStr(root, "password", def.password);
-    c.proxy = getStr(root, "proxy", def.proxy);
-    c.rate = getStr(root, "rate", def.rate);
-    c.retries = getInt(root, "retries", def.retries);
-    c.conc = getInt(root, "conc", def.conc);
-    c.embedSubs = getBool(root, "embed_subs", def.embedSubs);
-    c.embedThumb = getBool(root, "embed_thumb", def.embedThumb);
-    c.embedMeta = getBool(root, "embed_meta", def.embedMeta);
-    c.embedChapters = getBool(root, "embed_chapters", def.embedChapters);
-    c.subLangs = getStr(root, "sub_langs", def.subLangs);
-    c.convertSubs = getStr(root, "convert_subs", def.convertSubs);
-    c.mergeFmt = getStr(root, "merge_fmt", def.mergeFmt);
-    c.sbRemove = getBool(root, "sb_remove", def.sbRemove);
-    c.sbCats = getStr(root, "sb_cats", def.sbCats);
-    c.ppa = getStr(root, "ppa", def.ppa);
+    cfgFromJson(&c, root, def, archiveDef);
     cJSON_Delete(root);
     applyConfig(c);
 }
@@ -374,6 +485,15 @@ void YtdlpLogic::applyConfig(const YtdlpConfig& c) {
     m_ui->sbCatsEdit->setText(c.sbCats.isEmpty() ?
         qFromUtf8("sponsor,intro,outro,selfpromo,interaction") : c.sbCats);
     m_ui->ppaEdit->setText(c.ppa);
+    int dlIdx = 0;
+    if (c.downloader == "aria2c") { dlIdx = 1; }
+    else if (c.downloader == "ffmpeg") { dlIdx = 2; }
+    else if (c.downloader == "curl") { dlIdx = 3; }
+#ifdef QT3_BUILD
+    m_ui->dlExt->setCurrentItem(dlIdx);
+#else
+    m_ui->dlExt->setCurrentIndex(dlIdx);
+#endif
 }
 
 void YtdlpLogic::collectConfig(YtdlpConfig* c) const {
@@ -405,11 +525,12 @@ void YtdlpLogic::collectConfig(YtdlpConfig* c) const {
     c->sbRemove = m_ui->sbRemove->isChecked();
     c->sbCats = m_ui->sbCatsEdit->text();
     c->ppa = m_ui->ppaEdit->text();
-}
-
-static void addStr(cJSON* root, const char* key, const QString& s) {
-    QByteArray u = qUtf8Bytes(s);
-    cJSON_AddStringToObject(root, key, u.data());
+    switch (comboIndex(m_ui->dlExt)) {
+    case 1: { c->downloader = "aria2c"; break; }
+    case 2: { c->downloader = "ffmpeg"; break; }
+    case 3: { c->downloader = "curl"; break; }
+    default: { c->downloader = QString(); break; }
+    }
 }
 
 void YtdlpLogic::saveConfig() {
@@ -418,33 +539,7 @@ void YtdlpLogic::saveConfig() {
     YtdlpConfig c;
     collectConfig(&c);
     cJSON* root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "format_preset", c.formatPreset);
-    cJSON_AddNumberToObject(root, "height", c.height);
-    addStr(root, "fmt_custom", c.fmtCustom);
-    cJSON_AddBoolToObject(root, "extract_audio", c.extractAudio ? 1 : 0);
-    addStr(root, "audio_fmt", c.audioFmt);
-    addStr(root, "audio_qual", c.audioQual);
-    addStr(root, "dir", c.dir);
-    cJSON_AddBoolToObject(root, "use_archive", c.useArchive ? 1 : 0);
-    addStr(root, "archive", c.archive);
-    addStr(root, "items", c.items);
-    addStr(root, "cookie", c.cookie);
-    addStr(root, "username", c.username);
-    addStr(root, "password", c.password);
-    addStr(root, "proxy", c.proxy);
-    addStr(root, "rate", c.rate);
-    cJSON_AddNumberToObject(root, "retries", c.retries);
-    cJSON_AddNumberToObject(root, "conc", c.conc);
-    cJSON_AddBoolToObject(root, "embed_subs", c.embedSubs ? 1 : 0);
-    cJSON_AddBoolToObject(root, "embed_thumb", c.embedThumb ? 1 : 0);
-    cJSON_AddBoolToObject(root, "embed_meta", c.embedMeta ? 1 : 0);
-    cJSON_AddBoolToObject(root, "embed_chapters", c.embedChapters ? 1 : 0);
-    addStr(root, "sub_langs", c.subLangs);
-    addStr(root, "convert_subs", c.convertSubs);
-    addStr(root, "merge_fmt", c.mergeFmt);
-    cJSON_AddBoolToObject(root, "sb_remove", c.sbRemove ? 1 : 0);
-    addStr(root, "sb_cats", c.sbCats);
-    addStr(root, "ppa", c.ppa);
+    cfgToJson(c, root);
     char* out = cJSON_Print(root);
     if (out) {
         writeUtf8File(baseDir() + "/config.json", qFromUtf8(out));
@@ -465,6 +560,16 @@ QStringList YtdlpLogic::buildArgs(const QString& singleUrl) const {
     QStringList args;
     args << "yt-dlp";
     args << "--newline";
+
+    /* 外部下载器 */
+    QString dl;
+    switch (comboIndex(m_ui->dlExt)) {
+    case 1: { dl = "aria2c"; break; }
+    case 2: { dl = "ffmpeg"; break; }
+    case 3: { dl = "curl"; break; }
+    default: { break; }
+    }
+    if (!dl.isEmpty()) { args << "--downloader" << dl; }
 
     /* 格式 */
     int preset = comboIndex(m_ui->presetH);
@@ -843,9 +948,378 @@ void YtdlpLogic::onProcDone() {
                 qFromUtf8("退出码 ") + QString::number(code) + " " + t.url);
         }
         m_ui->btnStop->setEnabled(false);
+        saveHistoryEntry(t.state, t.url, t.outPath);
     }
     m_curIdx = -1;
     startNext();
+}
+
+/* ═══════════ 下载器/预设/历史/右键 ═══════════ */
+
+void YtdlpLogic::ensureDlExtOk() {
+    if (!m_ui || m_loading) { return; }
+    int idx = comboIndex(m_ui->dlExt);
+    if (idx <= 0) { return; }
+    QString tool;
+    switch (idx) {
+    case 1: { tool = "aria2c"; break; }
+    case 2: { tool = "ffmpeg"; break; }
+    case 3: { tool = "curl"; break; }
+    default: { return; }
+    }
+    if (toolInstalled(tool)) {
+        appendLogWithPrefix(qFromUtf8("dl"),
+            qFromUtf8("外部下载器 ") + tool + qFromUtf8(" 已就位"));
+        return;
+    }
+    appendLogWithPrefix(qFromUtf8("dl"),
+        tool + qFromUtf8(" 未在 PATH 找到，回退原生下载器"));
+    m_loading = true;
+#ifdef QT3_BUILD
+    m_ui->dlExt->setCurrentItem(0);
+#else
+    m_ui->dlExt->setCurrentIndex(0);
+#endif
+    m_loading = false;
+}
+
+void YtdlpLogic::onDlExtChanged() {
+    ensureDlExtOk();
+    onFormChanged();
+}
+
+static QString presetFilePath(const QString& base) {
+    return base + "/presets.json";
+}
+
+static QString historyFilePath(const QString& base) {
+    return base + "/history.json";
+}
+
+void YtdlpLogic::loadPresetList() {
+    if (!m_ui) { return; }
+    QComboBox* cb = m_ui->presetCombo;
+    cb->clear();
+    comboAdd(cb, qFromUtf8("(选择预设…)"));
+    ensureDirs();
+    QString json = readUtf8File(presetFilePath(baseDir()));
+    if (json.isEmpty()) { return; }
+    cJSON* root = cJSON_Parse(qUtf8Bytes(json).data());
+    if (!root) { return; }
+    cJSON* it = root->child;
+    while (it) {
+        if (it->string) {
+            comboAdd(cb, qFromUtf8(it->string));
+        }
+        it = it->next;
+    }
+    cJSON_Delete(root);
+}
+
+void YtdlpLogic::onPresetChosen() {
+    if (!m_ui || !m_presetLoaded) { return; }
+    int idx = comboIndex(m_ui->presetCombo);
+    if (idx <= 0) { return; }
+    QString name = comboCurrentTextOf(m_ui->presetCombo);
+    if (name.isEmpty()) { return; }
+    QString json = readUtf8File(presetFilePath(baseDir()));
+    if (json.isEmpty()) { return; }
+    cJSON* root = cJSON_Parse(qUtf8Bytes(json).data());
+    if (!root) { return; }
+    cJSON* item = cJSON_GetObjectItem(root, qUtf8Bytes(name).data());
+    if (!item || item->type != cJSON_Object) {
+        cJSON_Delete(root);
+        appendLogWithPrefix(qFromUtf8("预设"), name + qFromUtf8(" 已失效"));
+        return;
+    }
+    YtdlpConfig cur;
+    collectConfig(&cur);
+    YtdlpConfig c = cur;
+    QString curArchive = cur.archive;
+    cfgFromJson(&c, item, cur, curArchive);
+    cJSON_Delete(root);
+    m_loading = true;
+    applyConfig(c);
+    m_loading = false;
+    updateCmdPreview();
+    saveConfig();
+    appendLogWithPrefix(qFromUtf8("预设"), qFromUtf8("已应用 ") + name);
+}
+
+void YtdlpLogic::onPresetSave() {
+    if (!m_ui) { return; }
+    QString name = qStrip(qInputText(m_procParent,
+        qFromUtf8("保存预设"), qFromUtf8("输入预设名称："), ""));
+    if (name.isEmpty()) { return; }
+    ensureDirs();
+    YtdlpConfig c;
+    collectConfig(&c);
+    cJSON* item = cJSON_CreateObject();
+    cfgToJson(c, item);
+    cJSON* root = 0;
+    QString json = readUtf8File(presetFilePath(baseDir()));
+    if (!json.isEmpty()) {
+        root = cJSON_Parse(qUtf8Bytes(json).data());
+    }
+    if (!root) { root = cJSON_CreateObject(); }
+    cJSON* old = cJSON_DetachItemFromObject(root, qUtf8Bytes(name).data());
+    if (old) { cJSON_Delete(old); }
+    cJSON_AddItemToObject(root, qUtf8Bytes(name).data(), item);
+    char* out = cJSON_Print(root);
+    cJSON_Delete(root);
+    if (out) {
+        writeUtf8File(presetFilePath(baseDir()), qFromUtf8(out));
+        free(out);
+    }
+    loadPresetList();
+    /* 选中刚存的项（触发 onPresetChosen 应用无副作用） */
+    for (int i = 0; i < (int)m_ui->presetCombo->count(); i++) {
+        QString cur;
+#ifdef QT3_BUILD
+        cur = m_ui->presetCombo->text(i);
+#else
+        cur = m_ui->presetCombo->itemText(i);
+#endif
+        if (cur == name) {
+#ifdef QT3_BUILD
+            m_ui->presetCombo->setCurrentItem(i);
+#else
+            m_ui->presetCombo->setCurrentIndex(i);
+#endif
+            break;
+        }
+    }
+    appendLogWithPrefix(qFromUtf8("预设"), qFromUtf8("已保存 ") + name);
+}
+
+void YtdlpLogic::onPresetDel() {
+    if (!m_ui) { return; }
+    int idx = comboIndex(m_ui->presetCombo);
+    if (idx <= 0) {
+        appendLog(qFromUtf8("请先选择要删除的预设"));
+        return;
+    }
+    QString name = comboCurrentTextOf(m_ui->presetCombo);
+    QString json = readUtf8File(presetFilePath(baseDir()));
+    if (json.isEmpty()) { return; }
+    cJSON* root = cJSON_Parse(qUtf8Bytes(json).data());
+    if (!root) { return; }
+    cJSON* old = cJSON_DetachItemFromObject(root, qUtf8Bytes(name).data());
+    if (old) { cJSON_Delete(old); }
+    char* out = cJSON_Print(root);
+    cJSON_Delete(root);
+    if (out) {
+        writeUtf8File(presetFilePath(baseDir()), qFromUtf8(out));
+        free(out);
+    }
+    loadPresetList();
+    appendLogWithPrefix(qFromUtf8("预设"), qFromUtf8("已删除 ") + name);
+}
+
+void YtdlpLogic::loadHistory() {
+    if (!m_ui) { return; }
+    QString json = readUtf8File(historyFilePath(baseDir()));
+    if (json.isEmpty()) { return; }
+    cJSON* root = cJSON_Parse(qUtf8Bytes(json).data());
+    if (!root) { return; }
+    cJSON* items = cJSON_GetObjectItem(root, "items");
+    if (items && items->type == cJSON_Array) {
+        cJSON* it = items->child;
+        while (it) {
+            cJSON* u = cJSON_GetObjectItem(it, "url");
+            cJSON* s = cJSON_GetObjectItem(it, "state");
+            cJSON* o = cJSON_GetObjectItem(it, "out");
+            if (u && u->type == cJSON_String) {
+                YtdlpTask t;
+                t.url = qFromUtf8(u->valuestring);
+                t.state = s ? (int)s->valueint : 3;
+                t.outPath = (o && o->valuestring) ? qFromUtf8(o->valuestring) : QString();
+                t.row = yTableAppendRow(m_ui->taskTable);
+                QString disp = t.url;
+                if (disp.length() > 60) { disp = disp.left(57) + "..."; }
+                yTableText(m_ui->taskTable, t.row, 0, disp);
+                yTableText(m_ui->taskTable, t.row, 1,
+                    t.state == 2 ? qFromUtf8("完成(历史)") : qFromUtf8("失败(历史)"));
+                yTableText(m_ui->taskTable, t.row, 2, "—");
+                if (!t.outPath.isEmpty()) {
+                    yTableText(m_ui->taskTable, t.row, 5, t.outPath);
+                }
+            }
+            it = it->next;
+        }
+    }
+    cJSON_Delete(root);
+}
+
+void YtdlpLogic::saveHistoryEntry(int state, const QString& url,
+                                  const QString& outPath) {
+    if (state == 1 || state == 0) { return; }
+    ensureDirs();
+    cJSON* root = 0;
+    QString json = readUtf8File(historyFilePath(baseDir()));
+    if (!json.isEmpty()) {
+        root = cJSON_Parse(qUtf8Bytes(json).data());
+    }
+    if (!root) { root = cJSON_CreateObject(); }
+    cJSON* items = cJSON_GetObjectItem(root, "items");
+    if (!items || items->type != cJSON_Array) {
+        items = cJSON_CreateArray();
+        cJSON_AddItemToObject(root, "items", items);
+    }
+    cJSON* e = cJSON_CreateObject();
+    addStr(e, "url", url);
+    cJSON_AddNumberToObject(e, "state", state);
+    if (!outPath.isEmpty()) { addStr(e, "out", outPath); }
+    addStr(e, "time",
+        QDateTime::currentDateTime().toString("MM-dd hh:mm"));
+    cJSON_AddItemToArray(items, e);
+    while (cJSON_GetArraySize(items) > 200) {
+        cJSON* first = cJSON_GetArrayItem(items, 0);
+        cJSON_DetachItemFromArray(items, 0);
+        cJSON_Delete(first);
+    }
+    char* out = cJSON_Print(root);
+    cJSON_Delete(root);
+    if (out) {
+        writeUtf8File(historyFilePath(baseDir()), qFromUtf8(out));
+        free(out);
+    }
+}
+
+YtdlpTask* YtdlpLogic::taskAtRow(int row) {
+    for (int i = 0; i < (int)m_queue.count(); i++) {
+        if (m_queue[i].row == row) { return &m_queue[i]; }
+    }
+    return 0;
+}
+
+void YtdlpLogic::reindexRowsAfter(int removedRow) {
+    for (int i = 0; i < (int)m_queue.count(); i++) {
+        if (m_queue[i].row > removedRow) { m_queue[i].row--; }
+    }
+}
+
+void YtdlpLogic::onTaskMenu(int row, int col, const QPoint& p) {
+    (void)col;
+    handleTaskMenuAt(row, p);
+}
+
+void YtdlpLogic::onTaskMenu2(const QPoint& p) {
+    if (!m_ui) { return; }
+#ifdef QT3_BUILD
+    handleTaskMenuAt(m_ui->taskTable->currentRow(), p);
+#else
+    QPoint vpos = m_ui->taskTable->viewport()->mapFrom(m_ui->taskTable, p);
+    int row = m_ui->taskTable->rowAt(vpos.y());
+    handleTaskMenuAt(row, p);
+#endif
+}
+
+void YtdlpLogic::handleTaskMenuAt(int row, const QPoint& globalPos) {
+    if (!m_ui || row < 0) { return; }
+    YtdlpTask* t = taskAtRow(row);
+    if (!t) { return; }
+    bool canRetry = (t->state == 3 || t->state == 4);
+    bool canDelete = (t->state != 1 && t->state != 0);
+    bool canOpen = !t->outPath.isEmpty();
+#ifdef QT3_BUILD
+    QPopupMenu* menu = new QPopupMenu(m_ui->taskTable);
+    menu->insertItem(qFromUtf8("重试"), 1);
+    menu->insertItem(qFromUtf8("删除"), 2);
+    menu->insertItem(qFromUtf8("打开目录"), 3);
+    menu->insertItem(qFromUtf8("复制地址"), 4);
+    menu->setItemEnabled(1, canRetry);
+    menu->setItemEnabled(2, canDelete);
+    menu->setItemEnabled(3, canOpen);
+    int id = menu->exec(globalPos);
+    delete menu;
+    if (id == 1) { doRetryTask(row); }
+    else if (id == 2) { doDeleteTask(row); }
+    else if (id == 3) { doOpenTaskDir(*t); }
+    else if (id == 4) {
+        QApplication::clipboard()->setText(t->url);
+        appendLog(qFromUtf8("已复制地址"));
+    }
+#else
+    QMenu* menu = new QMenu(m_ui->taskTable);
+    QAction* aRetry = menu->addAction(qFromUtf8("重试"));
+    QAction* aDel = menu->addAction(qFromUtf8("删除"));
+    QAction* aOpen = menu->addAction(qFromUtf8("打开目录"));
+    QAction* aCopy = menu->addAction(qFromUtf8("复制地址"));
+    aRetry->setEnabled(canRetry);
+    aDel->setEnabled(canDelete);
+    aOpen->setEnabled(canOpen);
+    QAction* act = menu->exec(globalPos);
+    delete menu;
+    if (act == aRetry) { doRetryTask(row); }
+    else if (act == aDel) { doDeleteTask(row); }
+    else if (act == aOpen) { doOpenTaskDir(*t); }
+    else if (act == aCopy) {
+        QApplication::clipboard()->setText(t->url);
+        appendLog(qFromUtf8("已复制地址"));
+    }
+#endif
+}
+
+void YtdlpLogic::doRetryTask(int row) {
+    YtdlpTask* t = taskAtRow(row);
+    if (!t) { return; }
+    if (t->state == 1 || t->state == 0) { return; }
+    if (m_curProc) {
+        appendLog(qFromUtf8("当前有任务在运行，稍后自动排队"));
+    }
+    t->state = 0;
+    yTableText(m_ui->taskTable, row, 1, qFromUtf8("排队"));
+    yTableText(m_ui->taskTable, row, 2, "0%");
+    startNext();
+}
+
+void YtdlpLogic::doDeleteTask(int row) {
+    if (!m_ui) { return; }
+    YtdlpTask* t = taskAtRow(row);
+    if (!t) { return; }
+    if (t->state == 1 || t->state == 0) {
+        if (m_curIdx >= 0 && m_curIdx < (int)m_queue.count() &&
+            &m_queue[m_curIdx] == t && m_curProc) {
+            return; /* 运行中不允许删 */
+        }
+        if (t->state == 0) {
+            /* 排队中的任务还没有进程，可以直接删 */
+            yTableRemoveRow(m_ui->taskTable, row);
+        } else {
+            return;
+        }
+    } else {
+        yTableRemoveRow(m_ui->taskTable, row);
+    }
+    int curRow = -1;
+    if (m_curIdx >= 0 && m_curIdx < (int)m_queue.count()) {
+        curRow = m_queue[m_curIdx].row;
+    }
+    YTDLP_TASK_LIST keep;
+    for (int i = 0; i < (int)m_queue.count(); i++) {
+        if (&m_queue[i] == t) { continue; }
+        keep.append(m_queue[i]);
+    }
+    m_queue = keep;
+    reindexRowsAfter(row);
+    m_curIdx = -1;
+    if (curRow >= 0) {
+        for (int i = 0; i < (int)m_queue.count(); i++) {
+            if (m_queue[i].row == curRow) { m_curIdx = i; break; }
+        }
+    }
+}
+
+void YtdlpLogic::doOpenTaskDir(const YtdlpTask& t) {
+    QString dir = dirOfPath(t.outPath);
+    if (dir.isEmpty()) { dir = m_ui->dirEdit->text(); }
+    if (dir.isEmpty()) { dir = qGetHomePath(); }
+    QStringList a;
+    a << dir;
+    if (!qStartProcessDetached("xdg-open", a)) {
+        appendLogWithPrefix(qFromUtf8("err"), qFromUtf8("xdg-open 启动失败"));
+    }
 }
 
 /* ═══════════ 交互 ═══════════ */
@@ -1148,6 +1622,10 @@ void YtdlpLogic::connectAll() {
     connect(ui->sbRemove, SIGNAL(toggled(bool)), this, SLOT(onFormChanged()));
     connect(ui->sbCatsEdit, SIGNAL(textChanged(const QString&)), this, SLOT(onFormChanged()));
     connect(ui->ppaEdit, SIGNAL(textChanged(const QString&)), this, SLOT(onFormChanged()));
+    connect(ui->dlExt, SIGNAL(activated(int)), this, SLOT(onDlExtChanged()));
+    connect(ui->presetCombo, SIGNAL(activated(int)), this, SLOT(onPresetChosen()));
+    connect(ui->btnPresetSave, SIGNAL(clicked()), this, SLOT(onPresetSave()));
+    connect(ui->btnPresetDel, SIGNAL(clicked()), this, SLOT(onPresetDel()));
 
     connect(ui->dirPick, SIGNAL(clicked()), this, SLOT(onPickDir()));
     connect(ui->archivePick, SIGNAL(clicked()), this, SLOT(onPickArchive()));
@@ -1156,6 +1634,17 @@ void YtdlpLogic::connectAll() {
     connect(ui->btnFill, SIGNAL(clicked()), this, SLOT(onFillFormat()));
     connect(ui->btnStart, SIGNAL(clicked()), this, SLOT(onStartClicked()));
     connect(ui->btnStop, SIGNAL(clicked()), this, SLOT(onStopClicked()));
+
+#ifdef QT3_BUILD
+    connect(ui->taskTable,
+        SIGNAL(contextMenuRequested(int, int, const QPoint&)),
+        this, SLOT(onTaskMenu(int, int, const QPoint&)));
+#else
+    ui->taskTable->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(ui->taskTable,
+        SIGNAL(customContextMenuRequested(const QPoint&)),
+        this, SLOT(onTaskMenu2(const QPoint&)));
+#endif
 }
 
 /* ═══════════ yt-dlp 探测 ═══════════ */

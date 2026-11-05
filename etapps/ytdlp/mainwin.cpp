@@ -127,6 +127,17 @@ QWidget* createYtdlpMainWindow(void* parent) {
     plRow->addWidget(new QLabel(qFromUtf8("空=整单；如 3,5,8-12"), dlPage), 1);
     dlLayout->addLayout(plRow);
 
+    QBoxLayout* presetRow = qNewBoxLayout(0, QBoxLayout::LeftToRight, 0, 4);
+    presetRow->addWidget(new QLabel(qFromUtf8("预设"), dlPage));
+    QComboBox* presetCombo = new QComboBox(dlPage);
+    comboAdd(presetCombo, qFromUtf8("(选择预设…占位)"));
+    presetRow->addWidget(presetCombo, 3);
+    QPushButton* btnPresetSave = new QPushButton(qFromUtf8("存为…"), dlPage);
+    presetRow->addWidget(btnPresetSave);
+    QPushButton* btnPresetDel = new QPushButton(qFromUtf8("删除"), dlPage);
+    presetRow->addWidget(btnPresetDel);
+    dlLayout->addLayout(presetRow);
+
     QBoxLayout* startRow = qNewBoxLayout(0, QBoxLayout::LeftToRight, 0, 4);
     QPushButton* btnStop = new QPushButton(qFromUtf8("停止"), dlPage);
     btnStop->setEnabled(false);
@@ -182,6 +193,17 @@ QWidget* createYtdlpMainWindow(void* parent) {
     rateRow->addWidget(concSpin, 1);
     rateRow->addStretch(1);
     netLayout->addLayout(rateRow);
+
+    QBoxLayout* dlExtRowL = qNewBoxLayout(0, QBoxLayout::LeftToRight, 0, 4);
+    dlExtRowL->addWidget(new QLabel(qFromUtf8("外部下载器 --downloader"), netPage));
+    QComboBox* dlExt = new QComboBox(netPage);
+    comboAdd(dlExt, qFromUtf8("原生 (yt-dlp 内置)"));
+    comboAdd(dlExt, "aria2c");
+    comboAdd(dlExt, "ffmpeg");
+    comboAdd(dlExt, "curl");
+    dlExtRowL->addWidget(dlExt, 1);
+    dlExtRowL->addStretch(1);
+    netLayout->addLayout(dlExtRowL);
 
     netLayout->addStretch(1);
     tabs->addTab(netPage, qFromUtf8("网络登录"));
@@ -344,6 +366,9 @@ QWidget* createYtdlpMainWindow(void* parent) {
     ui->archiveEdit = archiveEdit;
     ui->archivePick = archivePick;
     ui->itemsSpec = itemsSpec;
+    ui->presetCombo = presetCombo;
+    ui->btnPresetSave = btnPresetSave;
+    ui->btnPresetDel = btnPresetDel;
     ui->btnStart = btnStart;
     ui->btnStop = btnStop;
     ui->cookieEdit = cookieEdit;
@@ -354,6 +379,7 @@ QWidget* createYtdlpMainWindow(void* parent) {
     ui->rateEdit = rateEdit;
     ui->retriesSpin = retriesSpin;
     ui->concSpin = concSpin;
+    ui->dlExt = dlExt;
     ui->embedSubs = embedSubs;
     ui->embedThumb = embedThumb;
     ui->embedMeta = embedMeta;

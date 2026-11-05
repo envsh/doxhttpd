@@ -5,6 +5,7 @@
 #include <qstring.h>
 #include <qstringlist.h>
 #include <qtimer.h>
+#include <qpoint.h>
 #include <string>
 
 class QWidget;
@@ -49,6 +50,9 @@ struct YtdlpUi {
     QLineEdit*    archiveEdit;
     QPushButton*  archivePick;
     QLineEdit*    itemsSpec;      /* 播放列表 -I，空=整单 */
+    QComboBox*    presetCombo;    /* 预设组（第0项占位） */
+    QPushButton*  btnPresetSave;
+    QPushButton*  btnPresetDel;
     QPushButton*  btnStart;
     QPushButton*  btnStop;
 
@@ -61,6 +65,7 @@ struct YtdlpUi {
     QLineEdit*    rateEdit;
     QSpinBox*     retriesSpin;
     QSpinBox*     concSpin;
+    QComboBox*    dlExt;          /* 0原生 1aria2c 2ffmpeg 3curl */
 
     /* Tab3 后处理 */
     QCheckBox*    embedSubs;
@@ -121,6 +126,7 @@ struct YtdlpConfig {
     bool    sbRemove;
     QString sbCats;
     QString ppa;
+    QString downloader;        /* ""=原生 yt-dlp，否则 aria2c/ffmpeg/curl */
 
     YtdlpConfig();
 };
@@ -164,6 +170,12 @@ private slots:
     void onProcReadErr();
     void onProcDone();
     void onKillTick();
+    void onDlExtChanged();
+    void onPresetChosen();
+    void onPresetSave();
+    void onPresetDel();
+    void onTaskMenu(int row, int col, const QPoint& p);
+    void onTaskMenu2(const QPoint& p);
 
 private:
     void connectAll();
@@ -183,6 +195,17 @@ private:
     void appendLogWithPrefix(const QString& prefix, const QString& msg);
     void parseProcLine(const QString& line);
     void consumeStream(const QByteArray& chunk, std::string* buf);
+    void ensureDlExtOk();
+    void loadPresetList();                          /* 按 presets.json 重建 combo */
+    void loadHistory();
+    void saveHistoryEntry(int state, const QString& url,
+                          const QString& outPath);   /* history.json 追加（trim 200） */
+    YtdlpTask* taskAtRow(int row);                  /* row → m_queue 指针，未命中 0 */
+    void reindexRowsAfter(int removedRow);
+    void handleTaskMenuAt(int row, const QPoint& globalPos);
+    void doRetryTask(int row);
+    void doDeleteTask(int row);
+    void doOpenTaskDir(const YtdlpTask& t);
 
 private:
     YtdlpUi*  m_ui;
@@ -190,6 +213,7 @@ private:
     QTimer*   m_saveTimer;
     bool      m_ytdlpOk;
     bool      m_loading;         /* 回填期间抑制 onFormChanged */
+    bool      m_presetLoaded;    /* combo 初次载入后 activated 才生效 */
 
     YTDLP_TASK_LIST m_queue;
     QProcess* m_curProc;
