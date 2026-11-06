@@ -71,7 +71,7 @@
         "empty_hint": "Recording is empty or failed, not sent"
     },
     "placeholders": {
-        "add_friend": "Enter Tox ID to add friend",
+        "add_friend": "Enter User ID to add friend",
         "join_group": "Group chat_id",
         "type_message": "Type your message here...",
         "search_contact": "Search contacts..."
@@ -115,7 +115,7 @@
     "no_status": "No status message",
     "unknown": "Unknown",
     "never_online": "Never online",
-    "tox_id_copied": "Tox ID copied to clipboard",
+    "tox_id_copied": "User ID copied to clipboard",
     "please_wait": "Please wait for loading",
     "load_failed": "Load failed",
     "load_messages_failed": "Failed to load messages (%1)",

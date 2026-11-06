@@ -71,7 +71,7 @@
         "empty_hint": "录制内容为空或失败，未发送"
     },
     "placeholders": {
-        "add_friend": "输入 Tox ID 添加好友",
+        "add_friend": "输入 User ID 添加好友",
         "join_group": "群组chat_id",
         "type_message": "输入消息...",
         "search_contact": "搜索联系人..."
@@ -115,7 +115,7 @@
     "no_status": "无状态消息",
     "unknown": "未知",
     "never_online": "从未上线",
-    "tox_id_copied": "Tox ID 已复制到剪贴板",
+    "tox_id_copied": "User ID 已复制到剪贴板",
     "please_wait": "请等待加载完成",
     "load_failed": "加载失败",
     "load_messages_failed": "加载消息失败（%1）",
