@@ -33,6 +33,7 @@ public:
     void setRing(int cap);
     void addSample(double v01);          /* [0,1]，越界 clamp */
     void setColor(int r, int g, int b);  /* Step3：Rx/Tx 双图分色 */
+    void getVals(double* out, int max) const; /* Step8：历史持久化读环 */
 protected:
     void paintEvent(QPaintEvent*);
 private:
@@ -183,7 +184,8 @@ private:
     int       m_alertCoolMem;
     int       m_alertCoolDisk;
     int       m_alertCoolBat;
-    int       m_alertNetHi;      /* 网络流量连续计数（Step7） */
+    int       m_alertNetRxHi;    /* 下行单独计数（Step8） */
+    int       m_alertNetTxHi;    /* 上行单独计数（Step8） */
     int       m_alertCoolNet;
     double    m_netSumRx;        /* 本 tick 全接口合计 B/s（Step7） */
     double    m_netSumTx;
@@ -204,6 +206,8 @@ private:
     void    fillAbout();                            /* About 静态文本 + 通知历史 */
     void    fillGpuRow();                           /* Step7：lspci -knn 一次性 */
     void    sampleTemp();                           /* 顶条 Package 温度 */
+    void    saveHistory();                          /* Step8：历史落盘（每 600 tick） */
+    void    loadHistory();                          /* Step8：启动还原历史 */
     void    fillTopTables();                        /* 每 10 tick：Top 进程 */
     void    updateTopbar();                         /* CPU/MEM/Temp 三段点亮 */
 };

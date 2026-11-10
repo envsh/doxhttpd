@@ -62,10 +62,16 @@ static QWidget* buildTopBar(QWidget* parent, IstatUi* ui) {
     QBoxLayout* h = qNewBoxLayout(bar, QBoxLayout::LeftToRight, 6);
 
     QLabel* c = new QLabel(qFromUtf8("CPU —"), bar);
+#ifndef QT3_BUILD
+    c->setAutoFillBackground(true);     /* Step8：色块背景 */
+#endif
     h->addWidget(c, 0);
     ui->topCpu = c;
 
     QLabel* m = new QLabel(qFromUtf8("MEM —"), bar);
+#ifndef QT3_BUILD
+    m->setAutoFillBackground(true);
+#endif
     h->addWidget(m, 0);
     ui->topMem = m;
 

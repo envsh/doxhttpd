@@ -150,7 +150,8 @@ IstmHumanBytes / IstmHumanRate`、`qUtf8Bytes`（Qt3 utf8 / Qt4 toUtf8）；
 | 4 ✅ | Disk 页（df -kP 真实分区表 5 列/10s、主块设备探测 nvme→sda、活动速率 KB/s+IOPS+in_flight 差分图 orange/SMART root 注记） | KB/s 量级复核 |
 | 5 ✅ | Sensors 页（hwmon temp/in/curr/fan 全表扫描+无风扇注记）+ Battery 页（status/capacity/charge 三元/健康率/功率W/循环/厂型 + ACAD + 电量史图 blue）+ 顶条 🔋 点亮 | health%=32.7% 本机复核 |
 | 6 ✅ | Notifications（CPU>90 或内存>90 连续 30s/分区>=90%/电量<15 且未接 AC；触发后 5min 冷却；About 页存最近 10 条）+ About 页充实 + 双终验 | 阈值触发注记可见 |
-| 7 ✅ | Step7 增补：顶条本地时钟（Time 模块）+ About 世界钟 6 城（固定 UTC offset，无 DST 注记）+ CPU 页 GPU 行（lspci -knn 型号+driver，一次性）+ 网络流量 >5MB/s 连续 30s 告警（5min 冷却）+ 顶条电池三态图标（⚡充电/🔌AC 未充/🔋释电）；Weather 维持未接（官方付费源，本机公网受限） | 顶条时间走动 + iGPU/NV 两行 GPU + 大流量触发 About 记录 |
+| 7 ✅ | Step7 增补：顶条本地时钟（Time 模块）+ About 世界钟 6 城（tzdata 优先/缺失回退固定 offset）+ CPU 页 GPU 行（lspci -knn 型号+driver，一次性）+ 网络 Rx/Tx 分离 >5MB/s 连续 30s 告警（5min 冷却）+ 顶条电池三态图标（⚡充电/🔌AC 未充/🔋释电）；Weather 维持未接（官方付费源，本机公网受限） | 顶条时间走动 + iGPU/NV 两行 GPU + 大流量触发 About 记录 |
+| 8 ✅ | Step8 官方对照收尾：① 电池剩余/充满时间估算（charge÷current，顶条🔋同步）② 世界钟真时区（/usr/share/zoneinfo 存在即 localtime_r，DST 自动；缺失回退固定 offset）③ 顶条 CPU/MEM 色块（<60 绿/<85 橙/≥85 红 palette）④ Rx/Tx 分离阈值告警 ⑤ 历史持久化 ~/.cache/istat_menus（cpu/mem/bat/rx/tx 五图每 10min+析构落盘，启动还原环形读序）。**修 Qt3 真 bug 三处**：QIODevice::readAll sysfs 死循环（启动 90% CPU 卡死根源，换确定性 readBlock）、QTable 先写后扩行越界（QGVector 警告）、arg(int,fw,base,QChar) 错绑 double 重载（IstmZ2 取代） | 冒烟 0 警告 0 输出 · 3.8% CPU · 重启首拍 m_n=60 历史还原 |
 
 ## 9. 风格与红线（沿用项目惯例）
 

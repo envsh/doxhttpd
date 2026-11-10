@@ -5,9 +5,15 @@
 #include <qtimer.h>
 #include <qpainter.h>
 #include <qcolor.h>
+#include <qpalette.h>
 #include <qstringlist.h>
 #include <qdatetime.h>
 #include <time.h>
+#include <stdlib.h>
+#include <sys/stat.h>
+#ifndef QT3_BUILD
+#include <qdir.h>
+#endif
 #include <string.h>
 
 /* ═══════════ 文本/文件 helpers（cpuz 同源，前缀 Istm） ═══════════ */
@@ -141,6 +147,15 @@ static void IstmSetRows(IstmTable* t, int rows) {
 #endif
 }
 
+static int IstmRows(IstmTable* t) {
+    if (!t) { return 0; }
+#ifdef QT3_BUILD
+    return t->numRows();
+#else
+    return t->rowCount();
+#endif
+}
+
 static void IstmBarPct(QProgressBar* bar, int pct) {
     if (!bar) { return; }
 #ifdef QT3_BUILD
@@ -171,32 +186,89 @@ static QString IstmPsiTok(const QStringList& tk, const char* key) {
     return QString();
 }
 
-/* Step7：世界钟 6 城（固定 UTC offset，不做 DST——iStat 简化口径） */
+/* 两位补零（Qt3 arg(int,fw,base,QChar) 会错绑 double 重载，禁用该形态） */
+static QString IstmZ2(int v) {
+    return v < 10 ? qFromUtf8("0%1").arg(v) : QString::number(v);
+}
+
+/* Step8：世界钟 6 城——优先读 /usr/share/zoneinfo 真时区（DST 自动跟随），
+   zoneinfo 缺失时回退固定 UTC offset（iStat 简化口径） */
 static QString IstmWorldClocks() {
-    struct tm gbuf;
-    time_t t = time(0);
-    gmtime_r(&t, &gbuf);
-    long long secOfDay = (long long)gbuf.tm_hour * 3600
-        + (long long)gbuf.tm_min * 60;
     static const char* cities[] =
         { "UTC", "纽约", "伦敦", "北京", "东京", "悉尼" };
+    static const char* zones[] =
+        { "UTC", "America/New_York", "Europe/London",
+          "Asia/Shanghai", "Asia/Tokyo", "Australia/Sydney" };
     static const int offs[] = { 0, -5, 0, 8, 9, 10 };
-    /* 纽约 EST -5：夏令时期间差 1h（注记） */
+    time_t t = time(0);
+    char* savedTz = getenv("TZ");       /* 还原系统时区用 */
     QString s;
     for (int i = 0; i < 6; i++) {
-        long long sec = secOfDay + (long long)offs[i] * 3600;
-        sec = ((sec % 86400) + 86400) % 86400;
-        int hh = (int)(sec / 3600);
-        int mm = (int)((sec % 3600) / 60);
+        int hh = 0;
+        int mm = 0;
+        bool useTz = false;
+        if (i > 0) {
+            QString zpath = qFromUtf8("/usr/share/zoneinfo/")
+                + qFromUtf8(zones[i]);
+            QFile zfi(zpath);
+            if (zfi.exists()) {
+                setenv("TZ", zones[i], 1);
+                tzset();
+                struct tm lbuf;
+                localtime_r(&t, &lbuf);
+                hh = lbuf.tm_hour;
+                mm = lbuf.tm_min;
+                useTz = true;
+                if (savedTz != 0) {
+                    setenv("TZ", savedTz, 1);
+                } else {
+                    unsetenv("TZ");
+                }
+                tzset();
+            }
+        }
+        if (!useTz) {
+            struct tm gbuf;
+            gmtime_r(&t, &gbuf);
+            long long secOfDay = (long long)gbuf.tm_hour * 3600
+                + (long long)gbuf.tm_min * 60;
+            long long sec = secOfDay + (long long)offs[i] * 3600;
+            sec = ((sec % 86400) + 86400) % 86400;
+            hh = (int)(sec / 3600);
+            mm = (int)((sec % 3600) / 60);
+        }
         if (i > 0) { s += "\n"; }
-        s += qFromUtf8("%1 %2:%3（UTC%4%5）")
+        s += qFromUtf8("%1 %2:%3")
             .arg(qFromUtf8(cities[i]))
-            .arg(hh, 2, 10, QChar('0'))
-            .arg(mm, 2, 10, QChar('0'))
-            .arg(offs[i] >= 0 ? QString("+") : QString("-"))
-            .arg(offs[i] >= 0 ? offs[i] : -offs[i]);
+            .arg(IstmZ2(hh))
+            .arg(IstmZ2(mm));
+        if (!useTz) {
+            s += qFromUtf8("（UTC%1%2）")
+                .arg(offs[i] >= 0 ? QString("+") : QString("-"))
+                .arg(offs[i] >= 0 ? offs[i] : -offs[i]);
+        }
     }
     return s;
+}
+
+/* Step8：顶条占用色块——按 pct 变换 QLabel 背景色（<60 绿 / <85 橙 / ≥85 红） */
+static void IstmTopColor(QLabel* l, int pct) {
+    if (!l) { return; }
+    int r;
+    int g;
+    int b;
+    if (pct < 60) { r = 34;  g = 120; b = 52; }
+    else if (pct < 85) { r = 216; g = 150; b = 30; }
+    else { r = 190; g = 48;  b = 48; }
+    QColor c(r, g, b);
+#ifdef QT3_BUILD
+    l->setPaletteBackgroundColor(c);
+#else
+    QPalette pal = l->palette();
+    pal.setColor(QPalette::Window, c);
+    l->setPalette(pal);
+    l->setAutoFillBackground(true);
+#endif
 }
 
 /* Step7：顶条本地时钟（每 tick） */
@@ -245,6 +317,17 @@ void IstatGraph::addSample(double v01) {
     m_head = (m_head + 1) % m_cap;
     if (m_n < m_cap) { m_n++; }
     update();
+}
+
+/* Step8：按 paint 同序导出最近 m_n 个采样（历史持久化用） */
+void IstatGraph::getVals(double* out, int max) const {
+    for (int i = 0; i < max; i++) { out[i] = 0.0; }
+    int n = m_n < max ? m_n : max;
+    for (int s = 0; s < n; s++) {
+        int idx = m_head - n + s;
+        while (idx < 0) { idx += m_cap; }
+        out[s] = m_vals[idx];
+    }
 }
 
 void IstatGraph::paintEvent(QPaintEvent*) {
@@ -344,7 +427,8 @@ IstatLogic::IstatLogic(QObject* parent)
     m_alertCoolMem = 0;
     m_alertCoolDisk = 0;
     m_alertCoolBat = 0;
-    m_alertNetHi = 0;
+    m_alertNetRxHi = 0;
+    m_alertNetTxHi = 0;
     m_alertCoolNet = 0;
     m_netSumRx = 0.0;
     m_netSumTx = 0.0;
@@ -352,12 +436,85 @@ IstatLogic::IstatLogic(QObject* parent)
 }
 
 IstatLogic::~IstatLogic() {
+    saveHistory();       /* 退出兜底落盘 */
+}
+
+/* ═══════════ 历史持久化（Step8：官方跨重启历史库的轻量版） ═══════════ */
+
+static QString IstmCacheDir() {
+    const char* home = getenv("HOME");
+    QString base = home ? QString::fromUtf8(home) : QString("/tmp");
+    return base + qFromUtf8("/.cache/istat_menus");
+}
+
+static void IstmMkCacheDir() {
+#ifdef QT3_BUILD
+    QString cache = QString(getenv("HOME")) + qFromUtf8("/.cache");
+    mkdir(cache.latin1(), 0755);
+    mkdir(IstmCacheDir().latin1(), 0755);         /* 已存在时静默失败 OK */
+#else
+    QDir().mkpath(IstmCacheDir());
+#endif
+}
+
+static void IstmSaveGraphFile(const IstatGraph* g, const QString& path) {
+    double vals[ISTM_RING_MAX];
+    g->getVals(vals, ISTM_RING_MAX);
+    QString line;
+    for (int i = 0; i < ISTM_RING_MAX; i++) {
+        if (i > 0) { line += " "; }
+        line += QString::number(vals[i], 'f', 4);
+    }
+    line += "\n";
+    QFile f(path);
+#ifdef QT3_BUILD
+    if (f.open(IO_WriteOnly | IO_Truncate)) {
+        f.writeBlock(line.latin1(), (unsigned long)line.length());
+        f.close();
+    }
+#else
+    if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        f.write(line.toLatin1(), (long long)line.length());
+        f.close();
+    }
+#endif
+}
+
+static void IstmLoadGraphFile(IstatGraph* g, const QString& path) {
+    QStringList tk = IstmSplitLines(IstmReadFile(path));
+    if (tk.isEmpty()) { return; }
+    QStringList nums = IstmTokens(tk[0]);       /* 空白分词，两版 Qt 通用 */
+    for (int i = 0; i < (int)nums.count(); i++) {
+        g->addSample(nums[i].toDouble());
+    }
+}
+
+void IstatLogic::saveHistory() {
+    if (!m_ui) { return; }
+    IstmMkCacheDir();
+    QString d = IstmCacheDir() + "/";
+    IstmSaveGraphFile(m_ui->graphCpu, d + "cpu.txt");
+    IstmSaveGraphFile(m_ui->graphMem, d + "mem.txt");
+    IstmSaveGraphFile(m_ui->graphBat, d + "bat.txt");
+    IstmSaveGraphFile(m_ui->graphNetRx, d + "rx.txt");
+    IstmSaveGraphFile(m_ui->graphNetTx, d + "tx.txt");
+}
+
+void IstatLogic::loadHistory() {
+    if (!m_ui) { return; }
+    QString d = IstmCacheDir() + "/";
+    IstmLoadGraphFile(m_ui->graphCpu, d + "cpu.txt");
+    IstmLoadGraphFile(m_ui->graphMem, d + "mem.txt");
+    IstmLoadGraphFile(m_ui->graphBat, d + "bat.txt");
+    IstmLoadGraphFile(m_ui->graphNetRx, d + "rx.txt");
+    IstmLoadGraphFile(m_ui->graphNetTx, d + "tx.txt");
 }
 
 void IstatLogic::setWidgets(IstatUi* ui) {
     m_ui = ui;
     probeCpuStatic();
     fillGpuRow();              /* GPU 硬件清单不变：一次性 */
+    loadHistory();             /* Step8：跨重启历史还原 */
 
     m_tickTimer = new QTimer(this);
     connect(m_tickTimer, SIGNAL(timeout()), this, SLOT(onTick()));
@@ -579,7 +736,9 @@ void IstatLogic::sampleNet() {
         sumRx += rRx;
         sumTx += rTx;
 
-        if (row < ISTM_MAXIF) {                      /* 表内逐行填充 */
+        if (row < ISTM_MAXIF && row < IstmRows(m_ui->tblNet)
+            && row <= m_netRows) {
+            /* 防越界：tick1 实际行数未扩时暂跳过（m_netRows 每 10 拍更新） */
             QString ipTxt = m_ifIp.contains(name)
                 ? m_ifIp[name] : QString("—");
             IstmSetCell(m_ui->tblNet, row, 0, name);
@@ -747,6 +906,7 @@ void IstatLogic::sampleDisk() {
 void IstatLogic::fillDiskStatic() {
     if (!m_ui) { return; }
     m_diskRows = 0;
+    IstmSetRows(m_ui->tblDisk, ISTM_MAXIF);      /* 先扩行，防 setText 越界 */
     QString out = IstmRun("df",
         QStringList() << "-k" << "-P");
     QStringList lines = IstmSplitLines(out);
@@ -810,6 +970,7 @@ void IstatLogic::fillGpuRow() {
 void IstatLogic::sampleSensors() {
     if (!m_ui) { return; }
     int row = 0;
+    IstmSetRows(m_ui->tblSens, ISTM_MAXIF);      /* 先扩行，防 setText 越界 */
     for (int h = 0; h < 12 && row < ISTM_MAXIF; h++) {
         QString dir = QString("/sys/class/hwmon/hwmon%1").arg(h);
         QString nm = IstmReadFile(dir + "/name");
@@ -908,9 +1069,28 @@ void IstatLogic::sampleBattery() {
         ? ((double)full / (double)design) * 100.0 : 0.0;
     double watts = ((double)vol * 1e-6) * ((double)cur * 1e-6);   /* μV·μA→W */
     QString wt = QString::number(watts, 'f', 1);
-    m_ui->lblBatHealth->setText(qFromUtf8("健康 %1% · %2 W")
+    /* Step8：剩余/充满时间估算（官方 Time Remaining 等价）：
+       charge(μAh)÷current(μA)→h→min；acText 在后段，这里只看 status */
+    QString eta;
+    if (cur > 0) {
+        if (status == "Charging") {
+            long long rem = full - now;
+            if (rem < 0) { rem = 0; }
+            long long min = rem * 60LL / cur;
+            eta = qFromUtf8("充满 %1h%2m")
+                .arg((int)(min / 60LL))
+                .arg(IstmZ2((int)(min % 60LL)));
+        } else if (status == "Discharging") {
+            long long min = now * 60LL / cur;
+            eta = qFromUtf8("剩 %1h%2m")
+                .arg((int)(min / 60LL))
+                .arg(IstmZ2((int)(min % 60LL)));
+        }
+    }
+    m_ui->lblBatHealth->setText(qFromUtf8("健康 %1% · %2 W%3")
         .arg(health, 0, 'f', 1)
-        .arg(wt));
+        .arg(wt)
+        .arg(eta.isEmpty() ? QString("") : qFromUtf8("  ") + eta));
 
     /* μAh→mAh（÷1000），再按 KB 口径 humanize（1 mAh ≈ 1 KB 量级显示） */
     m_ui->lblBatKv->setText(qFromUtf8(
@@ -940,10 +1120,11 @@ void IstatLogic::sampleBattery() {
                 icon = qFromUtf8("🔌");
             }
         }
-        m_ui->topBat->setText(qFromUtf8("%1 %2%%3")
+        m_ui->topBat->setText(qFromUtf8("%1 %2%%3%4")
             .arg(icon)
             .arg(cap)
-            .arg(acText == "1" ? " · AC" : ""));
+            .arg(acText == "1" ? " · AC" : "")
+            .arg(eta.isEmpty() ? QString("") : qFromUtf8(" · ") + eta));
     }
 }
 
@@ -1031,21 +1212,31 @@ void IstatLogic::checkAlerts() {
         }
     }
 
+    /* Step8：Rx/Tx 分离阈值——下行/上行各 >5MB/s 连续 3 轮（30s），共享冷却 */
+    if (m_netSumRx > 5.0 * 1024.0 * 1024.0) {
+        m_alertNetRxHi++;
+    } else {
+        m_alertNetRxHi = 0;
+    }
+    if (m_netSumTx > 5.0 * 1024.0 * 1024.0) {
+        m_alertNetTxHi++;
+    } else {
+        m_alertNetTxHi = 0;
+    }
     if (m_alertCoolCpu > 0) { m_alertCoolCpu--; }
     if (m_alertCoolMem > 0) { m_alertCoolMem--; }
     if (m_alertCoolDisk > 0) { m_alertCoolDisk--; }
-
-    /* Step7：网络合计 >5MB/s 连续 3 轮（30s），冷却 30 轮 */
-    if (m_netSumRx + m_netSumTx > 5.0 * 1024.0 * 1024.0) {
-        m_alertNetHi++;
-    } else {
-        m_alertNetHi = 0;
-    }
-    if (m_alertNetHi >= 3 && m_alertCoolNet <= 0) {
+    if (m_alertNetRxHi >= 3 && m_alertCoolNet <= 0) {
         m_alertCoolNet = 30;
         IstmAlertPush(m_alertHist,
-            qFromUtf8("网络流量 >5MB/s（30s），瞬时 %1")
-            .arg(IstmHumanRate(m_netSumRx + m_netSumTx)));
+            qFromUtf8("下行 >5MB/s（30s），瞬时 %1")
+            .arg(IstmHumanRate(m_netSumRx)));
+    }
+    if (m_alertNetTxHi >= 3 && m_alertCoolNet <= 0) {
+        m_alertCoolNet = 30;
+        IstmAlertPush(m_alertHist,
+            qFromUtf8("上行 >5MB/s（30s），瞬时 %1")
+            .arg(IstmHumanRate(m_netSumTx)));
     }
     if (m_alertCoolNet > 0) { m_alertCoolNet--; }
 
@@ -1061,11 +1252,11 @@ void IstatLogic::fillAbout() {
         "S.M.A.R.T./SPD/额外电压轨需 root 未实现；本机无风扇；天气未接（官方付费源+本机公网受限）\n");
     t += m_alertHist.isEmpty() ? QString("\n最近提醒：（无）") :
         (qFromUtf8("\n最近提醒（阈值：CPU/内存>90 连续 30s · 分区>=90% · "
-            "电量<15% 未接 AC · 网络>5MB/s 30s；5min 冷却）\n") + m_alertHist);
+            "电量<15% 未接 AC · 下行/上行 >5MB/s 30s；5min 冷却）\n") + m_alertHist);
     m_ui->lblAbout->setText(t);
     if (m_ui->lblWorld) {
         m_ui->lblWorld->setText(qFromUtf8(
-            "世界钟（固定 UTC offset，无 DST）\n") + IstmWorldClocks());
+            "世界钟（tzdata 优先，缺失回退固定 offset）\n") + IstmWorldClocks());
     }
 }
 
@@ -1138,7 +1329,11 @@ void IstatLogic::updateTopbar() {
     if (!m_ui) { return; }
     if (m_ui->topCpu) {
         m_ui->topCpu->setText(qFromUtf8("CPU %1%").arg(m_cpuPct));
+        IstmTopColor(m_ui->topCpu, m_cpuPct);
     }
+    int memTopPct = m_memTotalKB > 0
+        ? (int)(100 * m_memUsedKB / m_memTotalKB) : 0;
+    IstmTopColor(m_ui->topMem, memTopPct);
     /* topMem 已在 sampleMem 内置；topNet/topBat 已由 sampleNet/sampleBattery */
     sampleTemp();
     IstmTopClockText(m_ui->topClock);
@@ -1172,5 +1367,8 @@ void IstatLogic::onTick() {
        放 tick==1 会导致启动即完全卡死且首帧数据全空。 */
     if ((m_tick % 120) == 30) {
         fetchPubIp();
+    }
+    if ((m_tick % 600) == 0) {                 /* Step8：每 10 分钟落盘历史 */
+        saveHistory();
     }
 }
