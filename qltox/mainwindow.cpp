@@ -809,6 +809,7 @@ MainWindow::MainWindow(QWidget* parent)
 
 MainWindow::~MainWindow() {
     s_trayIcon = 0;
+    if (m_tray) { m_tray->hide(); }   /* 提前移除托盘图标，随进程退出 */
     ToxAPI::stopPollEvent();
     EventPoller::stop();
     Storage::instance().close();
@@ -1923,16 +1924,20 @@ bool MainWindow::event(QEvent* event) {
     return ret;
 }
 
-// 关闭拦截：托盘可用时点 X / Alt+F4 不退出，改为隐藏到托盘（最小化到托盘）。
-// 真正退出必须走 quitApp()（先置 m_forceQuit 再 close）；
-// 托盘不可见（无托盘环境）时才允许直接关闭，避免窗口藏起来后应用不可达。
+// 关闭行为：默认点 X / Alt+F4 即退出（托盘图标随进程消失，走与 quitApp 相同收尾链路）。
+// config.json 设 "close_to_tray":"1" 可恢复旧行为：隐藏到托盘驻留，托盘菜单「退出」才真正退出。
+// 托盘不可用（无托盘环境）时直接关闭，避免窗口藏起来后应用不可达。
 void MainWindow::closeEvent(QCloseEvent* event) {
-    if (!m_forceQuit && m_tray && m_tray->isVisible()) {
+    bool closeToTray = !m_forceQuit && m_tray && m_tray->isVisible()
+        && Config::value("close_to_tray") == "1";
+    if (closeToTray) {
         hide();
         event->ignore();
         return;
     }
     event->accept();
+    if (m_tray) { m_tray->hide(); }   /* 先移除托盘图标（Qt3 托盘是顶层 QWidget，会挡 lastWindowClosed） */
+    qApp->quit();                     /* 直接退出事件循环，不依赖 lastWindowClosed（Qt3/Qt4 通吃） */
 }
 
 // 真正退出应用：「文件→退出」菜单与托盘右键菜单的共同入口。
