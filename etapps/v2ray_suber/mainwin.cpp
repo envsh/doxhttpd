@@ -245,6 +245,10 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     nodeMenu->insertItem(qFromUtf8("用此节点启动核心"), logic, SLOT(onStartCore()));
     nodeMenu->insertItem(qFromUtf8("复制节点链接"), logic, SLOT(onCopyNodeLink()));
     nodeMenu->insertSeparator();
+    nodeMenu->insertItem(qFromUtf8("查询国家（选中）"), logic, SLOT(onLookupCountrySelected()));
+    nodeMenu->insertItem(qFromUtf8("查询国家（全部未确定）"), logic, SLOT(onLookupCountryAll()));
+    nodeMenu->insertItem(qFromUtf8("清空国家缓存"), logic, SLOT(onClearGeoCache()));
+    nodeMenu->insertSeparator();
     nodeMenu->insertItem(qFromUtf8("测试 TCP（选中）"), logic, SLOT(onTestTcpSelected()));
     nodeMenu->insertItem(qFromUtf8("测试真连接（选中）"), logic, SLOT(onTestRealSelected()));
     nodeMenu->insertItem(qFromUtf8("批量 TCP（全部）"), logic, SLOT(onTestTcpAll()));
@@ -257,6 +261,10 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     QMenu* nodeMenu = new QMenu(w);
     nodeMenu->addAction(qFromUtf8("用此节点启动核心"), logic, SLOT(onStartCore()));
     nodeMenu->addAction(qFromUtf8("复制节点链接"), logic, SLOT(onCopyNodeLink()));
+    nodeMenu->addSeparator();
+    nodeMenu->addAction(qFromUtf8("查询国家（选中）"), logic, SLOT(onLookupCountrySelected()));
+    nodeMenu->addAction(qFromUtf8("查询国家（全部未确定）"), logic, SLOT(onLookupCountryAll()));
+    nodeMenu->addAction(qFromUtf8("清空国家缓存"), logic, SLOT(onClearGeoCache()));
     nodeMenu->addSeparator();
     nodeMenu->addAction(qFromUtf8("测试 TCP（选中）"), logic, SLOT(onTestTcpSelected()));
     nodeMenu->addAction(qFromUtf8("测试真连接（选中）"), logic, SLOT(onTestRealSelected()));

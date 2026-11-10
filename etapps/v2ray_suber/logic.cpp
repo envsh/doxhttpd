@@ -52,6 +52,13 @@ static int sFindStr(const QString& s, const char* sub, int from) {
     return s.indexOf(QString(sub), from);
 #endif
 }
+static int sFindQ(const QString& s, const QString& sub, int from) {
+#ifdef QT3_BUILD
+    return s.find(sub, from);
+#else
+    return s.indexOf(sub, from);
+#endif
+}
 static int sRFind(const QString& s, char c, int from) {
 #ifdef QT3_BUILD
     return s.findRev(c, from);
@@ -352,6 +359,10 @@ V2RayLogic::V2RayLogic(QObject* parent)
     coreKind = CoreV2ray;
     coreSourceSystem = false;
     dlCoreKind = 0;
+    geoProc = 0;
+    geoBusy = false;
+    geoCurIdx = -1;
+    geoToolOk = false;
     testTcpSelBtn = 0;
     testRealSelBtn = 0;
     testTcpAllBtn = 0;
@@ -367,10 +378,12 @@ V2RayLogic::V2RayLogic(QObject* parent)
     loadSubscriptions();
     loadSubMeta();
     loadCoreSettings();
+    loadGeoCache();
     loadNodes();
     if (subList) { refreshSubList(); }
     detectSystemXray();
     refreshCoreCombo();
+    QTimer::singleShot(300, this, SLOT(onLookupCountryAll()));
     /* 订阅定时自动更新（默认 60 分钟，串行执行） */
     autoUpdateTimer = new QTimer(this);
     connect(autoUpdateTimer, SIGNAL(timeout()), this, SLOT(onAutoUpdateTick()));
@@ -524,32 +537,35 @@ void V2RayLogic::refreshNodeList() {
     if (!nodeList) { return; }
     if (v2TableCols(nodeList) == 0) {
         QStringList cols;
-        cols << qFromUtf8("名称") << qFromUtf8("协议") << qFromUtf8("地址")
-             << qFromUtf8("端口") << qFromUtf8("传输") << qFromUtf8("安全")
-             << "TCP(ms)" << qFromUtf8("真连(ms)") << qFromUtf8("状态");
+        cols << qFromUtf8("名称") << qFromUtf8("协议") << qFromUtf8("国家")
+             << qFromUtf8("地址") << qFromUtf8("端口") << qFromUtf8("传输")
+             << qFromUtf8("安全") << "TCP(ms)" << qFromUtf8("真连(ms)")
+             << qFromUtf8("状态");
         v2TableInit(nodeList, cols);
 #ifdef QT3_BUILD
         nodeList->setColumnWidth(0, 240);
         nodeList->setColumnStretchable(0, true);  /* 名称列拉伸 */
         nodeList->setColumnWidth(1, 60);   /* 协议 */
-        nodeList->setColumnWidth(2, 170);  /* 地址 */
-        nodeList->setColumnWidth(3, 60);   /* 端口 */
-        nodeList->setColumnWidth(4, 60);   /* 传输 */
-        nodeList->setColumnWidth(5, 70);   /* 安全 */
-        nodeList->setColumnWidth(6, 70);   /* TCP */
-        nodeList->setColumnWidth(7, 80);   /* 真连 */
-        nodeList->setColumnWidth(8, 70);   /* 状态 */
+        nodeList->setColumnWidth(2, 90);   /* 国家 */
+        nodeList->setColumnWidth(3, 170);  /* 地址 */
+        nodeList->setColumnWidth(4, 60);   /* 端口 */
+        nodeList->setColumnWidth(5, 60);   /* 传输 */
+        nodeList->setColumnWidth(6, 70);   /* 安全 */
+        nodeList->setColumnWidth(7, 70);   /* TCP */
+        nodeList->setColumnWidth(8, 80);   /* 真连 */
+        nodeList->setColumnWidth(9, 70);   /* 状态 */
 #else
         nodeList->horizontalHeader()->setStretchLastSection(false);
         nodeList->horizontalHeader()->setResizeMode(0, QHeaderView::Stretch);
         nodeList->setColumnWidth(1, 60);
-        nodeList->setColumnWidth(2, 170);
-        nodeList->setColumnWidth(3, 60);
+        nodeList->setColumnWidth(2, 90);
+        nodeList->setColumnWidth(3, 170);
         nodeList->setColumnWidth(4, 60);
-        nodeList->setColumnWidth(5, 70);
+        nodeList->setColumnWidth(5, 60);
         nodeList->setColumnWidth(6, 70);
-        nodeList->setColumnWidth(7, 80);
-        nodeList->setColumnWidth(8, 70);
+        nodeList->setColumnWidth(7, 70);
+        nodeList->setColumnWidth(8, 80);
+        nodeList->setColumnWidth(9, 70);
 #endif
     }
     v2TableClear(nodeList);
@@ -572,15 +588,19 @@ void V2RayLogic::refreshNodeList() {
         } else {
             st = qFromUtf8("未测");
         }
+        QString geo = n.country.isEmpty() ? qFromUtf8("—")
+            : (n.countryName.isEmpty() ? n.country
+               : n.country + " " + n.countryName);
         v2TableSetCell(nodeList, i, 0, name);
         v2TableSetCell(nodeList, i, 1, n.proto);
-        v2TableSetCell(nodeList, i, 2, n.addr);
-        v2TableSetCell(nodeList, i, 3, n.port);
-        v2TableSetCell(nodeList, i, 4, n.net.isEmpty() ? QString("tcp") : n.net);
-        v2TableSetCell(nodeList, i, 5, n.security.isEmpty() ? QString("none") : n.security);
-        v2TableSetCell(nodeList, i, 6, tcp);
-        v2TableSetCell(nodeList, i, 7, real);
-        v2TableSetCell(nodeList, i, 8, st);
+        v2TableSetCell(nodeList, i, 2, geo);
+        v2TableSetCell(nodeList, i, 3, n.addr);
+        v2TableSetCell(nodeList, i, 4, n.port);
+        v2TableSetCell(nodeList, i, 5, n.net.isEmpty() ? QString("tcp") : n.net);
+        v2TableSetCell(nodeList, i, 6, n.security.isEmpty() ? QString("none") : n.security);
+        v2TableSetCell(nodeList, i, 7, tcp);
+        v2TableSetCell(nodeList, i, 8, real);
+        v2TableSetCell(nodeList, i, 9, st);
     }
     emit nodesChanged();
 }
@@ -912,6 +932,183 @@ void V2RayLogic::onCoreKindChanged(int index) {
     appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("已切换内核：") + coreDisplayName());
 }
 
+/* ── 国家查询（离线 geoiplookup 队列） ── */
+QString V2RayLogic::findGeoTool() const {
+    const char* pe = getenv("PATH");
+    QString pathEnv = pe ? QString(pe) : QString();
+#ifdef QT3_BUILD
+    QStringList dirs = QStringList::split(':', pathEnv);
+#else
+    QStringList dirs = pathEnv.split(QChar(':'));
+#endif
+    for (int i = 0; i < (int)dirs.count(); ++i) {
+        if (dirs[i].isEmpty()) { continue; }
+        QString p = dirs[i] + "/geoiplookup";
+        if (fileExists(p) && access(QFile::encodeName(p).data(), X_OK) == 0) {
+            return p;
+        }
+    }
+    return QString();
+}
+
+void V2RayLogic::loadGeoCache() {
+    geoCache.clear();
+    QByteArray tb = qToUtf8(readUtf8File(baseDir() + "/geo_cache.json"));
+    if (tb.isEmpty()) { return; }
+    cJSON* root = cJSON_Parse(tb.data());
+    if (!root) { return; }
+    for (cJSON* it = root->child; it; it = it->next) {
+        if (it->string && it->valuestring) {
+            geoCache.insert(qFromUtf8(it->string), qFromUtf8(it->valuestring));
+        }
+    }
+    cJSON_Delete(root);
+}
+
+void V2RayLogic::saveGeoCache() {
+    cJSON* root = cJSON_CreateObject();
+    for (QMap<QString, QString>::iterator it = geoCache.begin(); it != geoCache.end(); ++it) {
+#ifdef QT3_BUILD
+        cJSON_AddStringToObject(root, qToUtf8(it.key()).data(), qToUtf8(it.data()).data());
+#else
+        cJSON_AddStringToObject(root, qToUtf8(it.key()).data(), qToUtf8(it.value()).data());
+#endif
+    }
+    char* txt = cJSON_PrintUnformatted(root);
+    if (txt) {
+        writeUtf8File(baseDir() + "/geo_cache.json", qFromUtf8(txt));
+        cJSON_free(txt);
+    }
+    cJSON_Delete(root);
+}
+
+static bool v2IsIpLiteral(const QString& a) {
+    if (a.isEmpty()) { return false; }
+    for (int i = 0; i < (int)a.length(); ++i) {
+        QChar c = a[i];
+        bool ok = c.isDigit() || c == '.' || c == ':'
+            || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        if (!ok) { return false; }
+    }
+    return true;
+}
+
+void V2RayLogic::startGeoLookup(bool all) {
+    if (geoBusy) {
+        appendLog(qFromUtf8("国家查询已在进行中"));
+        return;
+    }
+    geoToolPath = findGeoTool();
+    geoToolOk = !geoToolPath.isEmpty();
+    geoQueue.clear();
+    int sel = selectedNodeIndex();
+    for (int i = 0; i < (int)nodes.count(); ++i) {
+        if (!all && i != sel) { continue; }
+        if (!nodes[i].country.isEmpty()) { continue; }
+        if (!v2IsIpLiteral(nodes[i].addr)) { continue; }
+        geoQueue.append(i);
+    }
+    if ((int)geoQueue.count() <= 0) {
+        appendLog(qFromUtf8("没有需要查询国家的节点"));
+        return;
+    }
+    if (!geoToolOk) {
+        appendLogWithPrefix(qFromUtf8("[国家]"),
+            qFromUtf8("未找到 geoiplookup，无法离线查询（可依赖名称关键词）"));
+        return;
+    }
+    geoBusy = true;
+    if (nodeStatus) { nodeStatus->setText(qFromUtf8("国家查询中…")); }
+    appendLogWithPrefix(qFromUtf8("[国家]"),
+        qFromUtf8("开始查询国家，共 ") + QString::number((int)geoQueue.count()) + qFromUtf8(" 个"));
+    startNextGeo();
+}
+
+void V2RayLogic::startNextGeo() {
+    if ((int)geoQueue.count() <= 0) {
+        geoBusy = false;
+        saveGeoCache();
+        refreshNodeList();
+        if (nodeStatus) { nodeStatus->setText(qFromUtf8("状态：国家查询完成")); }
+        appendLogWithPrefix(qFromUtf8("[国家]"), qFromUtf8("国家查询完成"));
+        return;
+    }
+    geoCurIdx = geoQueue[0];
+    geoQueue.remove(geoQueue.at(0));
+    if (geoCurIdx < 0 || geoCurIdx >= (int)nodes.count()) {
+        QTimer::singleShot(0, this, SLOT(startNextGeo()));
+        return;
+    }
+    QString ip = nodes[geoCurIdx].addr;
+    if (geoCache.contains(ip)) {
+        QString val = geoCache[ip];
+        int bar = sFindStr(val, "|", 0);
+        nodes[geoCurIdx].country = (bar > 0) ? val.left(bar) : val;
+        nodes[geoCurIdx].countryName = (bar > 0) ? val.mid(bar + 1) : QString();
+        nodes[geoCurIdx].geoSource = "geoip";
+        QTimer::singleShot(0, this, SLOT(startNextGeo()));
+        return;
+    }
+    if (geoProc) { delete geoProc; geoProc = 0; }
+    geoData.resize(0);
+    geoProc = new QProcess(this);
+    connect(geoProc, SIGNAL(readyReadStdout()), this, SLOT(onGeoOutput()));
+    connect(geoProc, SIGNAL(processExited()), this, SLOT(onGeoExited()));
+    geoProc->addArgument(geoToolPath);
+    geoProc->addArgument(ip);
+    geoProc->start();
+}
+
+void V2RayLogic::onGeoOutput() {
+    if (!geoProc) { return; }
+#ifdef QT3_BUILD
+    baAppend(geoData, geoProc->readStdout());
+#else
+    baAppend(geoData, geoProc->readAllStandardOutput());
+#endif
+}
+
+void V2RayLogic::onGeoExited() {
+    if (geoProc) {
+        delete geoProc;
+        geoProc = 0;
+        QString out = qFromUtf8(geoData.data(), (int)geoData.size());
+        int c = sFindStr(out, ": ", 0);
+        if (c > 0 && geoCurIdx >= 0 && geoCurIdx < (int)nodes.count()) {
+            QString body = out.mid(c + 2);
+            int comma = sFindStr(body, ",", 0);
+            QString cc = (comma > 0) ? body.left(comma) : body;
+#ifdef QT3_BUILD
+            cc = cc.stripWhiteSpace();
+#else
+            cc = cc.trimmed();
+#endif
+            if (cc.length() == 2) {
+                cc = cc.upper();
+                nodes[geoCurIdx].country = cc;
+                nodes[geoCurIdx].countryName = countryNameOf(cc);
+                nodes[geoCurIdx].geoSource = "geoip";
+                geoCache.insert(nodes[geoCurIdx].addr, cc + "|" + countryNameOf(cc));
+            }
+        }
+    }
+    QTimer::singleShot(0, this, SLOT(startNextGeo()));
+}
+
+void V2RayLogic::onLookupCountrySelected() {
+    if (selectedNodeIndex() < 0) {
+        appendLog(qFromUtf8("请先选中节点"));
+        return;
+    }
+    startGeoLookup(false);
+}
+void V2RayLogic::onLookupCountryAll() { startGeoLookup(true); }
+void V2RayLogic::onClearGeoCache() {
+    geoCache.clear();
+    saveGeoCache();
+    appendLog(qFromUtf8("国家缓存已清空"));
+}
+
 void V2RayLogic::setTestWidgets(QPushButton* tcpSel, QPushButton* realSel,
                                 QPushButton* tcpAll, QPushButton* realAll,
                                 QPushButton* stopTest) {
@@ -1097,6 +1294,9 @@ void V2RayLogic::loadNodes() {
                     V2N_LOAD(updatedAt, "updatedAt")
                     V2N_LOAD(testedAt, "testedAt")
                     V2N_LOAD(raw, "raw")
+                    V2N_LOAD(country, "country")
+                    V2N_LOAD(countryName, "countryName")
+                    V2N_LOAD(geoSource, "geoSource")
 #undef V2N_LOAD
                     j = cJSON_GetObjectItem(it, "allowInsecure");
                     if (j) { n.allowInsecure = (j->valueint != 0); }
@@ -1104,6 +1304,7 @@ void V2RayLogic::loadNodes() {
                     n.tcpMs = j ? j->valueint : -2;
                     j = cJSON_GetObjectItem(it, "realMs");
                     n.realMs = j ? j->valueint : -2;
+                    if (n.country.isEmpty()) { applyCountryFromName(n); }
                     n.id = nodeId(n);
                     if (n.id.isEmpty()) { continue; }
                     n.supported = nodeSupportedByCore(n);
@@ -1165,6 +1366,9 @@ void V2RayLogic::saveNodes() {
         V2N_SAVE(updatedAt, "updatedAt")
         V2N_SAVE(testedAt, "testedAt")
         V2N_SAVE(raw, "raw")
+        V2N_SAVE(country, "country")
+        V2N_SAVE(countryName, "countryName")
+        V2N_SAVE(geoSource, "geoSource")
 #undef V2N_SAVE
         cJSON_AddNumberToObject(o, "allowInsecure", n.allowInsecure ? 1 : 0);
         cJSON_AddNumberToObject(o, "tcpMs", n.tcpMs);
@@ -1389,6 +1593,7 @@ void V2RayLogic::onSubFetched() {
         st.sync();
     }
     saveNodes();
+    startGeoLookup(true);
     /* A：记录该订阅的更新时间/节点数 */
     subMeta.insert(curSubUrl,
         QTime::currentTime().toString("hh:mm:ss") + "|" + QString::number((int)nodes.count()));
@@ -1420,6 +1625,157 @@ QString V2RayLogic::maybeDecodeBase64(const QString& in) {
 void V2RayLogic::clearNodes() {
     nodes.clear();
 }
+
+/* ── 国家/地区（名称优先，GeoIP 兜底） ── */
+struct V2GeoEntry { const char* key; const char* cc; const char* cn; };
+static const V2GeoEntry kV2GeoTable[] = {
+    {"美国","US","美国"},{"US","US","美国"},{"United States","US","美国"},
+    {"香港","HK","香港"},{"HK","HK","香港"},
+    {"台湾","TW","台湾"},{"TW","TW","台湾"},
+    {"日本","JP","日本"},{"JP","JP","日本"},{"Japan","JP","日本"},
+    {"新加坡","SG","新加坡"},{"SG","SG","新加坡"},
+    {"韩国","KR","韩国"},{"KR","KR","韩国"},
+    {"英国","GB","英国"},{"UK","GB","英国"},{"GB","GB","英国"},
+    {"德国","DE","德国"},{"DE","DE","德国"},
+    {"法国","FR","法国"},{"FR","FR","法国"},
+    {"荷兰","NL","荷兰"},{"NL","NL","荷兰"},
+    {"俄罗斯","RU","俄罗斯"},{"RU","RU","俄罗斯"},
+    {"乌克兰","UA","乌克兰"},{"UA","UA","乌克兰"},
+    {"罗马尼亚","RO","罗马尼亚"},{"RO","RO","罗马尼亚"},
+    {"立陶宛","LT","立陶宛"},{"LT","LT","立陶宛"},
+    {"瑞典","SE","瑞典"},{"SE","SE","瑞典"},
+    {"挪威","NO","挪威"},{"NO","NO","挪威"},
+    {"芬兰","FI","芬兰"},{"FI","FI","芬兰"},
+    {"丹麦","DK","丹麦"},{"DK","DK","丹麦"},
+    {"波兰","PL","波兰"},{"PL","PL","波兰"},
+    {"捷克","CZ","捷克"},{"CZ","CZ","捷克"},
+    {"奥地利","AT","奥地利"},{"AT","AT","奥地利"},
+    {"瑞士","CH","瑞士"},{"CH","CH","瑞士"},
+    {"意大利","IT","意大利"},{"IT","IT","意大利"},
+    {"西班牙","ES","西班牙"},{"ES","ES","西班牙"},
+    {"葡萄牙","PT","葡萄牙"},{"PT","PT","葡萄牙"},
+    {"希腊","GR","希腊"},{"GR","GR","希腊"},
+    {"土耳其","TR","土耳其"},{"TR","TR","土耳其"},
+    {"以色列","IL","以色列"},{"IL","IL","以色列"},
+    {"伊拉克","IQ","伊拉克"},{"IQ","IQ","伊拉克"},
+    {"伊朗","IR","伊朗"},{"IR","IR","伊朗"},
+    {"沙特","SA","沙特"},{"SA","SA","沙特"},
+    {"巴基斯坦","PK","巴基斯坦"},{"PK","PK","巴基斯坦"},
+    {"孟加拉","BD","孟加拉"},{"BD","BD","孟加拉"},
+    {"柬埔寨","KH","柬埔寨"},{"KH","KH","柬埔寨"},
+    {"缅甸","MM","缅甸"},{"MM","MM","缅甸"},
+    {"白俄罗斯","BY","白俄罗斯"},{"BY","BY","白俄罗斯"},
+    {"塞尔维亚","RS","塞尔维亚"},{"RS","RS","塞尔维亚"},
+    {"匈牙利","HU","匈牙利"},{"HU","HU","匈牙利"},
+    {"保加利亚","BG","保加利亚"},{"BG","BG","保加利亚"},
+    {"斯洛伐克","SK","斯洛伐克"},{"SK","SK","斯洛伐克"},
+    {"斯洛文尼亚","SI","斯洛文尼亚"},{"SI","SI","斯洛文尼亚"},
+    {"克罗地亚","HR","克罗地亚"},{"HR","HR","克罗地亚"},
+    {"爱尔兰","IE","爱尔兰"},{"IE","IE","爱尔兰"},
+    {"冰岛","IS","冰岛"},{"IS","IS","冰岛"},
+    {"比利时","BE","比利时"},{"BE","BE","比利时"},
+    {"卢森堡","LU","卢森堡"},{"LU","LU","卢森堡"},
+    {"爱沙尼亚","EE","爱沙尼亚"},{"EE","EE","爱沙尼亚"},
+    {"拉脱维亚","LV","拉脱维亚"},{"LV","LV","拉脱维亚"},
+    {"亚美尼亚","AM","亚美尼亚"},{"AM","AM","亚美尼亚"},
+    {"格鲁吉亚","GE","格鲁吉亚"},{"GE","GE","格鲁吉亚"},
+    {"阿塞拜疆","AZ","阿塞拜疆"},{"AZ","AZ","阿塞拜疆"},
+    {"乌兹别克斯坦","UZ","乌兹别克斯坦"},{"UZ","UZ","乌兹别克斯坦"},
+    {"秘鲁","PE","秘鲁"},{"PE","PE","秘鲁"},
+    {"委内瑞拉","VE","委内瑞拉"},{"VE","VE","委内瑞拉"},
+    {"乌拉圭","UY","乌拉圭"},{"UY","UY","乌拉圭"},
+    {"摩洛哥","MA","摩洛哥"},{"MA","MA","摩洛哥"},
+    {"尼日利亚","NG","尼日利亚"},{"NG","NG","尼日利亚"},
+    {"肯尼亚","KE","肯尼亚"},{"KE","KE","肯尼亚"},
+    {"阿联酋","AE","阿联酋"},{"AE","AE","阿联酋"},
+    {"哈萨克斯坦","KZ","哈萨克斯坦"},{"KZ","KZ","哈萨克斯坦"},
+    {"印度","IN","印度"},{"IN","IN","印度"},
+    {"泰国","TH","泰国"},{"TH","TH","泰国"},
+    {"越南","VN","越南"},{"VN","VN","越南"},
+    {"印尼","ID","印尼"},{"ID","ID","印尼"},
+    {"菲律宾","PH","菲律宾"},{"PH","PH","菲律宾"},
+    {"马来西亚","MY","马来西亚"},{"MY","MY","马来西亚"},
+    {"加拿大","CA","加拿大"},{"CA","CA","加拿大"},
+    {"墨西哥","MX","墨西哥"},{"MX","MX","墨西哥"},
+    {"巴西","BR","巴西"},{"BR","BR","巴西"},
+    {"阿根廷","AR","阿根廷"},{"AR","AR","阿根廷"},
+    {"智利","CL","智利"},{"CL","CL","智利"},
+    {"哥伦比亚","CO","哥伦比亚"},{"CO","CO","哥伦比亚"},
+    {"澳大利亚","AU","澳大利亚"},{"AU","AU","澳大利亚"},
+    {"新西兰","NZ","新西兰"},{"NZ","NZ","新西兰"},
+    {"南非","ZA","南非"},{"ZA","ZA","南非"},
+    {"埃及","EG","埃及"},{"EG","EG","埃及"},
+    {0,0,0}
+};
+
+static bool v2IsLanAddr(const QString& a) {
+    if (a == "::1" || a.left(3) == "127" || a.left(3) == "10.") { return true; }
+    if (a.left(8) == "192.168.") { return true; }
+    if (a.left(4) == "172.") {
+        bool ok = false;
+        int second = a.mid(4, 2).toInt(&ok);
+        if (ok && second >= 16 && second <= 31) { return true; }
+    }
+    return false;
+}
+
+/* 名称里的国旗 emoji（🇺🇸 等，QString 为代理对） */
+static bool v2FlagInName(const QString& name, QString& cc) {
+    for (int i = 0; i + 3 < (int)name.length(); ++i) {
+        if ((unsigned short)name[i].unicode() == 0xD83C
+            && (unsigned short)name[i+1].unicode() >= 0xDDE6
+            && (unsigned short)name[i+1].unicode() <= 0xDDFF
+            && (unsigned short)name[i+2].unicode() == 0xD83C
+            && (unsigned short)name[i+3].unicode() >= 0xDDE6
+            && (unsigned short)name[i+3].unicode() <= 0xDDFF) {
+            unsigned short a = (unsigned short)(name[i+1].unicode() - 0xDDE6 + 'A');
+            unsigned short b = (unsigned short)(name[i+3].unicode() - 0xDDE6 + 'A');
+            cc = QString(QChar(a)) + QString(QChar(b));
+            return true;
+        }
+    }
+    return false;
+}
+
+QString V2RayLogic::countryNameOf(const QString& cc) const {
+    for (int i = 0; kV2GeoTable[i].key; ++i) {
+        if (cc == kV2GeoTable[i].cc) { return qFromUtf8(kV2GeoTable[i].cn); }
+    }
+    return QString();
+}
+
+void V2RayLogic::applyCountryFromName(V2Node& n) const {
+    if (!n.country.isEmpty()) { return; }
+    if (v2IsLanAddr(n.addr)) {
+        n.country = "LAN";
+        n.countryName = qFromUtf8("本机/局域网");
+        n.geoSource = "lan";
+        return;
+    }
+    QString cc;
+    if (v2FlagInName(n.name, cc)) {
+        n.country = cc;
+        n.countryName = countryNameOf(cc);
+        n.geoSource = "emoji";
+        return;
+    }
+    for (int i = 0; kV2GeoTable[i].key; ++i) {
+        QString key = qFromUtf8(kV2GeoTable[i].key);
+        int pos = sFindQ(n.name, key, 0);
+        if (pos < 0) { continue; }
+        if (key.length() == 2) {   /* 代码需词边界，避免 utiltools 命中 US */
+            bool leftOk = (pos == 0) || !n.name[pos-1].isLetterOrNumber();
+            bool rightOk = (pos + 2 >= (int)n.name.length())
+                || !n.name[pos+2].isLetterOrNumber();
+            if (!leftOk || !rightOk) { continue; }
+        }
+        n.country = kV2GeoTable[i].cc;
+        n.countryName = qFromUtf8(kV2GeoTable[i].cn);
+        n.geoSource = "name";
+        return;
+    }
+}
+
 void V2RayLogic::parseSubscription(const QString& content) {
     QStringList lines = splitLines(content);
     QString now = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
@@ -1476,6 +1832,7 @@ void V2RayLogic::parseSubscription(const QString& content) {
             continue;
         }
         if (ok) {
+            applyCountryFromName(node);
             node.sourceSub = curSubUrl;
             node.updatedAt = now;
             appendNodeDedup(node);

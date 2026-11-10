@@ -66,6 +66,11 @@ struct V2Node {
     QString sourceSub;
     QString updatedAt;
 
+    /* 国家/地区 */
+    QString country;      /* ISO：US/HK/JP... */
+    QString countryName;  /* 中文名：美国/香港/日本 */
+    QString geoSource;    /* emoji | name | geoip | lan */
+
     /* 测速：-2=未测，-1=失败，>0 毫秒 */
     int     tcpMs;
     int     realMs;
@@ -122,6 +127,9 @@ public slots:
     void onCopySubLink();
     void onSortByLatency();
     void onCleanFailedNodes();
+    void onLookupCountrySelected();
+    void onLookupCountryAll();
+    void onClearGeoCache();
     void onRedetectCore();
     void onCoreKindChanged(int index);
     void onAutoUpdateTick();
@@ -150,6 +158,9 @@ private slots:
     void onRealCurlExited();
     void onDetectOutput();
     void onDetectExited();
+    void onGeoOutput();
+    void onGeoExited();
+    void startNextGeo();
 
 private:
     QString baseDir() const;
@@ -183,6 +194,12 @@ private:
     void refreshCoreCombo();
     int  xraySystemVersionOk() const;    /* >=1.8 返回 1，过低 0，未知 -1 */
     QString coreDisplayName() const;
+    void applyCountryFromName(V2Node& n) const;
+    QString countryNameOf(const QString& cc) const;
+    void startGeoLookup(bool all);
+    void loadGeoCache();
+    void saveGeoCache();
+    QString findGeoTool() const;
     void appendNodeDedup(const V2Node& n);
     void startTestBatch(bool real, bool all);
     void startNextTest();
@@ -270,6 +287,16 @@ private:
     QString  systemXrayPath;
     QString  systemXrayVersion;
     int      dlCoreKind;         /* 下载目标：0=v2ray 1=xray */
+
+    /* 国家查询（离线 geoiplookup 队列） */
+    QProcess* geoProc;
+    QByteArray geoData;
+    V2IntList geoQueue;
+    bool geoBusy;
+    int geoCurIdx;
+    bool geoToolOk;
+    QString geoToolPath;
+    QMap<QString, QString> geoCache;   /* ip -> "CC|中文名" */
 
     /* 订阅自动更新（串行队列） */
     QTimer* autoUpdateTimer;
