@@ -92,6 +92,30 @@ static void lbClear(V2ListBox* lb) {
 static int lbCount(V2ListBox* lb) {
     return (int)lb->count();
 }
+static void lbSetCurrent(V2ListBox* lb, int i) {
+#ifdef QT3_BUILD
+    lb->setCurrentItem(i);
+#else
+    lb->setCurrentRow(i);
+#endif
+}
+
+/* 去重：同 proto+addr+port+凭据 视为同一节点；ss 用原始链接比对 */
+static bool nodeExists(V2Node* arr, int n, const V2Node& x) {
+    for (int i = 0; i < n; ++i) {
+        if (x.proto == "ss") {
+            if (arr[i].proto == "ss" && arr[i].raw == x.raw) { return true; }
+            continue;
+        }
+        if (arr[i].proto == x.proto && arr[i].addr == x.addr
+            && arr[i].port == x.port && arr[i].uuid == x.uuid) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool hasShareScheme(const QString& s);   /* 前向声明：onSubFetched 先用 */
 
 static void writeUtf8File(const QString& path, const QString& content) {
 #ifdef QT3_BUILD
@@ -222,6 +246,11 @@ V2RayLogic::V2RayLogic(QObject* parent)
     bypassLanCheck = 0;
     listenAddrBox = 0;
     listenPortEdit = 0;
+    updBtn = 0;
+    updAllBtn = 0;
+    nodeStatus = 0;
+    coreDlBtn = 0;
+    coreStopRequested = false;
     dlTry = 0;
     autoUpdateIntervalMin = 60;
     pendingSubIndex = 0;
@@ -229,6 +258,7 @@ V2RayLogic::V2RayLogic(QObject* parent)
     dlProgressPct = -1;
     ensureDirs();
     loadSubscriptions();
+    loadSubMeta();
     if (subList) { refreshSubList(); }
     /* 订阅定时自动更新（默认 60 分钟，串行执行） */
     autoUpdateTimer = new QTimer(this);
@@ -325,7 +355,11 @@ void V2RayLogic::refreshSubList() {
     if (!subList) { return; }
     lbClear(subList);
     for (int i = 0; i < (int)subs.count(); ++i) {
-        lbAdd(subList, subs[i]);
+        QString show = subs[i];
+        if (subMeta.contains(subs[i])) {
+            show += qFromUtf8("  [上次 ") + subMeta[subs[i]] + qFromUtf8("]");
+        }
+        lbAdd(subList, show);
     }
 }
 void V2RayLogic::refreshNodeList() {
@@ -400,6 +434,60 @@ void V2RayLogic::onSaveSettings() {
     saveSettings();
 }
 
+void V2RayLogic::setCoreMessage(const QString& msg) {
+    if (coreState) { coreState->setText(msg); }
+}
+
+void V2RayLogic::setCoreWidgets(QPushButton* dlBtn) {
+    coreDlBtn = dlBtn;
+}
+
+void V2RayLogic::setCoreDownloadBusy(bool busy) {
+    if (coreDlBtn) { coreDlBtn->setEnabled(!busy); }
+}
+
+void V2RayLogic::setUpdateWidgets(QPushButton* updBtn_, QPushButton* updAllBtn_,
+                                  QLabel* nodeStatus_) {
+    updBtn = updBtn_;
+    updAllBtn = updAllBtn_;
+    nodeStatus = nodeStatus_;
+}
+
+void V2RayLogic::setUpdateBusy(bool busy, const QString& msg) {
+    if (updBtn)     { updBtn->setEnabled(!busy); }
+    if (updAllBtn)  { updAllBtn->setEnabled(!busy); }
+    if (nodeStatus) { nodeStatus->setText(msg); }
+}
+
+void V2RayLogic::loadSubMeta() {
+    subMeta.clear();
+    QString data = readUtf8File(baseDir() + "/sub_meta.txt");
+    QStringList lines = splitLines(data);
+    for (int i = 0; i < (int)lines.count(); ++i) {
+#ifdef QT3_BUILD
+        QString line = lines[i].stripWhiteSpace();
+#else
+        QString line = lines[i].trimmed();
+#endif
+        if (line.isEmpty()) { continue; }
+        int tab = sFind(line, '\t', 0);
+        if (tab <= 0) { continue; }
+        subMeta.insert(line.left(tab), line.mid(tab + 1));
+    }
+}
+
+void V2RayLogic::saveSubMeta() {
+    QString all;
+    for (QMap<QString, QString>::iterator it = subMeta.begin(); it != subMeta.end(); ++it) {
+#ifdef QT3_BUILD
+        all += it.key() + "\t" + it.data() + "\n";
+#else
+        all += it.key() + "\t" + it.value() + "\n";
+#endif
+    }
+    writeUtf8File(baseDir() + "/sub_meta.txt", all);
+}
+
 void V2RayLogic::saveSettings() {
     if (!bypassCnCheck && !bypassLanCheck && !listenAddrBox && !listenPortEdit) { return; }
     QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
@@ -468,6 +556,8 @@ void V2RayLogic::onDelSubscription() {
     int idx = selectedSubIndex();
     if (idx < 0) { appendLogWithPrefix(qFromUtf8("[订阅]"), qFromUtf8("请先选中要删除的订阅")); return; }
     appendLogWithPrefix(qFromUtf8("[订阅]"), qFromUtf8("已删除订阅：") + subs[idx]);
+    subMeta.remove(subs[idx]);
+    saveSubMeta();
     subs.remove(subs.at(idx));
     saveSubscriptions();
     refreshSubList();
@@ -481,10 +571,13 @@ void V2RayLogic::startSubFetch(const QString& url) {
     connect(subProc, SIGNAL(processExited()), this, SLOT(onSubFetched()));
     subProc->addArgument("curl");
     subProc->addArgument("-SsL");
+    subProc->addArgument("-f");                 /* HTTP >= 400 视为失败 */
     subProc->addArgument("--max-time");
     subProc->addArgument("30");
     subProc->addArgument(url);
     subProc->start();
+    curSubUrl = url;
+    setUpdateBusy(true, qFromUtf8("更新中：") + url);
     appendLogWithPrefix(qFromUtf8("[订阅]"), qFromUtf8("正在更新：") + url);
 }
 
@@ -493,7 +586,11 @@ void V2RayLogic::onUpdateSubscription() {
     if (updatingAll) { appendLogWithPrefix(qFromUtf8("[订阅]"), qFromUtf8("“更新全部订阅”进行中，请稍候")); return; }
     int idx = selectedSubIndex();
     if (idx < 0) {
-        if ((int)subs.count() >= 1) { idx = 0; } else { appendLogWithPrefix(qFromUtf8("[订阅]"), qFromUtf8("没有可用订阅，请先添加")); return; }
+        if ((int)subs.count() >= 1) { idx = 0; } else {
+            appendLogWithPrefix(qFromUtf8("[订阅]"), qFromUtf8("没有可用订阅，请先添加"));
+            if (nodeStatus) { nodeStatus->setText(qFromUtf8("状态：没有可用订阅，请先添加")); }
+            return;
+        }
     }
     startSubFetch(subs[idx]);
 }
@@ -520,6 +617,7 @@ void V2RayLogic::startNextPendingSub() {
         pendingSubUrls.clear();
         pendingSubIndex = 0;
         updatingAll = false;
+        setUpdateBusy(false, qFromUtf8("全部订阅更新完成"));
         appendLogWithPrefix(qFromUtf8("[订阅]"), qFromUtf8("全部订阅更新完成"));
         return;
     }
@@ -551,21 +649,58 @@ void V2RayLogic::onSubErrOutput() {
 }
 void V2RayLogic::onSubFetched() {
     if (!subProc) { return; }
+    bool fetchOk = true;
+#ifdef QT3_BUILD
+    fetchOk = subProc->normalExit();
+#else
+    fetchOk = (subProc->exitStatus() == QProcess::NormalExit)
+        && (subProc->exitCode() == 0);
+#endif
     baAppend(subData, subProc->readStdout());
     delete subProc;
     subProc = 0;
     QString content = qFromUtf8(subData.data(), (int)subData.size());
-    if (content.isEmpty()) {
-        appendLogWithPrefix(qFromUtf8("[订阅]"), qFromUtf8("订阅下载为空，请检查网络或订阅地址"));
+    if (!fetchOk || content.isEmpty()) {
+        appendLogWithPrefix(qFromUtf8("[订阅]"),
+            qFromUtf8("更新失败（网络/HTTP 错误），已保留原节点列表"));
+        if (!updatingAll) { setUpdateBusy(false, qFromUtf8("更新失败（已保留原节点）")); }
         if (updatingAll) { startNextPendingSub(); }
         return;
     }
     QString plain = maybeDecodeBase64(content);
+    if (!hasShareScheme(plain)) {
+        appendLogWithPrefix(qFromUtf8("[订阅]"),
+            qFromUtf8("订阅内容未发现节点链接（可能不是有效订阅），已保留原节点列表"));
+        if (!updatingAll) { setUpdateBusy(false, qFromUtf8("更新失败（内容无效，已保留原节点）")); }
+        if (updatingAll) { startNextPendingSub(); }
+        return;
+    }
+    /* C：记录原选中节点，更新后尽量恢复 */
+    QString prevKey;
+    int prevIdx = selectedNodeIndex();
+    if (prevIdx >= 0) {
+        prevKey = nodes[prevIdx].proto + "|" + nodes[prevIdx].addr + "|" + nodes[prevIdx].port;
+    }
     saveSubLast(plain);
     clearNodes();
     parseSubscription(plain);
     refreshNodeList();
+    int restore = -1;
+    for (int i = 0; i < nodeCount; ++i) {
+        QString key = nodes[i].proto + "|" + nodes[i].addr + "|" + nodes[i].port;
+        if (!prevKey.isEmpty() && key == prevKey) { restore = i; break; }
+    }
+    if (restore < 0 && nodeCount > 0) { restore = 0; }
+    if (restore >= 0 && nodeList) { lbSetCurrent(nodeList, restore); }
+    /* A：记录该订阅的更新时间/节点数 */
+    subMeta.insert(curSubUrl,
+        QTime::currentTime().toString("hh:mm:ss") + "|" + QString::number(nodeCount));
+    saveSubMeta();
+    refreshSubList();
     appendLogWithPrefix(qFromUtf8("[订阅]"), qFromUtf8("更新完成，共解析 ") + QString::number(nodeCount) + qFromUtf8(" 个节点"));
+    if (!updatingAll) {
+        setUpdateBusy(false, qFromUtf8("更新完成：") + QString::number(nodeCount) + qFromUtf8(" 个节点"));
+    }
     if (updatingAll) { startNextPendingSub(); }
 }
 
@@ -605,7 +740,10 @@ void V2RayLogic::parseSubscription(const QString& content) {
             node.proto = "vmess";
             parseVmess(line, node, ok, err);
             if (ok) {
-                if (nodeCount < 512) { nodes[nodeCount] = node; ++nodeCount; }
+                if (nodeCount < 512 && !nodeExists(nodes, nodeCount, node)) {
+                    nodes[nodeCount] = node;
+                    ++nodeCount;
+                }
                 continue;
             }
             appendLog(qFromUtf8("vmess 解析失败：") + err);
@@ -614,7 +752,10 @@ void V2RayLogic::parseSubscription(const QString& content) {
             node.proto = "vless";
             parseVlessTrojan(line, node, ok, err);
             if (ok) {
-                if (nodeCount < 512) { nodes[nodeCount] = node; ++nodeCount; }
+                if (nodeCount < 512 && !nodeExists(nodes, nodeCount, node)) {
+                    nodes[nodeCount] = node;
+                    ++nodeCount;
+                }
                 continue;
             }
             appendLog(qFromUtf8("vless 解析失败：") + err);
@@ -623,7 +764,10 @@ void V2RayLogic::parseSubscription(const QString& content) {
             node.proto = "trojan";
             parseVlessTrojan(line, node, ok, err);
             if (ok) {
-                if (nodeCount < 512) { nodes[nodeCount] = node; ++nodeCount; }
+                if (nodeCount < 512 && !nodeExists(nodes, nodeCount, node)) {
+                    nodes[nodeCount] = node;
+                    ++nodeCount;
+                }
                 continue;
             }
             appendLog(qFromUtf8("trojan 解析失败：") + err);
@@ -632,7 +776,10 @@ void V2RayLogic::parseSubscription(const QString& content) {
             node.proto = "ss";
             node.raw = line;
             node.name = line;
-            if (nodeCount < 512) { nodes[nodeCount] = node; ++nodeCount; }
+            if (nodeCount < 512 && !nodeExists(nodes, nodeCount, node)) {
+                nodes[nodeCount] = node;
+                ++nodeCount;
+            }
             appendLog(qFromUtf8("提示：ss 节点仅展示，不支持一键生成配置"));
         } else {
             /* 其它行忽略 */
@@ -757,6 +904,9 @@ void V2RayLogic::startCoreDownload() {
     QString url = QString(dlTry == 0 ? V2CORE_GH_PREFIX : V2CORE_GH_DIRECT) + dlZipName;
     ensureDirs();
     coreDlBusy = true;
+    setCoreDownloadBusy(true);
+    setCoreMessage(dlTry == 0 ? qFromUtf8("状态：正在下载核心（gh-proxy）…")
+                              : qFromUtf8("状态：正在下载核心（直连 GitHub）…"));
     dlProgressPct = -1;
     dlErrData.resize(0);
     if (dlProc) { delete dlProc; dlProc = 0; }
@@ -811,6 +961,8 @@ void V2RayLogic::onCoreDlErrOutput() {
         if (dlProgressPct < 0 || pct >= dlProgressPct + 10) {
             dlProgressPct = pct;
             appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("下载进度约 ") + QString::number(pct) + qFromUtf8("%"));
+            setCoreMessage(qFromUtf8("状态：正在下载核心 … ")
+                + QString::number(pct) + qFromUtf8("%"));
         }
     }
 }
@@ -827,6 +979,8 @@ void V2RayLogic::onCoreDlDone() {
             return;
         }
         appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("下载失败（未生成 zip 文件），请检查网络或 gh-proxy.com 可用性"));
+        setCoreMessage(qFromUtf8("状态：核心下载失败（详见日志）"));
+        setCoreDownloadBusy(false);
         refreshCoreState();
         return;
     }
@@ -841,10 +995,13 @@ void V2RayLogic::onCoreDlDone() {
             return;
         }
         appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("下载结果异常（zip 小于 1MB），可能下载不完整，已删除重试入口"));
+        setCoreMessage(qFromUtf8("状态：核心下载异常（详见日志）"));
+        setCoreDownloadBusy(false);
         refreshCoreState();
         return;
     }
     appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("下载完成（进度 100%），正在解压..."));
+    setCoreMessage(qFromUtf8("状态：正在解压安装…"));
     if (unzipProc) { delete unzipProc; unzipProc = 0; }
     unzipProc = new QProcess(this);
     connect(unzipProc, SIGNAL(processExited()), this, SLOT(onCoreUnzipDone()));
@@ -877,6 +1034,7 @@ void V2RayLogic::onCoreUnzipDone() {
         } else {
             appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("v2ray-core 安装完成，但缺少 geoip.dat / geosite.dat"));
         }
+        setCoreDownloadBusy(false);
     } else {
         if (dlTry == 0) {
             dlTry = 1;
@@ -885,16 +1043,23 @@ void V2RayLogic::onCoreUnzipDone() {
             return;
         }
         appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("v2ray-core 安装失败（未找到 v2ray 可执行文件）"));
+        setCoreMessage(qFromUtf8("状态：核心安装失败（详见日志）"));
+        setCoreDownloadBusy(false);
     }
 }
 
 void V2RayLogic::onStartCore() {
-    if (!coreInstalled()) { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心未安装，请先在“核心”页下载安装")); return; }
+    if (!coreInstalled()) {
+        appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心未安装，请先在“核心”页下载安装"));
+        setCoreMessage(qFromUtf8("状态：核心未安装（请先下载安装）"));
+        return;
+    }
     if (coreProc && coreProc->isRunning()) { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心已在运行")); return; }
     /* D：监听地址/端口校验（B：校验通过后持久化） */
     int lport = listenPort();
     if (lport < 0) {
         appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("监听端口非法（需 1-65535），请检查“核心”页设置"));
+        setCoreMessage(qFromUtf8("状态：启动失败：监听端口非法（1-65535）"));
         return;
     }
     QString laddr = listenAddress();
@@ -909,6 +1074,7 @@ void V2RayLogic::onStartCore() {
     if (inet_pton(AF_INET, laddrPtr, &a4) != 1
         && inet_pton(AF_INET6, laddrPtr, &a6) != 1) {
         appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("监听地址非法（需 IPv4/IPv6 字面量），请检查“核心”页设置"));
+        setCoreMessage(qFromUtf8("状态：启动失败：监听地址非法（需 IPv4/IPv6）"));
         return;
     }
     if (laddr == "0.0.0.0" || laddr == "::") {
@@ -918,11 +1084,20 @@ void V2RayLogic::onStartCore() {
     saveSettings();
     int idx = selectedNodeIndex();
     if (idx < 0) {
-        if (nodeCount >= 1) { idx = 0; } else { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("没有可用节点，请先更新订阅")); return; }
+        if (nodeCount >= 1) { idx = 0; } else {
+            appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("没有可用节点，请先更新订阅"));
+            setCoreMessage(qFromUtf8("状态：启动失败：没有可用节点（请先更新订阅）"));
+            return;
+        }
     }
     V2Node node = nodes[idx];
     QString err;
-    if (!generateConfig(node, err)) { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("生成配置失败：") + err); return; }
+    if (!generateConfig(node, err)) {
+        appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("生成配置失败：") + err);
+        setCoreMessage(qFromUtf8("状态：启动失败：生成配置失败（") + err + qFromUtf8("）"));
+        return;
+    }
+    coreStopRequested = false;
     if (coreProc) { delete coreProc; coreProc = 0; }
     coreProc = new QProcess(this);
     connect(coreProc, SIGNAL(readyReadStdout()), this, SLOT(onCoreOutput()));
@@ -951,11 +1126,16 @@ void V2RayLogic::onCoreErrOutput() {
     appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("(err) ") + qFromUtf8(out.data(), (int)out.size()));
 }
 void V2RayLogic::onCoreExit() {
-    appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心已退出"));
+    bool stopped = coreStopRequested;
+    coreStopRequested = false;
+    appendLogWithPrefix(qFromUtf8("[核心]"), stopped ? qFromUtf8("核心已停止") : qFromUtf8("核心已退出"));
     refreshCoreState();
+    setCoreMessage(stopped ? qFromUtf8("状态：核心已停止")
+                           : qFromUtf8("状态：核心已退出（异常，详见日志）"));
 }
 void V2RayLogic::onStopCore() {
     if (!coreProc || !coreProc->isRunning()) { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心未在运行")); return; }
+    coreStopRequested = true;
     coreProc->tryTerminate();
     appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("已发送停止请求"));
     refreshCoreState();

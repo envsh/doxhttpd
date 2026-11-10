@@ -5,6 +5,7 @@
 #include <qstring.h>
 #include <qstringlist.h>
 #include <qdatetime.h>
+#include <qmap.h>
 
 #ifdef QT3_BUILD
 #include <qlistbox.h>
@@ -46,6 +47,8 @@ public:
                     QPushButton* startBtn, QPushButton* stopBtn);
     void setRouteWidgets(QCheckBox* bypassCnCheck, QCheckBox* bypassLanCheck = 0);
     void setListenWidgets(QComboBox* addrBox, QLineEdit* portEdit);
+    void setUpdateWidgets(QPushButton* updBtn, QPushButton* updAllBtn, QLabel* nodeStatus);
+    void setCoreWidgets(QPushButton* dlBtn);
     void refreshCoreState();
 
 public slots:
@@ -86,6 +89,11 @@ private:
     QString listenAddress() const;
     int     listenPort() const;          /* 非法返回 -1 */
     void startCoreDownload();
+    void setCoreMessage(const QString& msg);
+    void setUpdateBusy(bool busy, const QString& msg);
+    void setCoreDownloadBusy(bool busy);
+    void loadSubMeta();
+    void saveSubMeta();
     void loadSubscriptions();
     void saveSubscriptions();
     void saveSubLast(const QString& content);
@@ -141,6 +149,10 @@ private:
     QCheckBox* bypassLanCheck;
     QComboBox* listenAddrBox;
     QLineEdit* listenPortEdit;
+    QPushButton* updBtn;
+    QPushButton* updAllBtn;
+    QLabel* nodeStatus;
+    QPushButton* coreDlBtn;
 
     /* 订阅自动更新（串行队列） */
     QTimer* autoUpdateTimer;
@@ -153,6 +165,10 @@ private:
     int dlProgressPct;
     int dlTry;              /* C：下载尝试 0=gh-proxy，1=直连 GitHub */
     QString dlZipName;      /* C：按架构选择的包名 */
+
+    bool coreStopRequested; /* 区分手动停止 / 异常退出 */
+    QString curSubUrl;      /* 当前更新中的订阅（写 sub_meta 用） */
+    QMap<QString, QString> subMeta;  /* url -> "hh:mm:ss|节点数" */
 };
 
 #endif

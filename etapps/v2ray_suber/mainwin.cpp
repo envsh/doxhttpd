@@ -70,6 +70,8 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     nodeBtnRow->addWidget(latBtn);
     nodeBtnRow->addStretch(1);
     nodeLayout->addLayout(nodeBtnRow);
+    QLabel* nodeStatus = new QLabel(qFromUtf8("状态：就绪"), nodePage);
+    nodeLayout->addWidget(nodeStatus);
     QLabel* nodeHint = new QLabel(qFromUtf8("提示：选中节点后点击“启动核心”即可生效（SOCKS 监听地址/端口见“核心”页）；测速为 curl TCP 实连耗时"), nodePage);
     nodeLayout->addWidget(nodeHint);
     tabs->addTab(nodePage, qFromUtf8("节点"));
@@ -130,6 +132,8 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     logic->setWidgets(subEdit, subList, nodeList, coreState, logEdit, startBtn, stopBtn);
     logic->setRouteWidgets(bypassCn, bypassLan);
     logic->setListenWidgets(listenAddr, listenPort);
+    logic->setUpdateWidgets(updBtn, updAllBtn, nodeStatus);
+    logic->setCoreWidgets(dlBtn);
     /* B：控件变化即时落盘（另外 aboutToQuit 再兜底一次） */
     QObject::connect(bypassCn, SIGNAL(toggled(bool)), logic, SLOT(onSaveSettings()));
     QObject::connect(bypassLan, SIGNAL(toggled(bool)), logic, SLOT(onSaveSettings()));
