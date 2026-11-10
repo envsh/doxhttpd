@@ -8,14 +8,14 @@
 #include <qmap.h>
 
 #ifdef QT3_BUILD
-#include <qlistbox.h>
+#include <qtable.h>
 #include <qvaluelist.h>
-typedef QListBox V2ListBox;
+typedef QTable V2Table;
 typedef QValueList<int> V2IntList;
 #else
-#include <qlistwidget.h>
+#include <qtablewidget.h>
 #include <qlist.h>
-typedef QListWidget V2ListBox;
+typedef QTableWidget V2Table;
 typedef QList<int> V2IntList;
 #endif
 
@@ -87,9 +87,11 @@ class V2RayLogic : public QObject {
     Q_OBJECT
 public:
     V2RayLogic(QObject* parent);
-    void setWidgets(QLineEdit* subEdit, V2ListBox* subList, V2ListBox* nodeList,
+    void setWidgets(QLineEdit* subEdit, V2Table* subList, V2Table* nodeList,
                     QLabel* coreState, QTextEdit* log,
                     QPushButton* startBtn, QPushButton* stopBtn);
+    void setTestWidgets(QPushButton* tcpSel, QPushButton* realSel,
+                        QPushButton* tcpAll, QPushButton* realAll, QPushButton* stopTest);
     void setRouteWidgets(QCheckBox* bypassCnCheck, QCheckBox* bypassLanCheck = 0);
     void setListenWidgets(QComboBox* addrBox, QLineEdit* portEdit);
     void setUpdateWidgets(QPushButton* updBtn, QPushButton* updAllBtn, QLabel* nodeStatus);
@@ -113,6 +115,9 @@ public slots:
     void onTestRealSelected();
     void onTestRealAll();
     void onStopTest();
+    void onCopySubLink();
+    void onSortByLatency();
+    void onCleanFailedNodes();
     void onAutoUpdateTick();
 
 signals:
@@ -216,8 +221,13 @@ private:
     QTime latTime;
 
     QLineEdit* subEdit;
-    V2ListBox* subList;
-    V2ListBox* nodeList;
+    V2Table* subList;
+    V2Table* nodeList;
+    QPushButton* testTcpSelBtn;
+    QPushButton* testRealSelBtn;
+    QPushButton* testTcpAllBtn;
+    QPushButton* testRealAllBtn;
+    QPushButton* testStopBtn;
     QLabel* coreState;
     QTextEdit* log;
     QPushButton* startBtn;
