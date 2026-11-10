@@ -10,6 +10,16 @@
 #include <qgroupbox.h>
 #include <qlayout.h>
 #include <qcheckbox.h>
+#include <qcombobox.h>
+
+/* Qt3 insertItem / Qt4 addItem 差异封装 */
+static void V2ComboAdd(QComboBox* c, const QString& s) {
+#ifdef QT3_BUILD
+    c->insertItem(s);
+#else
+    c->addItem(s);
+#endif
+}
 
 extern "C"
 QWidget* createV2raySuberMainWindow(void* parent) {
@@ -60,7 +70,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     nodeBtnRow->addWidget(latBtn);
     nodeBtnRow->addStretch(1);
     nodeLayout->addLayout(nodeBtnRow);
-    QLabel* nodeHint = new QLabel(qFromUtf8("提示：选中节点后点击“启动核心”即可生效（SOCKS 127.0.0.1:10808）；测速为 curl TCP 实连耗时"), nodePage);
+    QLabel* nodeHint = new QLabel(qFromUtf8("提示：选中节点后点击“启动核心”即可生效（SOCKS 监听地址/端口见“核心”页）；测速为 curl TCP 实连耗时"), nodePage);
     nodeLayout->addWidget(nodeHint);
     tabs->addTab(nodePage, qFromUtf8("节点"));
 
@@ -78,9 +88,30 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     coreBtnRow->addWidget(stopBtn);
     coreBtnRow->addStretch(1);
     coreLayout->addLayout(coreBtnRow);
+
+    /* D：SOCKS 监听地址 / 端口 */
+    QHBoxLayout* listenRow = new QHBoxLayout(0, 4, 4);
+    listenRow->addWidget(new QLabel(qFromUtf8("监听地址/端口："), corePage));
+    QComboBox* listenAddr = new QComboBox(corePage);
+    listenAddr->setEditable(true);
+    V2ComboAdd(listenAddr, "127.0.0.1");   /* 仅本机（默认） */
+    V2ComboAdd(listenAddr, "0.0.0.0");     /* 局域网可访问 */
+    V2ComboAdd(listenAddr, "::1");         /* IPv6 本机 */
+    listenAddr->setFixedWidth(140);
+    listenRow->addWidget(listenAddr);
+    QLineEdit* listenPort = new QLineEdit("10808", corePage);
+    listenPort->setFixedWidth(70);
+    listenRow->addWidget(listenPort);
+    listenRow->addStretch(1);
+    coreLayout->addLayout(listenRow);
+    coreLayout->addWidget(new QLabel(qFromUtf8("默认 127.0.0.1:10808 仅本机；0.0.0.0 会向局域网暴露 SOCKS（含 UDP），请谨慎"), corePage));
     QCheckBox* bypassCn = new QCheckBox(qFromUtf8("绕过中国大陆（geosite:cn / geoip:cn 直连，使用核心包自带 geo 文件）"), corePage);
+    bypassCn->setChecked(true);            /* 默认勾选 */
     coreLayout->addWidget(bypassCn);
-    QLabel* coreHint = new QLabel(qFromUtf8("说明：核心版本固定 v5.35.0，下载使用 gh-proxy.com 加速前缀；geoip/geosite 随核心包解压，无需单独下载"), corePage);
+    QCheckBox* bypassLan = new QCheckBox(qFromUtf8("绕过局域网（私有地址直连，不依赖 geo 文件）"), corePage);
+    bypassLan->setChecked(true);           /* 默认勾选 */
+    coreLayout->addWidget(bypassLan);
+    QLabel* coreHint = new QLabel(qFromUtf8("说明：核心版本固定 v5.35.0，下载优先 gh-proxy.com 加速（失败自动直连 GitHub）；监听地址/端口可在上方修改"), corePage);
     coreLayout->addWidget(coreHint);
     coreLayout->addStretch(1);
     tabs->addTab(corePage, qFromUtf8("核心"));
@@ -97,7 +128,18 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     /* ── 逻辑关联 ── */
     V2RayLogic* logic = new V2RayLogic(w);
     logic->setWidgets(subEdit, subList, nodeList, coreState, logEdit, startBtn, stopBtn);
-    logic->setRouteWidgets(bypassCn);
+    logic->setRouteWidgets(bypassCn, bypassLan);
+    logic->setListenWidgets(listenAddr, listenPort);
+    /* B：控件变化即时落盘（另外 aboutToQuit 再兜底一次） */
+    QObject::connect(bypassCn, SIGNAL(toggled(bool)), logic, SLOT(onSaveSettings()));
+    QObject::connect(bypassLan, SIGNAL(toggled(bool)), logic, SLOT(onSaveSettings()));
+    QObject::connect(listenPort, SIGNAL(returnPressed()), logic, SLOT(onSaveSettings()));
+    QObject::connect(listenAddr, SIGNAL(activated(int)), logic, SLOT(onSaveSettings()));
+#ifdef QT3_BUILD
+    QObject::connect(listenAddr, SIGNAL(textChanged(const QString&)), logic, SLOT(onSaveSettings()));
+#else
+    QObject::connect(listenAddr, SIGNAL(editTextChanged(const QString&)), logic, SLOT(onSaveSettings()));
+#endif
     QObject::connect(addBtn, SIGNAL(clicked()), logic, SLOT(onAddSubscription()));
     QObject::connect(delBtn, SIGNAL(clicked()), logic, SLOT(onDelSubscription()));
     QObject::connect(updBtn, SIGNAL(clicked()), logic, SLOT(onUpdateSubscription()));

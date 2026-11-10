@@ -4,8 +4,8 @@ CONFIG += plugin qt
 QT = core gui widgets
 
 INCLUDEPATH += ../../qlcomp ../
-SOURCES = exe.cpp main.cpp mainwin.cpp logic.cpp ../../qlcomp/compat34.cpp ../../qlcomp/qthooks.cpp ../../qlcomp/appsetup.cpp ../../qlcomp/cJSON.c
-HEADERS = ../../qlcomp/appsetup.h logic.h ../../qlcomp/lambdaslot.h
+SOURCES = exe.cpp main.cpp mainwin.cpp logic.cpp ../../qlcomp/compat34.cpp ../../qlcomp/qthooks.cpp ../../qlcomp/appsetup.cpp ../../qlcomp/cJSON.c ../../qlcomp/qsettings34.cpp
+HEADERS = ../../qlcomp/appsetup.h logic.h ../../qlcomp/lambdaslot.h ../../qlcomp/qsettings34.h
 # DESTDIR = ../../../qltox/plugins/uiapps
 
 MOC_DIR = .

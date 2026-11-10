@@ -20,6 +20,7 @@ class QLineEdit;
 class QPushButton;
 class QProcess;
 class QCheckBox;
+class QComboBox;
 class QTimer;
 
 /* 单个节点（来自订阅解析） */
@@ -43,10 +44,12 @@ public:
     void setWidgets(QLineEdit* subEdit, V2ListBox* subList, V2ListBox* nodeList,
                     QLabel* coreState, QTextEdit* log,
                     QPushButton* startBtn, QPushButton* stopBtn);
-    void setRouteWidgets(QCheckBox* bypassCnCheck);
+    void setRouteWidgets(QCheckBox* bypassCnCheck, QCheckBox* bypassLanCheck = 0);
+    void setListenWidgets(QComboBox* addrBox, QLineEdit* portEdit);
     void refreshCoreState();
 
 public slots:
+    void onSaveSettings();
     void onAddSubscription();
     void onDelSubscription();
     void onUpdateSubscription();
@@ -79,6 +82,10 @@ private:
     QString coreBinaryPath() const;
     QString zipPath() const;
     void ensureDirs();
+    void saveSettings();
+    QString listenAddress() const;
+    int     listenPort() const;          /* 非法返回 -1 */
+    void startCoreDownload();
     void loadSubscriptions();
     void saveSubscriptions();
     void saveSubLast(const QString& content);
@@ -131,6 +138,9 @@ private:
     QPushButton* startBtn;
     QPushButton* stopBtn;
     QCheckBox* bypassCnCheck;
+    QCheckBox* bypassLanCheck;
+    QComboBox* listenAddrBox;
+    QLineEdit* listenPortEdit;
 
     /* 订阅自动更新（串行队列） */
     QTimer* autoUpdateTimer;
@@ -141,6 +151,8 @@ private:
 
     /* 核心下载进度（百分比，-1 = 未知） */
     int dlProgressPct;
+    int dlTry;              /* C：下载尝试 0=gh-proxy，1=直连 GitHub */
+    QString dlZipName;      /* C：按架构选择的包名 */
 };
 
 #endif

@@ -2,6 +2,7 @@
 #include "compatcore34.h"
 #include "logic.h"
 #include "cJSON.h"
+#include "qsettings34.h"
 
 #include <qdir.h>
 #include <qfile.h>
@@ -15,16 +16,19 @@
 #include <qprocess.h>
 #include <qtimer.h>
 #include <qcheckbox.h>
+#include <qcombobox.h>
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <arpa/inet.h>
 
 /* ── 固定版本号（锁定，不可升级） ── */
 #define V2CORE_VERSION      "v5.35.0"
 #define V2CORE_GH_PREFIX    "https://gh-proxy.com/https://github.com/v2fly/v2ray-core/releases/download/v5.35.0/"
+#define V2CORE_GH_DIRECT    "https://github.com/v2fly/v2ray-core/releases/download/v5.35.0/"
 
 /* ── Qt3/Qt4 小工具 ── */
 static int sFind(const QString& s, char c, int from) {
@@ -55,6 +59,19 @@ static QStringList splitLines(const QString& content) {
     return content.split(QChar('\n'));
 #endif
 }
+
+/* C：按目标架构选择 v2ray-core 包名 */
+static QString v2ZipName() {
+#if defined(__aarch64__)
+    return QString("v2ray-linux-arm64-v8a.zip");
+#elif defined(__arm__)
+    return QString("v2ray-linux-arm32-v7a.zip");
+#elif defined(__i386__)
+    return QString("v2ray-linux-32.zip");
+#else
+    return QString("v2ray-linux-64.zip");
+#endif
+}
 static void lbAdd(V2ListBox* lb, const QString& s) {
 #ifdef QT3_BUILD
     lb->insertItem(s);
@@ -79,12 +96,15 @@ static int lbCount(V2ListBox* lb) {
 static void writeUtf8File(const QString& path, const QString& content) {
 #ifdef QT3_BUILD
     QByteArray u = content.utf8();
+    /* Qt3 QByteArray::size() 含尾 NUL：按 strlen 精确写入，避免文件尾多出 \0 */
+    const size_t n = u.data() ? strlen(u.data()) : 0;
 #else
     QByteArray u = content.toUtf8();
+    const size_t n = (size_t)u.size();
 #endif
     FILE* fp = fopen(QFile::encodeName(path).data(), "wb");
     if (!fp) { return; }
-    fwrite(u.data(), 1, (size_t)u.size(), fp);
+    fwrite(u.data(), 1, n, fp);
     fclose(fp);
 }
 static QString readUtf8File(const QString& path) {
@@ -199,6 +219,10 @@ V2RayLogic::V2RayLogic(QObject* parent)
     startBtn = 0;
     stopBtn = 0;
     bypassCnCheck = 0;
+    bypassLanCheck = 0;
+    listenAddrBox = 0;
+    listenPortEdit = 0;
+    dlTry = 0;
     autoUpdateIntervalMin = 60;
     pendingSubIndex = 0;
     updatingAll = false;
@@ -210,6 +234,8 @@ V2RayLogic::V2RayLogic(QObject* parent)
     autoUpdateTimer = new QTimer(this);
     connect(autoUpdateTimer, SIGNAL(timeout()), this, SLOT(onAutoUpdateTick()));
     autoUpdateTimer->start(autoUpdateIntervalMin * 60 * 1000);
+    /* B：退出前落盘（此时主窗/控件仍存活；析构里不能再碰兄弟控件） */
+    connect(qApp, SIGNAL(aboutToQuit()), this, SLOT(onSaveSettings()));
 }
 
 void V2RayLogic::setWidgets(QLineEdit* subEdit_, V2ListBox* subList_, V2ListBox* nodeList_,
@@ -320,12 +346,71 @@ void V2RayLogic::refreshNodeList() {
     }
 }
 
-void V2RayLogic::setRouteWidgets(QCheckBox* bypassCnCheck_) {
+void V2RayLogic::setRouteWidgets(QCheckBox* bypassCnCheck_, QCheckBox* bypassLanCheck_) {
     bypassCnCheck = bypassCnCheck_;
+    bypassLanCheck = bypassLanCheck_;
+    /* B：载入已保存的路由选项（默认两项均 true） */
+    QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+    if (bypassCnCheck) { bypassCnCheck->setChecked(st.valueBool("bypassCn", true)); }
+    if (bypassLanCheck) { bypassLanCheck->setChecked(st.valueBool("bypassLan", true)); }
     if (bypassCnCheck && !hasGeoFiles()) {
         appendLogWithPrefix(qFromUtf8("[核心]"),
             qFromUtf8("提示：核心目录缺少 geoip.dat / geosite.dat，勾选“绕过中国大陆”将不生效（重新下载安装核心即可）"));
     }
+}
+
+/* D：监听地址/端口（B：随路由选项一起持久化） */
+void V2RayLogic::setListenWidgets(QComboBox* addrBox, QLineEdit* portEdit) {
+    listenAddrBox = addrBox;
+    listenPortEdit = portEdit;
+    QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+    QString addr = st.valueStr("listenAddr", "127.0.0.1");
+    if (listenAddrBox) {
+#ifdef QT3_BUILD
+        listenAddrBox->setCurrentText(addr);
+#else
+        listenAddrBox->setEditText(addr);
+#endif
+    }
+    if (listenPortEdit) {
+        listenPortEdit->setText(QString::number(st.valueInt("listenPort", 10808)));
+    }
+}
+
+QString V2RayLogic::listenAddress() const {
+    QString a = listenAddrBox ? listenAddrBox->currentText() : QString();
+#ifdef QT3_BUILD
+    a = a.stripWhiteSpace();
+#else
+    a = a.trimmed();
+#endif
+    if (a.isEmpty()) { a = "127.0.0.1"; }
+    return a;
+}
+
+int V2RayLogic::listenPort() const {
+    if (!listenPortEdit) { return 10808; }
+    bool ok = false;
+    int p = listenPortEdit->text().toInt(&ok);
+    if (!ok || p < 1 || p > 65535) { return -1; }
+    return p;
+}
+
+void V2RayLogic::onSaveSettings() {
+    saveSettings();
+}
+
+void V2RayLogic::saveSettings() {
+    if (!bypassCnCheck && !bypassLanCheck && !listenAddrBox && !listenPortEdit) { return; }
+    QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+    if (listenAddrBox || listenPortEdit) {
+        st.setValue("listenAddr", listenAddress());
+        int p = listenPort();
+        st.setValue("listenPort", p > 0 ? p : 10808);
+    }
+    if (bypassCnCheck) { st.setValue("bypassCn", bypassCnCheck->isChecked()); }
+    if (bypassLanCheck) { st.setValue("bypassLan", bypassLanCheck->isChecked()); }
+    st.sync();
 }
 
 void V2RayLogic::appendLog(const QString& msg) {
@@ -656,11 +741,20 @@ void V2RayLogic::parseVlessTrojan(const QString& line, V2Node& node, bool& ok, Q
 /* ── 核心 ── */
 void V2RayLogic::onDownloadCore() {
     if (coreDlBusy) { appendLog(qFromUtf8("正在下载核心，请稍候")); return; }
-    QString zipName = "v2ray-linux-64.zip";
-#ifdef __aarch64__
-    zipName = "v2ray-linux-arm64-v8a.zip";
-#endif
-    QString url = qFromUtf8(V2CORE_GH_PREFIX) + zipName;
+    if (coreProc && coreProc->isRunning()) {
+        /* C：核心运行中不覆盖可执行文件（ETXTBSY），先请求停止 */
+        appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("核心正在运行：已发送停止请求，请稍后再点“下载安装”"));
+        onStopCore();
+        return;
+    }
+    QFile::remove(zipPath());   /* C：清掉上次残留的半截包，保证本次下载/回退判定准确 */
+    dlZipName = v2ZipName();
+    dlTry = 0;
+    startCoreDownload();
+}
+
+void V2RayLogic::startCoreDownload() {
+    QString url = QString(dlTry == 0 ? V2CORE_GH_PREFIX : V2CORE_GH_DIRECT) + dlZipName;
     ensureDirs();
     coreDlBusy = true;
     dlProgressPct = -1;
@@ -680,7 +774,9 @@ void V2RayLogic::onDownloadCore() {
     dlProc->addArgument("120");
     dlProc->addArgument(url);
     dlProc->start();
-    appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("正在下载 v2ray-core ") + qFromUtf8(V2CORE_VERSION) + qFromUtf8("（gh-proxy.com 加速）"));
+    appendLogWithPrefix(qFromUtf8("[核心下载]"),
+        qFromUtf8("正在下载 v2ray-core ") + qFromUtf8(V2CORE_VERSION)
+        + (dlTry == 0 ? qFromUtf8("（gh-proxy.com 加速）") : qFromUtf8("（直连 GitHub）")));
     appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("URL：") + url);
 }
 void V2RayLogic::onCoreDlOutput() {
@@ -724,6 +820,12 @@ void V2RayLogic::onCoreDlDone() {
     dlProc = 0;
     coreDlBusy = false;
     if (!fileExists(zipPath())) {
+        if (dlTry == 0) {
+            dlTry = 1;
+            appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("gh-proxy 下载失败（未生成 zip），改用直连 GitHub 重试"));
+            startCoreDownload();
+            return;
+        }
         appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("下载失败（未生成 zip 文件），请检查网络或 gh-proxy.com 可用性"));
         refreshCoreState();
         return;
@@ -731,8 +833,14 @@ void V2RayLogic::onCoreDlDone() {
     /* 文件大小过小视为下载不完整 */
     QFileInfo fi(zipPath());
     if ((long)fi.size() < 1024 * 1024) {
-        appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("下载结果异常（zip 小于 1MB），可能下载不完整，已删除重试入口"));
         QFile::remove(zipPath());
+        if (dlTry == 0) {
+            dlTry = 1;
+            appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("gh-proxy 下载结果异常（zip 小于 1MB），改用直连 GitHub 重试"));
+            startCoreDownload();
+            return;
+        }
+        appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("下载结果异常（zip 小于 1MB），可能下载不完整，已删除重试入口"));
         refreshCoreState();
         return;
     }
@@ -749,11 +857,20 @@ void V2RayLogic::onCoreDlDone() {
 }
 void V2RayLogic::onCoreUnzipDone() {
     if (!unzipProc) { return; }
+#ifdef QT3_BUILD
+    bool unzipOk = unzipProc->normalExit();
+#else
+    bool unzipOk = (unzipProc->exitStatus() == QProcess::NormalExit)
+        && (unzipProc->exitCode() == 0);
+#endif
     delete unzipProc;
     unzipProc = 0;
     chmod(QFile::encodeName(coreBinaryPath()).data(), 0755);
     QFile::remove(zipPath());
     refreshCoreState();
+    if (!unzipOk && !coreInstalled()) {
+        appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("解压失败（unzip 退出异常），请确认系统已安装 unzip 后重试"));
+    }
     if (coreInstalled()) {
         if (hasGeoFiles()) {
             appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("v2ray-core ") + qFromUtf8(V2CORE_VERSION) + qFromUtf8(" 安装完成（geoip.dat / geosite.dat 已就绪）"));
@@ -761,6 +878,12 @@ void V2RayLogic::onCoreUnzipDone() {
             appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("v2ray-core 安装完成，但缺少 geoip.dat / geosite.dat"));
         }
     } else {
+        if (dlTry == 0) {
+            dlTry = 1;
+            appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("解压/校验失败，改用直连 GitHub 重试"));
+            startCoreDownload();
+            return;
+        }
         appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("v2ray-core 安装失败（未找到 v2ray 可执行文件）"));
     }
 }
@@ -768,6 +891,31 @@ void V2RayLogic::onCoreUnzipDone() {
 void V2RayLogic::onStartCore() {
     if (!coreInstalled()) { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心未安装，请先在“核心”页下载安装")); return; }
     if (coreProc && coreProc->isRunning()) { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心已在运行")); return; }
+    /* D：监听地址/端口校验（B：校验通过后持久化） */
+    int lport = listenPort();
+    if (lport < 0) {
+        appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("监听端口非法（需 1-65535），请检查“核心”页设置"));
+        return;
+    }
+    QString laddr = listenAddress();
+#ifdef QT3_BUILD
+    const char* laddrPtr = laddr.latin1();
+#else
+    QByteArray laddrBa = laddr.toLatin1();
+    const char* laddrPtr = laddrBa.data();
+#endif
+    struct in_addr a4;
+    struct in6_addr a6;
+    if (inet_pton(AF_INET, laddrPtr, &a4) != 1
+        && inet_pton(AF_INET6, laddrPtr, &a6) != 1) {
+        appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("监听地址非法（需 IPv4/IPv6 字面量），请检查“核心”页设置"));
+        return;
+    }
+    if (laddr == "0.0.0.0" || laddr == "::") {
+        appendLogWithPrefix(qFromUtf8("[核心]"),
+            qFromUtf8("注意：监听地址 ") + laddr + qFromUtf8(" 会把 SOCKS 端口暴露给局域网/外部"));
+    }
+    saveSettings();
     int idx = selectedNodeIndex();
     if (idx < 0) {
         if (nodeCount >= 1) { idx = 0; } else { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("没有可用节点，请先更新订阅")); return; }
@@ -953,6 +1101,9 @@ bool V2RayLogic::generateConfig(const V2Node& node, QString& err) {
         return false;
     }
     if (coreDir().length() <= 0) { err = qFromUtf8("核心目录缺失"); return false; }
+    int lport = listenPort();
+    if (lport < 0) { err = qFromUtf8("监听端口非法"); return false; }
+    QString laddr = listenAddress();
     QString net = node.net;
     if (net.isEmpty()) { net = "tcp"; }
     QString stream;
@@ -985,21 +1136,39 @@ bool V2RayLogic::generateConfig(const V2Node& node, QString& err) {
             + ",\"password\":\"" + node.uuid + "\"}]},";
     }
     outbound += stream;
+    /* A：闭合代理出站对象并补 tag（原实现漏了对象闭合 }，生成非法 JSON） */
+    outbound += ",\"tag\":\"proxy\"}";
     QString cfg = "{\"log\":{\"loglevel\":\"warning\"},"
-        "\"inbounds\":[{\"port\":10808,\"listen\":\"127.0.0.1\",\"protocol\":\"socks\",\"settings\":{\"udp\":true}}],"
-        "\"outbounds\":[" + outbound + "]";
+        "\"inbounds\":[{\"port\":" + QString::number(lport)
+        + ",\"listen\":\"" + laddr
+        + "\",\"protocol\":\"socks\",\"settings\":{\"udp\":true}}],"
+        "\"outbounds\":[" + outbound
+        + ",{\"protocol\":\"freedom\",\"tag\":\"direct\",\"settings\":{}}]";
+    QStringList rules;
+    bool lanOn = (bypassLanCheck && bypassLanCheck->isChecked());
+    if (lanOn) {
+        /* A：绕过局域网——显式私有 CIDR（不依赖 geoip.dat） */
+        rules.append("{\"type\":\"field\",\"outboundTag\":\"direct\",\"ip\":["
+            "\"10.0.0.0/8\",\"172.16.0.0/12\",\"192.168.0.0/16\","
+            "\"127.0.0.0/8\",\"169.254.0.0/16\","
+            "\"::1/128\",\"fc00::/7\",\"fe80::/10\"]}");
+    }
     if (bypassCnCheck && bypassCnCheck->isChecked()) {
         if (hasGeoFiles()) {
             /* 绕过中国大陆：geosite:cn / geoip:cn 直连，其余走当前节点（引用核心包自带的 geo 文件） */
-            cfg += ",\"routing\":{\"domainStrategy\":\"IPIfNonMatch\",\"rules\":["
-                "{\"type\":\"field\",\"outboundTag\":\"direct\",\"domain\":[\"geosite:cn\"]},"
-                "{\"type\":\"field\",\"outboundTag\":\"direct\",\"ip\":[\"geoip:cn\",\"geoip:private\"]},"
-                "{\"type\":\"field\",\"outboundTag\":\"proxy\",\"network\":\"tcp,udp\"}"
-                "]}";
+            rules.append("{\"type\":\"field\",\"outboundTag\":\"direct\",\"domain\":[\"geosite:cn\"]}");
+            rules.append("{\"type\":\"field\",\"outboundTag\":\"direct\",\"ip\":[\"geoip:cn\"]}");
             appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("已启用绕过中国大陆路由（geosite:cn / geoip:cn 直连，其余走代理）"));
         } else {
             appendLogWithPrefix(qFromUtf8("[核心]"),
                 qFromUtf8("警告：未找到 core/geoip.dat 或 core/geosite.dat，绕过中国大陆路由未启用。请重新“下载安装”以获取完整 v2ray-core ") + qFromUtf8(V2CORE_VERSION) + qFromUtf8(" 包"));
+        }
+    }
+    if (!rules.isEmpty()) {
+        rules.append("{\"type\":\"field\",\"outboundTag\":\"proxy\",\"network\":\"tcp,udp\"}");
+        cfg += ",\"routing\":{\"domainStrategy\":\"IPIfNonMatch\",\"rules\":[" + rules.join(",") + "]}";
+        if (lanOn) {
+            appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("已启用绕过局域网（私有地址直连）"));
         }
     }
     cfg += "}";
@@ -1012,7 +1181,9 @@ void V2RayLogic::refreshCoreState() {
     if (!coreState || !startBtn || !stopBtn) { return; }
     QString s;
     if (coreProc && coreProc->isRunning()) {
-        s = qFromUtf8("状态：核心运行中（本地 SOCKS 127.0.0.1:10808）");
+        int rp = listenPort();
+        s = qFromUtf8("状态：核心运行中（本地 SOCKS ")
+            + listenAddress() + ":" + QString::number(rp > 0 ? rp : 10808) + "）";
     } else if (coreInstalled()) {
         s = qFromUtf8("状态：已安装 v2ray-core（固定 ") + qFromUtf8(V2CORE_VERSION) + qFromUtf8("）");
     } else {
