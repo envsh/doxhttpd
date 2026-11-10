@@ -1,4 +1,5 @@
 #include "compat34.h"
+#include "lambdaslot.h"
 #include "logic.h"
 #include <qwidget.h>
 #include <qlabel.h>
@@ -106,6 +107,13 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     QObject::connect(dlBtn, SIGNAL(clicked()), logic, SLOT(onDownloadCore()));
     QObject::connect(startBtn, SIGNAL(clicked()), logic, SLOT(onStartCore()));
     QObject::connect(stopBtn, SIGNAL(clicked()), logic, SLOT(onStopCore()));
+
+    /* 主窗销毁日志：exe 与 qltox 插件双形态共用（destroyed→LambdaSlot） */
+    LambdaSlot* logSlot = new LambdaSlot(0, [] {
+        qWarning("[mainwin] destroyed: V2raySuberMain");
+    });
+    QObject::connect(w, SIGNAL(destroyed()), logSlot, SLOT(call()));
+    QObject::connect(w, SIGNAL(destroyed()), logSlot, SLOT(deleteLater()));
 
     return w;
 }

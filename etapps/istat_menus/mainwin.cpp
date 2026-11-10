@@ -1,4 +1,5 @@
 #include "compat34.h"
+#include "lambdaslot.h"
 #include "logic.h"
 #include <qtabwidget.h>
 #include <qlabel.h>
@@ -373,6 +374,13 @@ QWidget* createIstatMainWindow(void* parent) {
     /* Logic 接线 */
     IstatLogic* logic = new IstatLogic(root);
     logic->setWidgets(ui);
+
+    /* 主窗销毁日志：exe 与 qltox 插件双形态共用（destroyed→LambdaSlot） */
+    LambdaSlot* logSlot = new LambdaSlot(0, [] {
+        qWarning("[mainwin] destroyed: istatMain");
+    });
+    QObject::connect(root, SIGNAL(destroyed()), logSlot, SLOT(call()));
+    QObject::connect(root, SIGNAL(destroyed()), logSlot, SLOT(deleteLater()));
 
     return root;
 }

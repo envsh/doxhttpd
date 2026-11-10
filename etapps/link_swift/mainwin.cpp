@@ -1,4 +1,5 @@
 #include "compat34.h"
+#include "lambdaslot.h"
 #include <qwidget.h>
 #include <qlabel.h>
 #include <qlineedit.h>
@@ -102,6 +103,13 @@ QWidget* createLinkSwiftMainWindow(void* parent) {
     logEdit->setReadOnly(true);
     logLayout->addWidget(logEdit);
     mainLayout->addWidget(logBox);
+
+    /* 主窗销毁日志：exe 与 qltox 插件双形态共用（destroyed→LambdaSlot） */
+    LambdaSlot* logSlot = new LambdaSlot(0, [] {
+        qWarning("[mainwin] destroyed: LinkSwiftMain");
+    });
+    QObject::connect(w, SIGNAL(destroyed()), logSlot, SLOT(call()));
+    QObject::connect(w, SIGNAL(destroyed()), logSlot, SLOT(deleteLater()));
 
     return w;
 }

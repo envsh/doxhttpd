@@ -1,4 +1,5 @@
 #include "compat34.h"
+#include "lambdaslot.h"
 #include <qwidget.h>
 #include <qlabel.h>
 #include <qpushbutton.h>
@@ -42,6 +43,13 @@ QWidget* createDotfileCleanerMainWindow(void* parent) {
 
     QLabel* statusLabel = new QLabel(qFromUtf8("状态：就绪"), w);
     mainLayout->addWidget(statusLabel);
+
+    /* 主窗销毁日志：exe 与 qltox 插件双形态共用（destroyed→LambdaSlot） */
+    LambdaSlot* logSlot = new LambdaSlot(0, [] {
+        qWarning("[mainwin] destroyed: DotfileCleanerMain");
+    });
+    QObject::connect(w, SIGNAL(destroyed()), logSlot, SLOT(call()));
+    QObject::connect(w, SIGNAL(destroyed()), logSlot, SLOT(deleteLater()));
 
     return w;
 }

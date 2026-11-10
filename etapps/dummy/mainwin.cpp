@@ -1,4 +1,5 @@
 #include "compat34.h"
+#include "lambdaslot.h"
 #include "plugin_api.h"
 #include <qlabel.h>
 #include <qpushbutton.h>
@@ -22,6 +23,14 @@ QWidget* createDummyMainWindow(void* parent) {
     w->setWindowTitle("Dummy Plugin");
 #endif
     w->resize(300, 200);
+
+    /* 主窗销毁日志：exe 与 qltox 插件双形态共用（destroyed→LambdaSlot） */
+    LambdaSlot* logSlot = new LambdaSlot(0, [] {
+        qWarning("[mainwin] destroyed: DummyMain");
+    });
+    QObject::connect(w, SIGNAL(destroyed()), logSlot, SLOT(call()));
+    QObject::connect(w, SIGNAL(destroyed()), logSlot, SLOT(deleteLater()));
+
     return w;
     
 }

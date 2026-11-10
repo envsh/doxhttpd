@@ -5,7 +5,7 @@ QT = core gui widgets
 
 INCLUDEPATH += ../../qlcomp ../
 SOURCES = exe.cpp main.cpp mainwin.cpp ../../qlcomp/compat34.cpp ../../qlcomp/appsetup.cpp
-HEADERS = ../../qlcomp/appsetup.h
+HEADERS = ../../qlcomp/appsetup.h ../../qlcomp/lambdaslot.h
 # DESTDIR = ../../../qltox/plugins/uiapps
 
 MOC_DIR = .

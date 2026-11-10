@@ -1,4 +1,5 @@
 #include "compat34.h"
+#include "lambdaslot.h"
 #include "logic.h"
 #include <qwidget.h>
 #include <qlabel.h>
@@ -137,6 +138,13 @@ QWidget* createSupervisorMgrMainWindow(void* parent) {
     QObject::connect(procTable, SIGNAL(itemSelectionChanged()), logic, SLOT(onProcSelected()));
     QObject::connect(procTable, SIGNAL(cellClicked(int,int)), logic, SLOT(onProcSelected()));
 #endif
+
+    /* 主窗销毁日志：exe 与 qltox 插件双形态共用（destroyed→LambdaSlot） */
+    LambdaSlot* logSlot = new LambdaSlot(0, [] {
+        qWarning("[mainwin] destroyed: SupervisorMgrMain");
+    });
+    QObject::connect(w, SIGNAL(destroyed()), logSlot, SLOT(call()));
+    QObject::connect(w, SIGNAL(destroyed()), logSlot, SLOT(deleteLater()));
 
     return w;
 }

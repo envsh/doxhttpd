@@ -5,7 +5,7 @@ QT = core gui widgets
 
 INCLUDEPATH += ../../qlcomp ../
 SOURCES = main.cpp mainwin.cpp sbui.cpp dblogic.cpp ../../qlcomp/compat34.cpp ../../qlcomp/qthooks.cpp ../../qlcomp/cJSON.c
-HEADERS = dblogic.h
+HEADERS = dblogic.h ../../qlcomp/lambdaslot.h
 DESTDIR = ../../../qltox/plugins/uiapps
 LIBS += -lsqlite3
 

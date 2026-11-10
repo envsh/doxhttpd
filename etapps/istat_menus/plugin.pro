@@ -5,7 +5,7 @@ QT = core gui widgets
 
 INCLUDEPATH += ../../qlcomp ../
 SOURCES = main.cpp mainwin.cpp logic.cpp ../../qlcomp/compat34.cpp ../../qlcomp/qthooks.cpp ../../qlcomp/cJSON.c
-HEADERS = logic.h
+HEADERS = logic.h ../../qlcomp/lambdaslot.h
 
 MOC_DIR = .
 OBJECTS_DIR = .
