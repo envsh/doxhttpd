@@ -7,8 +7,20 @@ if [ x"$1" == x"asan" ]; then
     QMAKE_EXTRA="CONFIG+=asan"
 fi
 
-QMAKE=${QMAKE:-/opt/qt/5.15.2/clang_64/bin/qmake}
-mkdir -p build-osx5 && cd build-osx5
+# script must copy as buildosx{3,4,5,6}.sh
+exename=$(basename $0)
+qtnum=${exename: -1}
+builddir="build-osx${qtnum}"
+
+if [ x"$qtnum" == x"4" ]; then
+	# macports binary qt4 installation
+	QMAKE=${QMAKE:-/opt/local/libexec/qt4/bin/qmake}
+elif [ x"$qtnum" == x"6" ]; then
+	QMAKE=${QMAKE:-/opt/qt/6.7.3/macos/bin/qmake}
+else
+	QMAKE=${QMAKE:-/opt/qt/5.15.2/clang_64/bin/qmake}
+fi
+mkdir -p "$builddir" && cd "$builddir"
 "$QMAKE" -r $QMAKE_EXTRA ../
 make
 
@@ -16,6 +28,6 @@ make
 mkdir -p qltox.app/Contents/Resources
 QT_TRANS=$("$QMAKE" -query QT_INSTALL_TRANSLATIONS)
 cp -f "$QT_TRANS/qt_zh_CN.qm" "$QT_TRANS/qt_zh_TW.qm" qltox.app/Contents/Resources/ 2>/dev/null || true
-tar zcf ../qltox-qt5-osx-x64.tar.gz qltox.app/
+tar zcf ../qltox-qt4-osx-x64.tar.gz qltox.app/
 ls -lh ../qltox-*.gz
 ls -lh qltox.app/Contents/MacOS/
