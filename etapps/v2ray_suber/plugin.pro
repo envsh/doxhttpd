@@ -4,8 +4,10 @@ CONFIG += plugin qt
 QT = core gui widgets
 
 INCLUDEPATH += ../../qlcomp ../
-SOURCES = main.cpp mainwin.cpp logic.cpp ../../qlcomp/compat34.cpp ../../qlcomp/qthooks.cpp ../../qlcomp/cJSON.c ../../qlcomp/qsettings34.cpp
-HEADERS = logic.h ../../qlcomp/qsettings34.h ../../qlcomp/lambdaslot.h
+INCLUDEPATH += /usr/include/harfbuzz /usr/include/freetype2
+SOURCES = main.cpp mainwin.cpp logic.cpp v2flag.cpp ../../qlcomp/compat34.cpp ../../qlcomp/qthooks.cpp ../../qlcomp/cJSON.c ../../qlcomp/qsettings34.cpp
+LIBS += -lharfbuzz -lfreetype
+HEADERS = logic.h v2flag.h ../../qlcomp/qsettings34.h ../../qlcomp/lambdaslot.h
 DESTDIR = ../../../qltox/plugins/uiapps
 
 MOC_DIR = .

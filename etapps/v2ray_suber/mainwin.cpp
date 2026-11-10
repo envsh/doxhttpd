@@ -13,10 +13,21 @@
 #include <qcombobox.h>
 #ifdef QT3_BUILD
 #include <qpopupmenu.h>
+#include <qtooltip.h>
 #else
 #include <qmenu.h>
 #endif
 #include <qcursor.h>
+
+/* Qt3 没有 QWidget::setToolTip，用 QToolTip::add 兼容 */
+static void v2Tip(QWidget* w, const QString& tip) {
+    if (!w) { return; }
+#ifdef QT3_BUILD
+    QToolTip::add(w, tip);
+#else
+    w->setToolTip(tip);
+#endif
+}
 
 /* Qt3 insertItem / Qt4 addItem 差异封装 */
 static void V2ComboAdd(QComboBox* c, const QString& s) {
@@ -31,7 +42,15 @@ static void V2ComboAdd(QComboBox* c, const QString& s) {
 static void V2PrepareRow(V2Table* t) {
     if (!t) { return; }
     QPoint gp = QCursor::pos();
-    int r = t->rowAt(t->mapFromGlobal(gp).y());
+#ifdef QT3_BUILD
+    /* QTable::rowAt 用内容坐标：视口坐标 + 垂直滚动量（含表头偏移修正） */
+    int y = t->contentsY() + t->viewport()->mapFromGlobal(gp).y();
+    int r = t->rowAt(y);
+#else
+    /* QTableView::rowAt 用视口坐标 */
+    int r = t->rowAt(t->viewport()->mapFromGlobal(gp).y());
+#endif
+    if (r < 0) { r = t->currentRow(); }   /* 键盘唤起/光标不在表内时回退 */
     if (r >= 0) { t->setCurrentCell(r, 0); }
 }
 
@@ -66,6 +85,23 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     subTop->addWidget(updBtn);
     subTop->addWidget(updAllBtn);
     subLayout->addLayout(subTop);
+    /* 自动更新开关 + 频率 */
+    QHBoxLayout* autoRow = new QHBoxLayout(0, 4, 4);
+    QCheckBox* autoChk = new QCheckBox(qFromUtf8("自动更新订阅"), subPage);
+    autoChk->setChecked(true);
+    QComboBox* autoFreq = new QComboBox(subPage);
+    V2ComboAdd(autoFreq, qFromUtf8("30 分钟"));
+    V2ComboAdd(autoFreq, qFromUtf8("1 小时"));
+    V2ComboAdd(autoFreq, qFromUtf8("2 小时"));
+    V2ComboAdd(autoFreq, qFromUtf8("3 小时"));
+    V2ComboAdd(autoFreq, qFromUtf8("6 小时"));
+    V2ComboAdd(autoFreq, qFromUtf8("12 小时"));
+    V2ComboAdd(autoFreq, qFromUtf8("24 小时"));
+    autoRow->addWidget(autoChk);
+    autoRow->addWidget(new QLabel(qFromUtf8("频率："), subPage));
+    autoRow->addWidget(autoFreq);
+    autoRow->addStretch(1);
+    subLayout->addLayout(autoRow);
 #ifdef QT3_BUILD
     V2Table* subList = new QTable(0, 0, subPage);
     subList->setReadOnly(true);
@@ -77,7 +113,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     subList->setSelectionMode(QAbstractItemView::SingleSelection);
 #endif
     subLayout->addWidget(subList);
-    QLabel* subHint = new QLabel(qFromUtf8("提示：输入订阅链接点击“添加”；支持“更新选中”与“更新全部”（串行后台执行，每小时自动更新）"), subPage);
+    QLabel* subHint = new QLabel(qFromUtf8("提示：输入订阅链接点击“添加”；支持“更新选中”与“更新全部”（串行后台执行；可设置自动更新开关/频率，默认每 2 小时）"), subPage);
     subLayout->addWidget(subHint);
     tabs->addTab(subPage, qFromUtf8("订阅"));
 
@@ -121,6 +157,9 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     QVBoxLayout* coreLayout = new QVBoxLayout(corePage, 6, 4);
     QLabel* coreState = new QLabel(qFromUtf8("状态：检测中"), corePage);
     coreLayout->addWidget(coreState);
+    /* 当前使用的节点（独立一行，不参与测试结果覆盖） */
+    QLabel* activeNodeLabel = new QLabel(qFromUtf8("当前节点：—"), corePage);
+    coreLayout->addWidget(activeNodeLabel);
     QHBoxLayout* coreBtnRow = new QHBoxLayout(0, 4, 4);
     QPushButton* dlBtn = new QPushButton(qFromUtf8("下载安装"), corePage);
     QPushButton* startBtn = new QPushButton(qFromUtf8("启动核心"), corePage);
@@ -143,7 +182,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
 
     /* D：SOCKS 监听地址 / 端口 */
     QHBoxLayout* listenRow = new QHBoxLayout(0, 4, 4);
-    listenRow->addWidget(new QLabel(qFromUtf8("监听地址/端口："), corePage));
+    listenRow->addWidget(new QLabel(qFromUtf8("监听地址："), corePage));
     QComboBox* listenAddr = new QComboBox(corePage);
     listenAddr->setEditable(true);
     V2ComboAdd(listenAddr, "127.0.0.1");   /* 仅本机（默认） */
@@ -151,12 +190,42 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     V2ComboAdd(listenAddr, "::1");         /* IPv6 本机 */
     listenAddr->setFixedWidth(140);
     listenRow->addWidget(listenAddr);
-    QLineEdit* listenPort = new QLineEdit("10808", corePage);
-    listenPort->setFixedWidth(70);
-    listenRow->addWidget(listenPort);
+    listenRow->addWidget(new QLabel(qFromUtf8("SOCKS 端口："), corePage));
+    QLineEdit* listenSocks = new QLineEdit("10808", corePage);
+    listenSocks->setFixedWidth(70);
+    listenRow->addWidget(listenSocks);
+    listenRow->addWidget(new QLabel(qFromUtf8("HTTP 端口："), corePage));
+    QLineEdit* listenHttp = new QLineEdit("10809", corePage);
+    listenHttp->setFixedWidth(70);
+    listenRow->addWidget(listenHttp);
+    QPushButton* testPortsBtn = new QPushButton(qFromUtf8("测试端口"), corePage);
+    QPushButton* testGstaticBtn = new QPushButton(qFromUtf8("测试 gstatic"), corePage);
+    listenRow->addWidget(testPortsBtn);
+    listenRow->addWidget(testGstaticBtn);
     listenRow->addStretch(1);
     coreLayout->addLayout(listenRow);
-    coreLayout->addWidget(new QLabel(qFromUtf8("默认 127.0.0.1:10808 仅本机；0.0.0.0 会向局域网暴露 SOCKS（含 UDP），请谨慎"), corePage));
+    coreLayout->addWidget(new QLabel(qFromUtf8("默认 SOCKS 10808 / HTTP 10809（仅本机）；0.0.0.0 会向局域网暴露"), corePage));
+    /* 测试按钮结果：图标 + 文字（绿勾/红叉/灰线），独立一行 */
+    QHBoxLayout* testRow = new QHBoxLayout(0, 4, 4);
+    QLabel* testPrefix = new QLabel(qFromUtf8("测试结果："), corePage);
+    QLabel* testSocksIcon = new QLabel(corePage);
+    QLabel* testSocksText = new QLabel(corePage);
+    QLabel* testHttpIcon = new QLabel(corePage);
+    QLabel* testHttpText = new QLabel(corePage);
+    QLabel* testMsg = new QLabel(corePage);
+    testRow->addWidget(testPrefix);
+    testRow->addWidget(testSocksIcon);
+    testRow->addWidget(testSocksText);
+    testRow->addSpacing(12);
+    testRow->addWidget(testHttpIcon);
+    testRow->addWidget(testHttpText);
+    testRow->addWidget(testMsg);
+    testRow->addStretch(1);
+    coreLayout->addLayout(testRow);
+
+    /* 按钮 Tooltip：说明访问的 URL / 行为 */
+    v2Tip(testPortsBtn, qFromUtf8("用 curl 连接 http://<监听地址>:<SOCKS端口>/ 与 http://<监听地址>:<HTTP端口>/，检测端口是否在监听（不访问外网）"));
+    v2Tip(testGstaticBtn, qFromUtf8("经 SOCKS5 / HTTP 代理访问 https://www.gstatic.com/generate_204（超时 5s），HTTP 204 表示代理可用"));
     QCheckBox* bypassCn = new QCheckBox(qFromUtf8("绕过中国大陆（geosite:cn / geoip:cn 直连，使用核心包自带 geo 文件）"), corePage);
     bypassCn->setChecked(true);            /* 默认勾选 */
     coreLayout->addWidget(bypassCn);
@@ -181,15 +250,24 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     V2RayLogic* logic = new V2RayLogic(w);
     logic->setWidgets(subEdit, subList, nodeList, coreState, logEdit, startBtn, stopBtn);
     logic->setRouteWidgets(bypassCn, bypassLan);
-    logic->setListenWidgets(listenAddr, listenPort);
+    logic->setListenWidgets(listenAddr, listenSocks, listenHttp);
     logic->setUpdateWidgets(updBtn, updAllBtn, nodeStatus);
+    logic->setAutoUpdateWidgets(autoChk, autoFreq);
+    QObject::connect(autoChk, SIGNAL(toggled(bool)), logic, SLOT(onAutoUpdateSettingsChanged()));
+    QObject::connect(autoFreq, SIGNAL(activated(int)), logic, SLOT(onAutoUpdateSettingsChanged()));
     logic->setCoreWidgets(dlBtn);
+    logic->setCoreTestWidgets(testSocksIcon, testSocksText,
+                              testHttpIcon, testHttpText, testMsg);
+    logic->setActiveNodeWidget(activeNodeLabel);
     logic->setCoreSelector(coreSel, redetectBtn);
     logic->setTestWidgets(tcpSelBtn, realSelBtn, tcpAllBtn, realAllBtn, stopTestBtn);
     /* B：控件变化即时落盘（另外 aboutToQuit 再兜底一次） */
     QObject::connect(bypassCn, SIGNAL(toggled(bool)), logic, SLOT(onSaveSettings()));
     QObject::connect(bypassLan, SIGNAL(toggled(bool)), logic, SLOT(onSaveSettings()));
-    QObject::connect(listenPort, SIGNAL(returnPressed()), logic, SLOT(onSaveSettings()));
+    QObject::connect(listenSocks, SIGNAL(returnPressed()), logic, SLOT(onSaveSettings()));
+    QObject::connect(listenHttp, SIGNAL(returnPressed()), logic, SLOT(onSaveSettings()));
+    QObject::connect(testPortsBtn, SIGNAL(clicked()), logic, SLOT(onTestPorts()));
+    QObject::connect(testGstaticBtn, SIGNAL(clicked()), logic, SLOT(onTestGstatic()));
     QObject::connect(listenAddr, SIGNAL(activated(int)), logic, SLOT(onSaveSettings()));
 #ifdef QT3_BUILD
     QObject::connect(listenAddr, SIGNAL(textChanged(const QString&)), logic, SLOT(onSaveSettings()));
@@ -294,6 +372,40 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     });
     QObject::connect(w, SIGNAL(destroyed()), logSlot, SLOT(call()));
     QObject::connect(w, SIGNAL(destroyed()), logSlot, SLOT(deleteLater()));
+
+    /* 其它按钮 Tooltip（说明访问的 URL / 行为） */
+    v2Tip(startBtn, qFromUtf8("用当前内核 + 选中节点，在本机同时启动 SOCKS 与 HTTP 代理"));
+    v2Tip(stopBtn, qFromUtf8("向当前核心进程发送终止信号"));
+    v2Tip(dlBtn, qFromUtf8("从 gh-proxy.com 下载核心（失败自动回退 GitHub）"));
+    v2Tip(redetectBtn, qFromUtf8("重新探测系统中的 v2ray / xray"));
+    v2Tip(tcpSelBtn, qFromUtf8("curl telnet://<节点地址>:<端口>，测 TCP 建连耗时"));
+    v2Tip(realSelBtn, qFromUtf8("经该节点访问 https://www.gstatic.com/generate_204，测真连接耗时"));
+    v2Tip(tcpAllBtn, qFromUtf8("对所有节点批量执行 TCP 建连测试"));
+    v2Tip(realAllBtn, qFromUtf8("对所有节点批量访问 https://www.gstatic.com/generate_204 测真连接"));
+    v2Tip(stopTestBtn, qFromUtf8("停止当前测速队列"));
+    v2Tip(autoChk, qFromUtf8("开启后按设定频率自动执行“更新全部订阅”"));
+    v2Tip(autoFreq, qFromUtf8("自动更新间隔（默认 2 小时）"));
+    v2Tip(updBtn, qFromUtf8("用 curl 拉取选中订阅地址并解析节点"));
+    v2Tip(updAllBtn, qFromUtf8("用 curl 拉取全部订阅地址并解析节点"));
+
+    /* 节点选择/当前行变化 → 更新“当前节点”显示 */
+#ifdef QT3_BUILD
+    QObject::connect(nodeList, SIGNAL(selectionChanged()), logic, SLOT(onNodeSelectionChanged()));
+    QObject::connect(nodeList, SIGNAL(currentChanged(int,int)), logic, SLOT(onNodeSelectionChanged()));
+#else
+    QObject::connect(nodeList, SIGNAL(itemSelectionChanged()), logic, SLOT(onNodeSelectionChanged()));
+    QObject::connect(nodeList, SIGNAL(currentCellChanged(int,int,int,int)), logic, SLOT(onNodeSelectionChanged()));
+#endif
+
+    /* 启动默认页：核心 */
+#ifdef QT3_BUILD
+    tabs->setCurrentPage(tabs->indexOf(corePage));
+#else
+    tabs->setCurrentIndex(tabs->indexOf(corePage));
+#endif
+
+    /* 重启恢复：上次运行中的核心自动拉起 */
+    logic->restoreCoreOnStartup();
 
     return w;
 }

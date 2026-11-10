@@ -102,10 +102,21 @@ public:
                         QPushButton* tcpAll, QPushButton* realAll, QPushButton* stopTest);
     void setRouteWidgets(QCheckBox* bypassCnCheck, QCheckBox* bypassLanCheck = 0);
     void setListenWidgets(QComboBox* addrBox, QLineEdit* portEdit);
+    void setListenWidgets(QComboBox* addrBox, QLineEdit* socksPortEdit,
+                          QLineEdit* httpPortEdit);
     void setUpdateWidgets(QPushButton* updBtn, QPushButton* updAllBtn, QLabel* nodeStatus);
+    void setAutoUpdateWidgets(QCheckBox* chk, QComboBox* freq);
     void setCoreWidgets(QPushButton* dlBtn);
+    void setCoreTestWidgets(QLabel* socksIcon, QLabel* socksText,
+                            QLabel* httpIcon, QLabel* httpText, QLabel* msg);
+    void setCoreTestChips(int socksKind, const QString& socksText,
+                          int httpKind, const QString& httpText);
+    void setCoreTestMessage(const QString& msg);
+    void setActiveNodeWidget(QLabel* activeNodeLabel);
+    void refreshActiveNodeLabel();
     void setCoreSelector(QComboBox* coreSelBox, QPushButton* redetectBtn);
     void refreshCoreState();
+    void restoreCoreOnStartup();
 
 public slots:
     void onSaveSettings();
@@ -130,9 +141,14 @@ public slots:
     void onLookupCountrySelected();
     void onLookupCountryAll();
     void onClearGeoCache();
+    void onTestPorts();
+    void onTestGstatic();
+    void onNodeSelectionChanged();
+    void shutdownProcesses();
     void onRedetectCore();
     void onCoreKindChanged(int index);
     void onAutoUpdateTick();
+    void onAutoUpdateSettingsChanged();
 
 signals:
     void nodesChanged();
@@ -161,6 +177,9 @@ private slots:
     void onGeoOutput();
     void onGeoExited();
     void startNextGeo();
+    void onProbeExited();
+    void probeStartPort(int which);
+    void probeStartGstatic(int which);
 
 private:
     QString baseDir() const;
@@ -173,7 +192,9 @@ private:
     void ensureDirs();
     void saveSettings();
     QString listenAddress() const;
-    int     listenPort() const;          /* 非法返回 -1 */
+    int     listenPort() const;          /* SOCKS（兼容旧代码） */
+    int     listenSocksPort() const;     /* 非法返回 -1 */
+    int     listenHttpPort() const;
     void startCoreDownload();
     void setCoreMessage(const QString& msg);
     void setUpdateBusy(bool busy, const QString& msg);
@@ -185,6 +206,7 @@ private:
     QString nodeId(const V2Node& n) const;
     int  indexByNodeId(const QString& id) const;
     void removeNodesBySource(const QString& src);
+    void pruneSubNodesForUpdate(const QString& src);
     bool nodeSupportedByCore(const V2Node& n) const;
     bool nodeSupportedByCore(const V2Node& n, CoreKind kind) const;
     void recomputeSupport();
@@ -265,6 +287,12 @@ private:
     QPushButton* testRealAllBtn;
     QPushButton* testStopBtn;
     QLabel* coreState;
+    QLabel* coreTestSocksIcon;   /* 测试结果：SOCKS 图标/文字 */
+    QLabel* coreTestSocksText;
+    QLabel* coreTestHttpIcon;
+    QLabel* coreTestHttpText;
+    QLabel* coreTestMsg;
+    QLabel* activeNodeLabel;     /* 当前使用的节点 */
     QTextEdit* log;
     QPushButton* startBtn;
     QPushButton* stopBtn;
@@ -272,6 +300,8 @@ private:
     QCheckBox* bypassLanCheck;
     QComboBox* listenAddrBox;
     QLineEdit* listenPortEdit;
+    QLineEdit* listenSocksEdit;
+    QLineEdit* listenHttpEdit;
     QPushButton* updBtn;
     QPushButton* updAllBtn;
     QLabel* nodeStatus;
@@ -298,12 +328,22 @@ private:
     QString geoToolPath;
     QMap<QString, QString> geoCache;   /* ip -> "CC|中文名" */
 
+    /* 端口/连通性测试（curl） */
+    QProcess* probeProc;
+    int       probeMode;       /* 0=端口 1=gstatic */
+    int       probeStage;      /* 0=SOCKS 1=HTTP */
+    QString   probeSocksRes;
+    QString   probeHttpRes;
+
     /* 订阅自动更新（串行队列） */
     QTimer* autoUpdateTimer;
     int autoUpdateIntervalMin;
     QStringList pendingSubUrls;
     int pendingSubIndex;
     bool updatingAll;
+    QCheckBox* autoUpdateChk;
+    QComboBox* autoUpdateFreqBox;
+    bool autoUpdateEnabled;
 
     /* 核心下载进度（百分比，-1 = 未知） */
     int dlProgressPct;
@@ -311,6 +351,7 @@ private:
     QString dlZipName;      /* C：按架构选择的包名 */
 
     bool coreStopRequested; /* 区分手动停止 / 异常退出 */
+    bool appQuitting;       /* 退出中：不覆盖 runningLast，便于下次恢复 */
     QString curSubUrl;      /* 当前更新中的订阅（写 sub_meta 用） */
     QMap<QString, QString> subMeta;  /* url -> "hh:mm:ss|节点数" */
 };

@@ -3,6 +3,20 @@
 #include "logic.h"
 #include "cJSON.h"
 #include "qsettings34.h"
+#include "v2flag.h"
+#ifdef QT3_BUILD
+#include <qpainter.h>
+#include <qpen.h>
+#include <qcolor.h>
+#include <qimage.h>
+#else
+#include <QPainter>
+#include <QPen>
+#include <QColor>
+#include <QImage>
+#include <QIcon>
+#include <QTableWidgetItem>
+#endif
 #ifndef QT3_BUILD
 #include <QHeaderView>
 #endif
@@ -342,6 +356,12 @@ V2RayLogic::V2RayLogic(QObject* parent)
     subList = 0;
     nodeList = 0;
     coreState = 0;
+    coreTestSocksIcon = 0;
+    coreTestSocksText = 0;
+    coreTestHttpIcon = 0;
+    coreTestHttpText = 0;
+    coreTestMsg = 0;
+    activeNodeLabel = 0;
     log = 0;
     startBtn = 0;
     stopBtn = 0;
@@ -349,6 +369,10 @@ V2RayLogic::V2RayLogic(QObject* parent)
     bypassLanCheck = 0;
     listenAddrBox = 0;
     listenPortEdit = 0;
+    listenSocksEdit = 0;
+    listenHttpEdit = 0;
+    probeProc = 0;
+    probeStage = 0;
     updBtn = 0;
     updAllBtn = 0;
     nodeStatus = 0;
@@ -369,8 +393,12 @@ V2RayLogic::V2RayLogic(QObject* parent)
     testRealAllBtn = 0;
     testStopBtn = 0;
     coreStopRequested = false;
+    appQuitting = false;
     dlTry = 0;
-    autoUpdateIntervalMin = 60;
+    autoUpdateIntervalMin = 120;
+    autoUpdateEnabled = true;
+    autoUpdateChk = 0;
+    autoUpdateFreqBox = 0;
     pendingSubIndex = 0;
     updatingAll = false;
     dlProgressPct = -1;
@@ -384,13 +412,23 @@ V2RayLogic::V2RayLogic(QObject* parent)
     detectSystemXray();
     refreshCoreCombo();
     QTimer::singleShot(300, this, SLOT(onLookupCountryAll()));
-    /* 订阅定时自动更新（默认 60 分钟，串行执行） */
+    /* 订阅定时自动更新（默认开启、每 120 分钟，串行执行） */
+    {
+        QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+        autoUpdateEnabled = st.valueInt("sub/autoUpdate", 1) != 0;
+        autoUpdateIntervalMin = st.valueInt("sub/autoUpdateMin", 120);
+        if (autoUpdateIntervalMin < 5) { autoUpdateIntervalMin = 120; }
+    }
     autoUpdateTimer = new QTimer(this);
     connect(autoUpdateTimer, SIGNAL(timeout()), this, SLOT(onAutoUpdateTick()));
-    autoUpdateTimer->start(autoUpdateIntervalMin * 60 * 1000);
+    if (autoUpdateEnabled) {
+        autoUpdateTimer->start(autoUpdateIntervalMin * 60 * 1000);
+    }
     /* B：退出前落盘（此时主窗/控件仍存活；析构里不能再碰兄弟控件） */
     connect(qApp, SIGNAL(aboutToQuit()), this, SLOT(onSaveSettings()));
     connect(qApp, SIGNAL(aboutToQuit()), this, SLOT(onSaveAllOnQuit()));
+    /* 退出时统一终止所有子进程，避免残留 xray/v2ray/curl */
+    connect(qApp, SIGNAL(aboutToQuit()), this, SLOT(shutdownProcesses()));
 }
 
 void V2RayLogic::setWidgets(QLineEdit* subEdit_, V2Table* subList_, V2Table* nodeList_,
@@ -521,51 +559,159 @@ void V2RayLogic::refreshSubList() {
     v2TableSetRows(subList, (int)subs.count());
     for (int i = 0; i < (int)subs.count(); ++i) {
         QString meta = subMeta.contains(subs[i]) ? subMeta[subs[i]] : QString();
-        QString t = meta;
+        QString t;
         QString n = qFromUtf8("—");
-        int bar = sFindStr(meta, "|", 0);
-        if (bar > 0) {
-            t = meta.left(bar);
-            n = meta.mid(bar + 1);
+        if (!meta.isEmpty()) {
+            t = meta;
+            int bar = sFindStr(meta, "|", 0);
+            if (bar > 0) {
+                t = meta.left(bar);
+                n = meta.mid(bar + 1);
+            }
+        } else {
+            /* 后备：sub_meta 丢失时由 nodes.json 反推（节点数 + 最近更新时间） */
+            int cnt = 0;
+            QString last;
+            for (int k = 0; k < (int)nodes.count(); ++k) {
+                if (nodes[k].sourceSub != subs[i]) { continue; }
+                ++cnt;
+                if (last.isEmpty() || nodes[k].updatedAt > last) {
+                    last = nodes[k].updatedAt;
+                }
+            }
+            if (cnt > 0) {
+                if (last.length() >= 19) { last = last.mid(11); }
+                t = last;
+                n = QString::number(cnt);
+                subMeta.insert(subs[i], t + "|" + n);   /* 自愈：写回 meta */
+            }
         }
         v2TableSetCell(subList, i, 0, subs[i]);
         v2TableSetCell(subList, i, 1, t.isEmpty() ? qFromUtf8("—") : t);
         v2TableSetCell(subList, i, 2, n);
     }
 }
+#ifdef QT3_BUILD
+/* 国旗 + 文本 的自绘单元格（参考 qlcomp/emojiitems.h 的 EmojiTableItem） */
+class V2GeoItem : public QTableItem {
+public:
+    V2GeoItem(QTable* t, const QString& text, const QPixmap& flag)
+        : QTableItem(t, QTableItem::Never, text), m_flag(flag) {}
+    void paint(QPainter* p, const QColorGroup& cg, const QRect& cr, bool selected) {
+        p->fillRect(cr, selected ? cg.brush(QColorGroup::Highlight)
+                                 : cg.brush(QColorGroup::Base));
+        int x = cr.x() + 2;
+        if (!m_flag.isNull()) {
+            p->drawPixmap(x, cr.y() + (cr.height() - m_flag.height()) / 2, m_flag);
+            x += m_flag.width() + 4;
+        }
+        p->setPen(selected ? cg.highlightedText() : cg.text());
+        p->drawText(QRect(x, cr.y(), cr.width() - (x - cr.x()), cr.height()),
+                    Qt::AlignVCenter | Qt::AlignLeft, text());
+    }
+private:
+    QPixmap m_flag;
+};
+#endif
+
+/* 直接在 QImage 上落像素（Qt3 对 alpha QPixmap 用 QPainter 绘制在部分环境不生效） */
+static void v2PlotPixel(QImage& img, int x, int y, QRgb c, int thick) {
+    for (int dy = 0; dy < thick; ++dy) {
+        for (int dx = 0; dx < thick; ++dx) {
+            int px = x + dx;
+            int py = y + dy;
+            if (px >= 0 && px < img.width() && py >= 0 && py < img.height()) {
+                img.setPixel(px, py, c);
+            }
+        }
+    }
+}
+
+static void v2DrawLine(QImage& img, int x0, int y0, int x1, int y1,
+                       QRgb c, int thick) {
+    int dx = x1 - x0;
+    int dy = y1 - y0;
+    int adx = dx < 0 ? -dx : dx;
+    int ady = dy < 0 ? -dy : dy;
+    int steps = adx > ady ? adx : ady;
+    if (steps == 0) {
+        v2PlotPixel(img, x0, y0, c, thick);
+        return;
+    }
+    for (int i = 0; i <= steps; ++i) {
+        int x = x0 + dx * i / steps;
+        int y = y0 + dy * i / steps;
+        v2PlotPixel(img, x, y, c, thick);
+    }
+}
+
+/* 可用性图标：0=绿勾 1=红叉 2=灰线 */
+static QPixmap v2StatusIcon(int kind) {
+    QImage img(14, 14, 32);
+#ifdef QT3_BUILD
+    img.setAlphaBuffer(true);
+#endif
+    img.fill(0);
+    QColor col(140, 140, 140);
+    int thick = 1;
+    if (kind == 0) {
+        col = QColor(30, 150, 60);
+        thick = 2;
+    } else if (kind == 1) {
+        col = QColor(200, 40, 40);
+        thick = 2;
+    }
+    QRgb c = qRgba(col.red(), col.green(), col.blue(), 255);
+    if (kind == 0) {
+        v2DrawLine(img, 2, 7, 6, 11, c, thick);
+        v2DrawLine(img, 6, 11, 12, 3, c, thick);
+    } else if (kind == 1) {
+        v2DrawLine(img, 3, 3, 11, 11, c, thick);
+        v2DrawLine(img, 11, 3, 3, 11, c, thick);
+    } else {
+        v2DrawLine(img, 3, 7, 11, 7, c, thick);
+    }
+    QPixmap pm;
+    pm.convertFromImage(img);
+    return pm;
+}
+
 void V2RayLogic::refreshNodeList() {
     if (!nodeList) { return; }
     if (v2TableCols(nodeList) == 0) {
         QStringList cols;
-        cols << qFromUtf8("名称") << qFromUtf8("协议") << qFromUtf8("国家")
-             << qFromUtf8("地址") << qFromUtf8("端口") << qFromUtf8("传输")
-             << qFromUtf8("安全") << "TCP(ms)" << qFromUtf8("真连(ms)")
-             << qFromUtf8("状态");
+        cols << qFromUtf8("名称") << qFromUtf8("协议") << qFromUtf8("国旗")
+             << qFromUtf8("国家") << qFromUtf8("地址") << qFromUtf8("端口")
+             << qFromUtf8("传输") << qFromUtf8("安全") << "TCP(ms)"
+             << qFromUtf8("真连(ms)") << qFromUtf8("可用") << qFromUtf8("状态");
         v2TableInit(nodeList, cols);
 #ifdef QT3_BUILD
-        nodeList->setColumnWidth(0, 240);
-        nodeList->setColumnStretchable(0, true);  /* 名称列拉伸 */
-        nodeList->setColumnWidth(1, 60);   /* 协议 */
-        nodeList->setColumnWidth(2, 90);   /* 国家 */
-        nodeList->setColumnWidth(3, 170);  /* 地址 */
-        nodeList->setColumnWidth(4, 60);   /* 端口 */
-        nodeList->setColumnWidth(5, 60);   /* 传输 */
-        nodeList->setColumnWidth(6, 70);   /* 安全 */
-        nodeList->setColumnWidth(7, 70);   /* TCP */
-        nodeList->setColumnWidth(8, 80);   /* 真连 */
-        nodeList->setColumnWidth(9, 70);   /* 状态 */
+        nodeList->setColumnWidth(0, 200);
+        nodeList->setColumnWidth(1, 60);
+        nodeList->setColumnWidth(2, 40);
+        nodeList->setColumnWidth(3, 90);
+        nodeList->setColumnWidth(4, 170);
+        nodeList->setColumnWidth(5, 60);
+        nodeList->setColumnWidth(6, 60);
+        nodeList->setColumnWidth(7, 70);
+        nodeList->setColumnWidth(8, 70);
+        nodeList->setColumnWidth(9, 80);
+        nodeList->setColumnWidth(10, 48);
+        nodeList->setColumnWidth(11, 70);
 #else
         nodeList->horizontalHeader()->setStretchLastSection(false);
-        nodeList->horizontalHeader()->setResizeMode(0, QHeaderView::Stretch);
+        nodeList->setColumnWidth(0, 200);
         nodeList->setColumnWidth(1, 60);
-        nodeList->setColumnWidth(2, 90);
-        nodeList->setColumnWidth(3, 170);
-        nodeList->setColumnWidth(4, 60);
+        nodeList->setColumnWidth(2, 40);
+        nodeList->setColumnWidth(3, 90);
+        nodeList->setColumnWidth(4, 170);
         nodeList->setColumnWidth(5, 60);
-        nodeList->setColumnWidth(6, 70);
+        nodeList->setColumnWidth(6, 60);
         nodeList->setColumnWidth(7, 70);
-        nodeList->setColumnWidth(8, 80);
-        nodeList->setColumnWidth(9, 70);
+        nodeList->setColumnWidth(8, 70);
+        nodeList->setColumnWidth(9, 80);
+        nodeList->setColumnWidth(10, 48);
+        nodeList->setColumnWidth(11, 70);
 #endif
     }
     v2TableClear(nodeList);
@@ -583,24 +729,56 @@ void V2RayLogic::refreshNodeList() {
             st = (n.proto == "hysteria2") ? qFromUtf8("未实现") : qFromUtf8("需Xray");
         } else if (n.realMs > 0) {
             st = qFromUtf8("可用");
+        } else if (n.realMs == -1) {
+            st = qFromUtf8("不可用");
         } else if (n.tcpMs > 0) {
             st = qFromUtf8("端口通");
+        } else if (n.tcpMs == -1) {
+            st = qFromUtf8("端口失败");
         } else {
             st = qFromUtf8("未测");
         }
-        QString geo = n.country.isEmpty() ? qFromUtf8("—")
+        QString geoText = n.country.isEmpty() ? qFromUtf8("—")
             : (n.countryName.isEmpty() ? n.country
                : n.country + " " + n.countryName);
+        QPixmap flag;
+        if (n.country.length() == 2) { flag = v2FlagPixmap(n.country, 14); }
+        int avail = 2;
+        if (!n.supported) {
+            avail = 1;
+        } else if (n.realMs > 0) {
+            avail = 0;
+        } else if (n.realMs == -1) {
+            avail = 1;
+        }
         v2TableSetCell(nodeList, i, 0, name);
         v2TableSetCell(nodeList, i, 1, n.proto);
-        v2TableSetCell(nodeList, i, 2, geo);
-        v2TableSetCell(nodeList, i, 3, n.addr);
-        v2TableSetCell(nodeList, i, 4, n.port);
-        v2TableSetCell(nodeList, i, 5, n.net.isEmpty() ? QString("tcp") : n.net);
-        v2TableSetCell(nodeList, i, 6, n.security.isEmpty() ? QString("none") : n.security);
-        v2TableSetCell(nodeList, i, 7, tcp);
-        v2TableSetCell(nodeList, i, 8, real);
-        v2TableSetCell(nodeList, i, 9, st);
+        if (!flag.isNull()) {
+#ifdef QT3_BUILD
+            nodeList->setPixmap(i, 2, flag);
+#else
+            QTableWidgetItem* fi = new QTableWidgetItem();
+            fi->setIcon(QIcon(flag));
+            nodeList->setItem(i, 2, fi);
+#endif
+        }
+        v2TableSetCell(nodeList, i, 3, geoText);
+        v2TableSetCell(nodeList, i, 4, n.addr);
+        v2TableSetCell(nodeList, i, 5, n.port);
+        v2TableSetCell(nodeList, i, 6, n.net.isEmpty() ? QString("tcp") : n.net);
+        v2TableSetCell(nodeList, i, 7, n.security.isEmpty() ? QString("none") : n.security);
+        v2TableSetCell(nodeList, i, 8, tcp);
+        v2TableSetCell(nodeList, i, 9, real);
+#ifdef QT3_BUILD
+        nodeList->setPixmap(i, 10, v2StatusIcon(avail));
+#else
+        {
+            QTableWidgetItem* ai = new QTableWidgetItem();
+            ai->setIcon(QIcon(v2StatusIcon(avail)));
+            nodeList->setItem(i, 10, ai);
+        }
+#endif
+        v2TableSetCell(nodeList, i, 11, st);
     }
     emit nodesChanged();
 }
@@ -620,8 +798,15 @@ void V2RayLogic::setRouteWidgets(QCheckBox* bypassCnCheck_, QCheckBox* bypassLan
 
 /* D：监听地址/端口（B：随路由选项一起持久化） */
 void V2RayLogic::setListenWidgets(QComboBox* addrBox, QLineEdit* portEdit) {
+    setListenWidgets(addrBox, portEdit, 0);
+}
+
+void V2RayLogic::setListenWidgets(QComboBox* addrBox, QLineEdit* socksEdit,
+                                  QLineEdit* httpEdit) {
     listenAddrBox = addrBox;
-    listenPortEdit = portEdit;
+    listenSocksEdit = socksEdit;
+    listenHttpEdit = httpEdit;
+    listenPortEdit = socksEdit;   /* 兼容旧路径 */
     QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
     QString addr = st.valueStr("listenAddr", "127.0.0.1");
     if (listenAddrBox) {
@@ -631,9 +816,11 @@ void V2RayLogic::setListenWidgets(QComboBox* addrBox, QLineEdit* portEdit) {
         listenAddrBox->setEditText(addr);
 #endif
     }
-    if (listenPortEdit) {
-        listenPortEdit->setText(QString::number(st.valueInt("listenPort", 10808)));
-    }
+    int socks = st.valueInt("listenSocksPort", st.valueInt("listenPort", 10808));
+    int http = st.valueInt("listenHttpPort", socks == 10808 ? 10809 : socks + 1);
+    if (http == socks) { http = socks + 1; }
+    if (listenSocksEdit) { listenSocksEdit->setText(QString::number(socks)); }
+    if (listenHttpEdit) { listenHttpEdit->setText(QString::number(http)); }
 }
 
 QString V2RayLogic::listenAddress() const {
@@ -647,12 +834,24 @@ QString V2RayLogic::listenAddress() const {
     return a;
 }
 
-int V2RayLogic::listenPort() const {
-    if (!listenPortEdit) { return 10808; }
+int V2RayLogic::listenSocksPort() const {
+    if (!listenSocksEdit) { return 10808; }
     bool ok = false;
-    int p = listenPortEdit->text().toInt(&ok);
+    int p = listenSocksEdit->text().toInt(&ok);
     if (!ok || p < 1 || p > 65535) { return -1; }
     return p;
+}
+
+int V2RayLogic::listenHttpPort() const {
+    if (!listenHttpEdit) { return 10809; }
+    bool ok = false;
+    int p = listenHttpEdit->text().toInt(&ok);
+    if (!ok || p < 1 || p > 65535) { return -1; }
+    return p;
+}
+
+int V2RayLogic::listenPort() const {
+    return listenSocksPort();
 }
 
 void V2RayLogic::onSaveSettings() {
@@ -661,6 +860,90 @@ void V2RayLogic::onSaveSettings() {
 
 void V2RayLogic::setCoreMessage(const QString& msg) {
     if (coreState) { coreState->setText(msg); }
+}
+
+void V2RayLogic::setCoreTestWidgets(QLabel* socksIcon, QLabel* socksText,
+                                    QLabel* httpIcon, QLabel* httpText,
+                                    QLabel* msg) {
+    coreTestSocksIcon = socksIcon;
+    coreTestSocksText = socksText;
+    coreTestHttpIcon = httpIcon;
+    coreTestHttpText = httpText;
+    coreTestMsg = msg;
+    /* 初值：灰线 + 未测试 */
+    setCoreTestChips(2, qFromUtf8("SOCKS —"), 2, qFromUtf8("HTTP —"));
+}
+
+/* kind：0=绿勾 1=红叉 2=灰线 */
+void V2RayLogic::setCoreTestChips(int socksKind, const QString& socksText,
+                                  int httpKind, const QString& httpText) {
+    if (coreTestSocksIcon && socksKind >= 0) {
+        coreTestSocksIcon->setPixmap(v2StatusIcon(socksKind));
+    }
+    if (coreTestSocksText) { coreTestSocksText->setText(socksText); }
+    if (coreTestHttpIcon && httpKind >= 0) {
+        coreTestHttpIcon->setPixmap(v2StatusIcon(httpKind));
+    }
+    if (coreTestHttpText) { coreTestHttpText->setText(httpText); }
+    if (coreTestMsg) { coreTestMsg->setText(QString()); }
+}
+
+void V2RayLogic::setCoreTestMessage(const QString& msg) {
+    if (coreTestMsg) { coreTestMsg->setText(msg); }
+}
+
+void V2RayLogic::setActiveNodeWidget(QLabel* lbl) {
+    activeNodeLabel = lbl;
+    refreshActiveNodeLabel();
+}
+
+void V2RayLogic::refreshActiveNodeLabel() {
+    if (!activeNodeLabel) { return; }
+    if (nodes.count() == 0) {
+        activeNodeLabel->setText(qFromUtf8("当前节点：—"));
+        return;
+    }
+    bool running = coreProc && coreProc->isRunning();
+    int idx = -1;
+    if (running) {
+        QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+        idx = indexByNodeId(st.valueStr("activeNode", ""));
+    }
+    if (idx < 0) { idx = selectedNodeIndex(); }
+    if (idx < 0) {
+        QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+        idx = indexByNodeId(st.valueStr("activeNode", ""));
+    }
+    if (idx < 0 || idx >= (int)nodes.count()) {
+        activeNodeLabel->setText(qFromUtf8("当前节点：—"));
+        return;
+    }
+    const V2Node& n = nodes[idx];
+    QString name = n.name.isEmpty() ? n.id : n.name;
+    QString s = qFromUtf8("当前节点：") + name
+        + qFromUtf8(" · ") + n.proto + " " + n.addr + ":" + n.port;
+    if (n.realMs > 0) {
+        s += qFromUtf8(" · 真连 ") + QString::number(n.realMs) + "ms";
+    }
+    s += running ? qFromUtf8("（使用中）") : qFromUtf8("（未启动）");
+    activeNodeLabel->setText(s);
+}
+
+void V2RayLogic::onNodeSelectionChanged() {
+    refreshActiveNodeLabel();
+}
+
+/* 重启恢复：上次运行中则自动启动核心 */
+void V2RayLogic::restoreCoreOnStartup() {
+    QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+    bool lastRunning = st.valueInt("core/runningLast", 0) != 0;
+    if (!lastRunning || !coreInstalled()) {
+        refreshActiveNodeLabel();
+        refreshCoreState();
+        return;
+    }
+    appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("检测到上次为运行状态，正在自动恢复…"));
+    onStartCore();
 }
 
 void V2RayLogic::setCoreWidgets(QPushButton* dlBtn) {
@@ -682,6 +965,46 @@ void V2RayLogic::setUpdateBusy(bool busy, const QString& msg) {
     if (updBtn)     { updBtn->setEnabled(!busy); }
     if (updAllBtn)  { updAllBtn->setEnabled(!busy); }
     if (nodeStatus) { nodeStatus->setText(msg); }
+}
+
+void V2RayLogic::setAutoUpdateWidgets(QCheckBox* chk, QComboBox* freq) {
+    autoUpdateChk = chk;
+    autoUpdateFreqBox = freq;
+    static const int mins[] = { 30, 60, 120, 180, 360, 720, 1440 };
+    if (autoUpdateChk) {
+        autoUpdateChk->setChecked(autoUpdateEnabled);
+    }
+    if (autoUpdateFreqBox) {
+        int idx = 2;   /* 默认 2 小时 */
+        for (int i = 0; i < 7; ++i) {
+            if (mins[i] == autoUpdateIntervalMin) { idx = i; break; }
+        }
+        v2ComboSetCurrent(autoUpdateFreqBox, idx);
+        autoUpdateFreqBox->setEnabled(autoUpdateEnabled);
+    }
+}
+
+void V2RayLogic::onAutoUpdateSettingsChanged() {
+    static const int mins[] = { 30, 60, 120, 180, 360, 720, 1440 };
+    autoUpdateEnabled = autoUpdateChk && autoUpdateChk->isChecked();
+    int idx = autoUpdateFreqBox ? v2ComboCurrent(autoUpdateFreqBox) : 2;
+    if (idx >= 0 && idx < 7) { autoUpdateIntervalMin = mins[idx]; }
+    if (autoUpdateFreqBox) { autoUpdateFreqBox->setEnabled(autoUpdateEnabled); }
+    if (autoUpdateTimer) {
+        if (autoUpdateEnabled) {
+            autoUpdateTimer->start(autoUpdateIntervalMin * 60 * 1000);
+        } else {
+            autoUpdateTimer->stop();
+        }
+    }
+    QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+    st.setValue("sub/autoUpdate", autoUpdateEnabled);
+    st.setValue("sub/autoUpdateMin", autoUpdateIntervalMin);
+    st.sync();
+    appendLogWithPrefix(qFromUtf8("[订阅]"),
+        autoUpdateEnabled
+            ? (qFromUtf8("自动更新：开启（每 ") + QString::number(autoUpdateIntervalMin) + qFromUtf8(" 分钟）"))
+            : qFromUtf8("自动更新：关闭"));
 }
 
 void V2RayLogic::loadSubMeta() {
@@ -715,6 +1038,20 @@ void V2RayLogic::saveSubMeta() {
 
 void V2RayLogic::onSaveAllOnQuit() {
     saveNodes();
+    saveSubMeta();
+}
+
+/* 退出时统一终止所有子进程（保留 core/runningLast 以便下次自动恢复） */
+void V2RayLogic::shutdownProcesses() {
+    appQuitting = true;
+    QProcess* ps[] = { probeProc, coreProc, latProc, testCurlProc, testCoreProc,
+                       subProc, dlProc, unzipProc, detectProc, geoProc };
+    int n = (int)(sizeof(ps) / sizeof(ps[0]));
+    for (int i = 0; i < n; ++i) {
+        if (ps[i] && ps[i]->isRunning()) {
+            ps[i]->tryTerminate();
+        }
+    }
 }
 
 /* ── 内核选择（v2ray / Xray 系统 / Xray 内置） ── */
@@ -1109,6 +1446,224 @@ void V2RayLogic::onClearGeoCache() {
     appendLog(qFromUtf8("国家缓存已清空"));
 }
 
+/* ── 端口/连通性测试（全部用 curl，跨平台） ── */
+static QString v2CurlCodeOf(const QByteArray& out) {
+    QString s = qFromUtf8(out.data(), (int)out.size());
+#ifdef QT3_BUILD
+    s = s.stripWhiteSpace();
+#else
+    s = s.trimmed();
+#endif
+    int sp = sFind(s, ' ', 0);
+    if (sp > 0) { s = s.left(sp); }
+    return s.isEmpty() ? QString("000") : s;
+}
+
+/* gstatic 结果 → 友好文案；kind 0=成功 1=失败 */
+static QString v2GstaticLabel(const QString& detail, const QString& err,
+                              const QString& prefix, int& kind) {
+    QString code = detail;
+    QString time;
+    int sp = sFind(code, ' ', 0);
+    if (sp > 0) {
+        time = code.mid(sp + 1);
+        code = code.left(sp);
+    }
+    if (!code.isEmpty() && code != "000") {
+        kind = 0;
+        QString t = prefix + qFromUtf8(" 可用(") + code;
+        if (!time.isEmpty()) { t += " " + time + qFromUtf8("s"); }
+        t += ")";
+        return t;
+    }
+    kind = 1;
+    QString e = err;
+#ifdef QT3_BUILD
+    e = e.stripWhiteSpace();
+#else
+    e = e.trimmed();
+#endif
+    QString reason = qFromUtf8("连接失败");
+    if (e.contains("timed out") || e.contains("Timeout")
+        || e.contains("timeout")) {
+        reason = qFromUtf8("超时");
+    } else if (e.contains("Could not resolve") || e.contains("resolve host")) {
+        reason = qFromUtf8("DNS 解析失败");
+    } else if (e.contains("Connection refused")) {
+        reason = qFromUtf8("连接被拒");
+    } else if (e.contains("Connection reset")) {
+        reason = qFromUtf8("连接被重置");
+    } else if (e.contains("SSL") || e.contains("TLS")
+               || e.contains("certificate")) {
+        reason = qFromUtf8("TLS 失败");
+    } else {
+        bool ok = false;
+        double secs = time.toDouble(&ok);
+        if (ok && secs >= 4.7) { reason = qFromUtf8("超时"); }
+    }
+    QString t = prefix + qFromUtf8(" 失败[") + reason + "]";
+    if (!time.isEmpty()) { t += "(" + time + qFromUtf8("s)"); }
+    return t;
+}
+
+void V2RayLogic::probeStartPort(int which) {
+    int port = (which == 0) ? listenSocksPort() : listenHttpPort();
+    if (port < 0) { port = (which == 0) ? 10808 : 10809; }
+    if (probeProc) {
+        if (probeProc->isRunning()) { probeProc->tryTerminate(); }
+        delete probeProc;
+        probeProc = 0;
+    }
+    probeProc = new QProcess(this);
+    connect(probeProc, SIGNAL(processExited()), this, SLOT(onProbeExited()));
+    probeProc->addArgument("curl");
+    probeProc->addArgument("-s");
+    probeProc->addArgument("-o");
+    probeProc->addArgument("/dev/null");
+    probeProc->addArgument("--connect-timeout");
+    probeProc->addArgument("1");
+    probeProc->addArgument("-m");
+    probeProc->addArgument("2");
+    probeProc->addArgument("-w");
+    probeProc->addArgument("%{http_code}");
+    probeProc->addArgument(QString("http://127.0.0.1:") + QString::number(port) + "/");
+    probeProc->start();
+}
+
+void V2RayLogic::probeStartGstatic(int which) {
+    int port = (which == 0) ? listenSocksPort() : listenHttpPort();
+    if (port < 0) { port = (which == 0) ? 10808 : 10809; }
+    if (probeProc) {
+        if (probeProc->isRunning()) { probeProc->tryTerminate(); }
+        delete probeProc;
+        probeProc = 0;
+    }
+    probeProc = new QProcess(this);
+    connect(probeProc, SIGNAL(processExited()), this, SLOT(onProbeExited()));
+    probeProc->addArgument("curl");
+    probeProc->addArgument("-s");
+    probeProc->addArgument("-S");
+    probeProc->addArgument("-o");
+    probeProc->addArgument("/dev/null");
+    probeProc->addArgument("-m");
+    probeProc->addArgument("5");
+    probeProc->addArgument("-w");
+    probeProc->addArgument("%{http_code} %{time_total}");
+    if (which == 0) {
+        probeProc->addArgument("--socks5-hostname");
+        probeProc->addArgument(QString("127.0.0.1:") + QString::number(port));
+    } else {
+        probeProc->addArgument("-x");
+        probeProc->addArgument(QString("http://127.0.0.1:") + QString::number(port));
+    }
+    probeProc->addArgument("https://www.gstatic.com/generate_204");
+    probeProc->start();
+}
+
+void V2RayLogic::onTestPorts() {
+    if (probeProc && probeProc->isRunning()) {
+        appendLogWithPrefix(qFromUtf8("[端口]"), qFromUtf8("测试进行中，请稍候"));
+        return;
+    }
+    int sp = listenSocksPort();
+    int hp = listenHttpPort();
+    if (sp < 0 || hp < 0) {
+        setCoreTestMessage(qFromUtf8("端口非法"));
+        return;
+    }
+    probeMode = 0;
+    probeStage = 0;
+    probeSocksRes = QString();
+    probeHttpRes = QString();
+    setCoreTestChips(2, qFromUtf8("SOCKS 测试中…"),
+                     2, qFromUtf8("HTTP 测试中…"));
+    probeStartPort(0);
+}
+
+void V2RayLogic::onTestGstatic() {
+    if (probeProc && probeProc->isRunning()) {
+        appendLogWithPrefix(qFromUtf8("[测试]"), qFromUtf8("测试进行中，请稍候"));
+        return;
+    }
+    if (!(coreProc && coreProc->isRunning())) {
+        setCoreTestMessage(qFromUtf8("请先启动核心再测试"));
+        return;
+    }
+    probeMode = 1;
+    probeStage = 0;
+    probeSocksRes = QString();
+    probeHttpRes = QString();
+    setCoreTestChips(2, qFromUtf8("SOCKS 测试中…"),
+                     2, qFromUtf8("HTTP 测试中…"));
+    probeStartGstatic(0);
+}
+
+void V2RayLogic::onProbeExited() {
+    if (!probeProc) { return; }
+#ifdef QT3_BUILD
+    QByteArray out = probeProc->readStdout();
+    QByteArray errOut = probeProc->readStderr();
+#else
+    QByteArray out = probeProc->readAllStandardOutput();
+    QByteArray errOut = probeProc->readAllStandardError();
+#endif
+    if (probeProc->isRunning()) { probeProc->tryTerminate(); }
+    delete probeProc;
+    probeProc = 0;
+    QString code = v2CurlCodeOf(out);
+    bool connected = (code != "000");
+    bool running = coreProc && coreProc->isRunning();
+    if (probeMode == 0) {
+        /* 端口测试：连通=绿勾；运行中未连通=红叉；未运行且空闲=灰线 */
+        int sKind = connected ? 0 : (running ? 1 : 2);
+        QString sText = connected ? qFromUtf8("SOCKS 可用")
+                                  : (running ? qFromUtf8("SOCKS 未监听")
+                                             : qFromUtf8("SOCKS 空闲"));
+        if (probeStage == 0) {
+            probeSocksRes = sText;
+            probeStage = 1;
+            setCoreTestChips(sKind, sText, 2, qFromUtf8("HTTP 测试中…"));
+            probeStartPort(1);
+            return;
+        }
+        int hKind = connected ? 0 : (running ? 1 : 2);
+        QString hText = connected ? qFromUtf8("HTTP 可用")
+                                  : (running ? qFromUtf8("HTTP 未监听")
+                                             : qFromUtf8("HTTP 空闲"));
+        probeHttpRes = hText;
+        setCoreTestChips(sKind, sText, hKind, hText);
+        appendLogWithPrefix(qFromUtf8("[端口]"),
+            qFromUtf8("SOCKS ") + sText + qFromUtf8(" · HTTP ") + hText);
+        return;
+    }
+    /* gstatic：解析状态码/耗时/错误 → 友好文案（超时/DNS/被拒/TLS…） */
+    QString detail = qFromUtf8(out.data(), (int)out.size());
+    QString detailErr = qFromUtf8(errOut.data(), (int)errOut.size());
+#ifdef QT3_BUILD
+    detail = detail.stripWhiteSpace();
+    detailErr = detailErr.stripWhiteSpace();
+#else
+    detail = detail.trimmed();
+    detailErr = detailErr.trimmed();
+#endif
+    if (probeStage == 0) {
+        int sk = 1;
+        QString sText = v2GstaticLabel(detail, detailErr, "SOCKS", sk);
+        probeSocksRes = sText;
+        probeStage = 1;
+        setCoreTestChips(sk, sText, 2, qFromUtf8("HTTP 测试中…"));
+        probeStartGstatic(1);
+        return;
+    }
+    int hk = 1;
+    QString hText = v2GstaticLabel(detail, detailErr, "HTTP", hk);
+    probeHttpRes = hText;
+    setCoreTestChips(-1, probeSocksRes, hk, hText);   /* kind -1：保留 SOCKS 图标 */
+    appendLogWithPrefix(qFromUtf8("[测试]"),
+        qFromUtf8("gstatic ") + probeSocksRes + qFromUtf8(" · ") + hText);
+}
+
+
 void V2RayLogic::setTestWidgets(QPushButton* tcpSel, QPushButton* realSel,
                                 QPushButton* tcpAll, QPushButton* realAll,
                                 QPushButton* stopTest) {
@@ -1223,6 +1778,29 @@ void V2RayLogic::removeNodesBySource(const QString& src) {
         if (nodes[i].sourceSub != src) { keep.append(nodes[i]); }
     }
     nodes = keep;
+}
+
+/* 订阅更新时：保留 正在使用 或 真连成功 的节点，清理未测/失败 */
+void V2RayLogic::pruneSubNodesForUpdate(const QString& src) {
+    QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+    QString activeId = st.valueStr("activeNode", "");
+    V2NodeList keep;
+    int kept = 0;
+    int removed = 0;
+    for (int i = 0; i < (int)nodes.count(); ++i) {
+        const V2Node& n = nodes[i];
+        if (n.sourceSub != src) { keep.append(n); continue; }
+        bool inUse = !activeId.isEmpty() && n.id == activeId;  /* 正在 core 使用 */
+        bool usable = (n.realMs > 0);                          /* 真连成功（绿勾） */
+        if (inUse || usable) { keep.append(n); ++kept; }
+        else { ++removed; }
+    }
+    nodes = keep;
+    if (removed > 0) {
+        appendLogWithPrefix(qFromUtf8("[订阅]"),
+            qFromUtf8("订阅更新：保留在用/真连可用 ") + QString::number(kept)
+            + qFromUtf8(" 个，清理未测/失败 ") + QString::number(removed) + qFromUtf8(" 个"));
+    }
 }
 
 /* 仅 v2ray-core 能力：REALITY / XTLS / 未实现协议一律不支持 */
@@ -1387,15 +1965,20 @@ void V2RayLogic::saveNodes() {
 }
 
 void V2RayLogic::saveSettings() {
-    if (!bypassCnCheck && !bypassLanCheck && !listenAddrBox && !listenPortEdit) { return; }
+    if (!bypassCnCheck && !bypassLanCheck && !listenAddrBox
+        && !listenSocksEdit && !listenHttpEdit) { return; }
     QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
-    if (listenAddrBox || listenPortEdit) {
+    if (listenAddrBox || listenSocksEdit || listenHttpEdit) {
         st.setValue("listenAddr", listenAddress());
-        int p = listenPort();
-        st.setValue("listenPort", p > 0 ? p : 10808);
+        int sp = listenSocksPort();
+        int hp = listenHttpPort();
+        st.setValue("listenSocksPort", sp > 0 ? sp : 10808);
+        st.setValue("listenHttpPort", hp > 0 ? hp : 10809);
     }
     if (bypassCnCheck) { st.setValue("bypassCn", bypassCnCheck->isChecked()); }
     if (bypassLanCheck) { st.setValue("bypassLan", bypassLanCheck->isChecked()); }
+    st.setValue("sub/autoUpdate", autoUpdateEnabled);
+    st.setValue("sub/autoUpdateMin", autoUpdateIntervalMin);
     st.sync();
 }
 
@@ -1528,6 +2111,7 @@ void V2RayLogic::startNextPendingSub() {
 }
 
 void V2RayLogic::onAutoUpdateTick() {
+    if (!autoUpdateEnabled) { return; }
     if ((int)subs.count() <= 0) { return; }
     if (subProc && subProc->isRunning()) { return; }
     if (updatingAll) { return; }
@@ -1581,16 +2165,24 @@ void V2RayLogic::onSubFetched() {
     int prevIdx = selectedNodeIndex();
     if (prevIdx >= 0) { prevId = nodes[prevIdx].id; }
     saveSubLast(plain);
-    removeNodesBySource(curSubUrl);          /* 只替换本订阅来源的节点 */
+    pruneSubNodesForUpdate(curSubUrl);       /* 保留在用/真连可用，清理未测/失败 */
     parseSubscription(plain);
     refreshNodeList();
-    int restore = indexByNodeId(prevId);
-    if (restore < 0 && nodes.count() > 0) { restore = 0; }
-    if (restore >= 0 && nodeList) {
-        v2TableSetRow(nodeList, restore);
+    {
         QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
-        st.setValue("activeNode", nodes[restore].id);
-        st.sync();
+        QString activeId = st.valueStr("activeNode", "");
+        bool coreRunning = coreProc && coreProc->isRunning();
+        /* core 运行时固定选中“在用节点”，且不改写 activeNode */
+        QString wantSel = coreRunning ? activeId : prevId;
+        int restore = indexByNodeId(wantSel);
+        if (restore < 0 && nodes.count() > 0) { restore = 0; }
+        if (restore >= 0 && nodeList) {
+            v2TableSetRow(nodeList, restore);
+            if (!coreRunning) {
+                st.setValue("activeNode", nodes[restore].id);
+                st.sync();
+            }
+        }
     }
     saveNodes();
     startGeoLookup(true);
@@ -2205,11 +2797,19 @@ void V2RayLogic::onStartCore() {
         return;
     }
     if (coreProc && coreProc->isRunning()) { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心已在运行")); return; }
-    /* D：监听地址/端口校验（B：校验通过后持久化） */
-    int lport = listenPort();
-    if (lport < 0) {
+    /* 启动核心前终止可能仍在运行的端口探针（监听端口将变化） */
+    if (probeProc && probeProc->isRunning()) { probeProc->tryTerminate(); }
+    /* D：监听地址/端口校验（SOCKS + HTTP 双端口） */
+    int sport = listenSocksPort();
+    int hport = listenHttpPort();
+    if (sport < 0 || hport < 0) {
         appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("监听端口非法（需 1-65535），请检查“核心”页设置"));
         setCoreMessage(qFromUtf8("状态：启动失败：监听端口非法（1-65535）"));
+        return;
+    }
+    if (sport == hport) {
+        appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("SOCKS 与 HTTP 端口不能相同"));
+        setCoreMessage(qFromUtf8("状态：启动失败：SOCKS/HTTP 端口不能相同"));
         return;
     }
     QString laddr = listenAddress();
@@ -2277,7 +2877,14 @@ void V2RayLogic::onStartCore() {
     coreProc->addArgument("-c");
     coreProc->addArgument(coreConfigPath());
     coreProc->start();
+    /* 记录“用户期望运行”，供下次启动恢复 */
+    {
+        QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+        st.setValue("core/runningLast", 1);
+        st.sync();
+    }
     refreshCoreState();
+    refreshActiveNodeLabel();
     appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心启动中（节点：") + node.name + qFromUtf8("）"));
 }
 void V2RayLogic::onCoreOutput() {
@@ -2295,17 +2902,30 @@ void V2RayLogic::onCoreErrOutput() {
 void V2RayLogic::onCoreExit() {
     bool stopped = coreStopRequested;
     coreStopRequested = false;
+    /* 退出中保留 runningLast；其它情况（手动停止/异常退出）置 0，避免下次自动拉起重启失败的核心 */
+    if (!appQuitting) {
+        QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+        st.setValue("core/runningLast", 0);
+        st.sync();
+    }
     appendLogWithPrefix(qFromUtf8("[核心]"), stopped ? qFromUtf8("核心已停止") : qFromUtf8("核心已退出"));
     refreshCoreState();
+    refreshActiveNodeLabel();
     setCoreMessage(stopped ? qFromUtf8("状态：核心已停止")
                            : qFromUtf8("状态：核心已退出（异常，详见日志）"));
 }
 void V2RayLogic::onStopCore() {
     if (!coreProc || !coreProc->isRunning()) { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心未在运行")); return; }
     coreStopRequested = true;
+    {
+        QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+        st.setValue("core/runningLast", 0);
+        st.sync();
+    }
     coreProc->tryTerminate();
     appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("已发送停止请求"));
     refreshCoreState();
+    refreshActiveNodeLabel();
 }
 void V2RayLogic::onCopyNodeLink() {
     int idx = selectedNodeIndex();
@@ -2703,15 +3323,21 @@ bool V2RayLogic::generateConfig(const V2Node& node, QString& err) {
         return false;
     }
     if (coreDir().length() <= 0) { err = qFromUtf8("核心目录缺失"); return false; }
-    int lport = listenPort();
-    if (lport < 0) { err = qFromUtf8("监听端口非法"); return false; }
+    int sport = listenSocksPort();
+    int hport = listenHttpPort();
+    if (sport < 0 || hport < 0 || sport == hport) {
+        err = qFromUtf8("监听端口非法（SOCKS/HTTP 需 1-65535 且不同）");
+        return false;
+    }
     QString laddr = listenAddress();
     QString outbound = v2BuildProxyOutbound(node, coreKind, err);
     if (outbound.isEmpty()) { return false; }
     QString cfg = "{\"log\":{\"loglevel\":\"warning\"},"
-        "\"inbounds\":[{\"port\":" + QString::number(lport)
-        + ",\"listen\":\"" + laddr
-        + "\",\"protocol\":\"socks\",\"settings\":{\"udp\":true}}],"
+        "\"inbounds\":["
+        "{\"port\":" + QString::number(sport) + ",\"listen\":\"" + laddr
+        + "\",\"protocol\":\"socks\",\"settings\":{\"udp\":true}},"
+        "{\"port\":" + QString::number(hport) + ",\"listen\":\"" + laddr
+        + "\",\"protocol\":\"http\",\"settings\":{}}],"
         "\"outbounds\":[" + outbound
         + ",{\"protocol\":\"freedom\",\"tag\":\"direct\",\"settings\":{}}]";
     QStringList rules;
@@ -2763,9 +3389,12 @@ void V2RayLogic::refreshCoreState() {
     if (!coreState || !startBtn || !stopBtn) { return; }
     QString s;
     if (coreProc && coreProc->isRunning()) {
-        int rp = listenPort();
-        s = qFromUtf8("状态：核心运行中（本地 SOCKS ")
-            + listenAddress() + ":" + QString::number(rp > 0 ? rp : 10808) + qFromUtf8("）");
+        int sp = listenSocksPort();
+        int hp = listenHttpPort();
+        s = qFromUtf8("状态：核心运行中（SOCKS ")
+            + listenAddress() + ":" + QString::number(sp > 0 ? sp : 10808)
+            + qFromUtf8(" · HTTP ") + listenAddress() + ":"
+            + QString::number(hp > 0 ? hp : 10809) + qFromUtf8("）");
     } else if (coreInstalled()) {
         s = qFromUtf8("状态：已就绪 · ") + coreDisplayName()
             + qFromUtf8(" @ ") + coreBinaryPath();
@@ -2773,12 +3402,14 @@ void V2RayLogic::refreshCoreState() {
         s = qFromUtf8("状态：") + coreDisplayName() + qFromUtf8(" 不可用，请下载安装或切换内核");
     }
     coreState->setText(s);
-    startBtn->setEnabled(coreInstalled());
-    stopBtn->setEnabled(coreProc && coreProc->isRunning());
+    bool running = coreProc && coreProc->isRunning();
+    startBtn->setEnabled(coreInstalled() && !running);
+    stopBtn->setEnabled(running);
     if (coreDlBtn) {
         bool needDl = !(coreKind == CoreXray && coreSourceSystem);
         coreDlBtn->setEnabled(needDl);
         coreDlBtn->setText(coreKind == CoreXray ? qFromUtf8("下载安装 Xray")
                                                 : qFromUtf8("下载安装 v2ray"));
     }
+    refreshActiveNodeLabel();
 }
