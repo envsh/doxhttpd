@@ -83,6 +83,9 @@ typedef QValueList<V2Node> V2NodeList;
 typedef QList<V2Node> V2NodeList;
 #endif
 
+/* 内核类型：v2ray-core / Xray-core */
+enum CoreKind { CoreV2ray = 0, CoreXray = 1 };
+
 class V2RayLogic : public QObject {
     Q_OBJECT
 public:
@@ -96,6 +99,7 @@ public:
     void setListenWidgets(QComboBox* addrBox, QLineEdit* portEdit);
     void setUpdateWidgets(QPushButton* updBtn, QPushButton* updAllBtn, QLabel* nodeStatus);
     void setCoreWidgets(QPushButton* dlBtn);
+    void setCoreSelector(QComboBox* coreSelBox, QPushButton* redetectBtn);
     void refreshCoreState();
 
 public slots:
@@ -118,6 +122,8 @@ public slots:
     void onCopySubLink();
     void onSortByLatency();
     void onCleanFailedNodes();
+    void onRedetectCore();
+    void onCoreKindChanged(int index);
     void onAutoUpdateTick();
 
 signals:
@@ -142,12 +148,17 @@ private slots:
     void onContinueTest();
     void onRealCoreReady();
     void onRealCurlExited();
+    void onDetectOutput();
+    void onDetectExited();
 
 private:
     QString baseDir() const;
     QString coreDir() const;
     QString coreBinaryPath() const;
     QString zipPath() const;
+    QString xrayDir() const;
+    QString coreWorkDir() const;         /* 当前内核的工作/配置目录 */
+    QString coreConfigPath() const;
     void ensureDirs();
     void saveSettings();
     QString listenAddress() const;
@@ -164,6 +175,14 @@ private:
     int  indexByNodeId(const QString& id) const;
     void removeNodesBySource(const QString& src);
     bool nodeSupportedByCore(const V2Node& n) const;
+    bool nodeSupportedByCore(const V2Node& n, CoreKind kind) const;
+    void recomputeSupport();
+    void loadCoreSettings();
+    void saveCoreSettings();
+    void detectSystemXray();
+    void refreshCoreCombo();
+    int  xraySystemVersionOk() const;    /* >=1.8 返回 1，过低 0，未知 -1 */
+    QString coreDisplayName() const;
     void appendNodeDedup(const V2Node& n);
     void startTestBatch(bool real, bool all);
     void startNextTest();
@@ -240,6 +259,17 @@ private:
     QPushButton* updAllBtn;
     QLabel* nodeStatus;
     QPushButton* coreDlBtn;
+    QComboBox* coreSelBox;
+    QPushButton* redetectBtn;
+    QProcess* detectProc;
+    QByteArray detectData;
+
+    /* 内核选择（持久化） */
+    CoreKind coreKind;
+    bool     coreSourceSystem;   /* 仅 Xray 有效：使用系统 xray */
+    QString  systemXrayPath;
+    QString  systemXrayVersion;
+    int      dlCoreKind;         /* 下载目标：0=v2ray 1=xray */
 
     /* 订阅自动更新（串行队列） */
     QTimer* autoUpdateTimer;

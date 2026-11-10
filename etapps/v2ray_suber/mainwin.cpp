@@ -131,6 +131,16 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     coreBtnRow->addStretch(1);
     coreLayout->addLayout(coreBtnRow);
 
+    /* 内核选择：v2ray / Xray（系统）/ Xray（内置） */
+    QHBoxLayout* coreSelRow = new QHBoxLayout(0, 4, 4);
+    coreSelRow->addWidget(new QLabel(qFromUtf8("核心："), corePage));
+    QComboBox* coreSel = new QComboBox(corePage);
+    coreSelRow->addWidget(coreSel);
+    QPushButton* redetectBtn = new QPushButton(qFromUtf8("重新检测系统核心"), corePage);
+    coreSelRow->addWidget(redetectBtn);
+    coreSelRow->addStretch(1);
+    coreLayout->addLayout(coreSelRow);
+
     /* D：SOCKS 监听地址 / 端口 */
     QHBoxLayout* listenRow = new QHBoxLayout(0, 4, 4);
     listenRow->addWidget(new QLabel(qFromUtf8("监听地址/端口："), corePage));
@@ -174,6 +184,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     logic->setListenWidgets(listenAddr, listenPort);
     logic->setUpdateWidgets(updBtn, updAllBtn, nodeStatus);
     logic->setCoreWidgets(dlBtn);
+    logic->setCoreSelector(coreSel, redetectBtn);
     logic->setTestWidgets(tcpSelBtn, realSelBtn, tcpAllBtn, realAllBtn, stopTestBtn);
     /* B：控件变化即时落盘（另外 aboutToQuit 再兜底一次） */
     QObject::connect(bypassCn, SIGNAL(toggled(bool)), logic, SLOT(onSaveSettings()));
@@ -198,6 +209,8 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     QObject::connect(dlBtn, SIGNAL(clicked()), logic, SLOT(onDownloadCore()));
     QObject::connect(startBtn, SIGNAL(clicked()), logic, SLOT(onStartCore()));
     QObject::connect(stopBtn, SIGNAL(clicked()), logic, SLOT(onStopCore()));
+    QObject::connect(coreSel, SIGNAL(activated(int)), logic, SLOT(onCoreKindChanged(int)));
+    QObject::connect(redetectBtn, SIGNAL(clicked()), logic, SLOT(onRedetectCore()));
 
     /* ── 订阅表右键菜单 ── */
 #ifdef QT3_BUILD

@@ -33,6 +33,9 @@
 #define V2CORE_VERSION      "v5.35.0"
 #define V2CORE_GH_PREFIX    "https://gh-proxy.com/https://github.com/v2fly/v2ray-core/releases/download/v5.35.0/"
 #define V2CORE_GH_DIRECT    "https://github.com/v2fly/v2ray-core/releases/download/v5.35.0/"
+#define XCORE_VERSION       "v26.11.9"
+#define XCORE_GH_PREFIX     "https://gh-proxy.com/https://github.com/XTLS/Xray-core/releases/download/v26.11.9/"
+#define XCORE_GH_DIRECT     "https://github.com/XTLS/Xray-core/releases/download/v26.11.9/"
 
 /* ── Qt3/Qt4 小工具 ── */
 static int sFind(const QString& s, char c, int from) {
@@ -64,8 +67,19 @@ static QStringList splitLines(const QString& content) {
 #endif
 }
 
-/* C：按目标架构选择 v2ray-core 包名 */
-static QString v2ZipName() {
+/* C：按目标架构选择内核包名 */
+static QString v2ZipName(CoreKind kind) {
+    if (kind == CoreXray) {
+#if defined(__aarch64__)
+        return QString("Xray-linux-arm64-v8a.zip");
+#elif defined(__arm__)
+        return QString("Xray-linux-arm32-v7a.zip");
+#elif defined(__i386__)
+        return QString("Xray-linux-32.zip");
+#else
+        return QString("Xray-linux-64.zip");
+#endif
+    }
 #if defined(__aarch64__)
     return QString("v2ray-linux-arm64-v8a.zip");
 #elif defined(__arm__)
@@ -74,6 +88,23 @@ static QString v2ZipName() {
     return QString("v2ray-linux-32.zip");
 #else
     return QString("v2ray-linux-64.zip");
+#endif
+}
+
+/* Qt3/Qt4 下拉框索引差异 */
+static int v2ComboCurrent(QComboBox* c) {
+#ifdef QT3_BUILD
+    return c ? c->currentItem() : -1;
+#else
+    return c ? c->currentIndex() : -1;
+#endif
+}
+static void v2ComboSetCurrent(QComboBox* c, int i) {
+    if (!c || i < 0) { return; }
+#ifdef QT3_BUILD
+    c->setCurrentItem(i);
+#else
+    c->setCurrentIndex(i);
 #endif
 }
 static void v2TableInit(V2Table* t, const QStringList& cols) {
@@ -315,6 +346,12 @@ V2RayLogic::V2RayLogic(QObject* parent)
     updAllBtn = 0;
     nodeStatus = 0;
     coreDlBtn = 0;
+    coreSelBox = 0;
+    redetectBtn = 0;
+    detectProc = 0;
+    coreKind = CoreV2ray;
+    coreSourceSystem = false;
+    dlCoreKind = 0;
     testTcpSelBtn = 0;
     testRealSelBtn = 0;
     testTcpAllBtn = 0;
@@ -329,8 +366,11 @@ V2RayLogic::V2RayLogic(QObject* parent)
     ensureDirs();
     loadSubscriptions();
     loadSubMeta();
+    loadCoreSettings();
     loadNodes();
     if (subList) { refreshSubList(); }
+    detectSystemXray();
+    refreshCoreCombo();
     /* 订阅定时自动更新（默认 60 分钟，串行执行） */
     autoUpdateTimer = new QTimer(this);
     connect(autoUpdateTimer, SIGNAL(timeout()), this, SLOT(onAutoUpdateTick()));
@@ -375,10 +415,23 @@ QString V2RayLogic::baseDir() const {
 QString V2RayLogic::coreDir() const {
     return baseDir() + "/core";
 }
+QString V2RayLogic::xrayDir() const {
+    return coreDir() + "/xray";
+}
+QString V2RayLogic::coreWorkDir() const {
+    if (coreKind == CoreXray) { return xrayDir(); }
+    return coreDir();
+}
+QString V2RayLogic::coreConfigPath() const {
+    return coreWorkDir() + "/config_run.json";
+}
 QString V2RayLogic::coreBinaryPath() const {
-    return coreDir() + "/v2ray";
+    if (coreKind == CoreV2ray) { return coreDir() + "/v2ray"; }
+    if (coreSourceSystem && !systemXrayPath.isEmpty()) { return systemXrayPath; }
+    return xrayDir() + "/xray";
 }
 QString V2RayLogic::zipPath() const {
+    if (coreKind == CoreXray) { return baseDir() + "/xray-core.zip"; }
     return baseDir() + "/v2ray-core.zip";
 }
 void V2RayLogic::ensureDirs() {
@@ -392,6 +445,7 @@ void V2RayLogic::ensureDirs() {
     mkdir(QString(home + "/.config").utf8().data(), 0755);
     mkdir(baseDir().utf8().data(), 0755);
     mkdir(coreDir().utf8().data(), 0755);
+    mkdir(xrayDir().utf8().data(), 0755);
 }
 
 bool V2RayLogic::coreInstalled() const {
@@ -401,7 +455,8 @@ bool V2RayLogic::coreInstalled() const {
 }
 
 bool V2RayLogic::hasGeoFiles() const {
-    return fileExists(coreDir() + "/geoip.dat") && fileExists(coreDir() + "/geosite.dat");
+    return fileExists(coreWorkDir() + "/geoip.dat")
+        && fileExists(coreWorkDir() + "/geosite.dat");
 }
 
 /* ── 订阅列表管理 ── */
@@ -642,6 +697,221 @@ void V2RayLogic::onSaveAllOnQuit() {
     saveNodes();
 }
 
+/* ── 内核选择（v2ray / Xray 系统 / Xray 内置） ── */
+void V2RayLogic::loadCoreSettings() {
+    QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+    QString kind = st.valueStr("core/kind", "v2ray");
+    coreKind = (kind == "xray") ? CoreXray : CoreV2ray;
+    coreSourceSystem = (st.valueStr("core/source", "builtin") == "system");
+    QString sp = st.valueStr("core/systemPath", "");
+    if (!sp.isEmpty()) { systemXrayPath = sp; }
+    systemXrayVersion = st.valueStr("core/xrayVersion", "");
+}
+
+void V2RayLogic::saveCoreSettings() {
+    QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+    st.setValue("core/kind", coreKind == CoreXray ? QString("xray") : QString("v2ray"));
+    st.setValue("core/source", coreSourceSystem ? QString("system") : QString("builtin"));
+    st.setValue("core/systemPath", systemXrayPath);
+    st.setValue("core/xrayVersion", systemXrayVersion);
+    st.sync();
+}
+
+void V2RayLogic::detectSystemXray() {
+    QStringList cand;
+    QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+    QString ov = st.valueStr("core/systemPath", "");
+    if (!ov.isEmpty()) { cand.append(ov); }
+    const char* pe = getenv("PATH");
+    QString pathEnv = pe ? QString(pe) : QString();
+#ifdef QT3_BUILD
+    QStringList dirs = QStringList::split(':', pathEnv);
+#else
+    QStringList dirs = pathEnv.split(QChar(':'));
+#endif
+    for (int i = 0; i < (int)dirs.count(); ++i) {
+        if (!dirs[i].isEmpty()) { cand.append(dirs[i] + "/xray"); }
+    }
+    cand.append(QString("/usr/local/bin/xray"));
+    cand.append(QString("/usr/bin/xray"));
+    cand.append(QString("/opt/xray/xray"));
+#ifdef QT3_BUILD
+    cand.append(QDir::homeDirPath() + "/.local/bin/xray");
+#else
+    cand.append(QDir::homePath() + "/.local/bin/xray");
+#endif
+    QString found;
+    for (int i = 0; i < (int)cand.count(); ++i) {
+        if (fileExists(cand[i])
+            && access(QFile::encodeName(cand[i]).data(), X_OK) == 0) {
+            found = cand[i];
+            break;
+        }
+    }
+    if (found != systemXrayPath) { systemXrayVersion = QString(); }
+    systemXrayPath = found;
+    if (detectProc) { delete detectProc; detectProc = 0; }
+    if (found.isEmpty()) {
+        systemXrayVersion = QString();
+        appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("未检测到系统 Xray（可下载内置版）"));
+        if (coreKind == CoreXray && coreSourceSystem) {
+            coreSourceSystem = false;      /* 系统版没了 → 回落内置 */
+            saveCoreSettings();
+        }
+        if (!st.contains("core/kind")) {
+            coreKind = CoreV2ray;          /* 首次运行：无系统 Xray 用 v2ray */
+            coreSourceSystem = false;
+            saveCoreSettings();
+        }
+        refreshCoreCombo();
+        refreshCoreState();
+        return;
+    }
+    /* 首次运行且未保存过选择：默认使用系统 Xray */
+    if (!st.contains("core/kind")) {
+        coreKind = CoreXray;
+        coreSourceSystem = true;
+        saveCoreSettings();
+    }
+    detectData.resize(0);
+    detectProc = new QProcess(this);
+    connect(detectProc, SIGNAL(readyReadStdout()), this, SLOT(onDetectOutput()));
+    connect(detectProc, SIGNAL(processExited()), this, SLOT(onDetectExited()));
+    detectProc->addArgument(found);
+    detectProc->addArgument("version");
+    detectProc->start();
+    appendLogWithPrefix(qFromUtf8("[核心]"),
+        qFromUtf8("发现系统 Xray：") + found + qFromUtf8("（读取版本…）"));
+}
+
+void V2RayLogic::onDetectOutput() {
+    if (!detectProc) { return; }
+#ifdef QT3_BUILD
+    baAppend(detectData, detectProc->readStdout());
+#else
+    baAppend(detectData, detectProc->readAllStandardOutput());
+#endif
+}
+
+void V2RayLogic::onDetectExited() {
+    if (!detectProc) { return; }
+    delete detectProc;
+    detectProc = 0;
+    QString out = qFromUtf8(detectData.data(), (int)detectData.size());
+    int sp = sFind(out, ' ', 0);
+    QString ver = (sp > 0) ? out.mid(sp + 1) : QString();
+    int sp2 = sFind(ver, ' ', 0);
+    if (sp2 > 0) { ver = ver.left(sp2); }
+#ifdef QT3_BUILD
+    ver = ver.stripWhiteSpace();
+#else
+    ver = ver.trimmed();
+#endif
+    systemXrayVersion = ver;
+    appendLogWithPrefix(qFromUtf8("[核心]"),
+        qFromUtf8("系统 Xray 版本：")
+        + (systemXrayVersion.isEmpty() ? qFromUtf8("未知") : systemXrayVersion));
+    saveCoreSettings();
+    recomputeSupport();
+    refreshNodeList();
+    refreshCoreCombo();
+    refreshCoreState();
+}
+
+/* >=1.8 支持 REALITY：1=可用，0=过低，-1=未知 */
+int V2RayLogic::xraySystemVersionOk() const {
+    if (systemXrayVersion.isEmpty()) { return -1; }
+#ifdef QT3_BUILD
+    QStringList parts = QStringList::split('.', systemXrayVersion);
+#else
+    QStringList parts = systemXrayVersion.split(QChar('.'));
+#endif
+    if (parts.count() < 2) { return -1; }
+    bool ok1 = false;
+    bool ok2 = false;
+    int maj = parts[0].toInt(&ok1);
+    int min = parts[1].toInt(&ok2);
+    if (!ok1 || !ok2) { return -1; }
+    if (maj > 1) { return 1; }
+    if (maj < 1) { return 0; }
+    return (min >= 8) ? 1 : 0;
+}
+
+QString V2RayLogic::coreDisplayName() const {
+    if (coreKind == CoreV2ray) {
+        return qFromUtf8("v2ray-core ") + qFromUtf8(V2CORE_VERSION);
+    }
+    if (coreSourceSystem) {
+        return qFromUtf8("Xray ") + (systemXrayVersion.isEmpty()
+            ? qFromUtf8("(系统)") : systemXrayVersion) + qFromUtf8("（系统）");
+    }
+    return qFromUtf8("Xray ") + qFromUtf8(XCORE_VERSION) + qFromUtf8("（内置）");
+}
+
+void V2RayLogic::refreshCoreCombo() {
+    if (!coreSelBox) { return; }
+    QString sysText = systemXrayPath.isEmpty()
+        ? qFromUtf8("Xray（系统：未找到）")
+        : qFromUtf8("Xray（系统：") + systemXrayPath
+            + (systemXrayVersion.isEmpty() ? QString("")
+               : qFromUtf8(" · ") + systemXrayVersion) + qFromUtf8("）");
+    int idx = (coreKind == CoreV2ray) ? 0 : (coreSourceSystem ? 1 : 2);
+#ifdef QT3_BUILD
+    coreSelBox->clear();
+    coreSelBox->insertItem(qFromUtf8("v2ray-core（内置 ") + qFromUtf8(V2CORE_VERSION) + qFromUtf8("）"));
+    coreSelBox->insertItem(sysText);
+    coreSelBox->insertItem(qFromUtf8("Xray（内置 ") + qFromUtf8(XCORE_VERSION) + qFromUtf8("）"));
+    coreSelBox->setCurrentItem(idx);
+#else
+    coreSelBox->clear();
+    coreSelBox->addItem(qFromUtf8("v2ray-core（内置 ") + qFromUtf8(V2CORE_VERSION) + qFromUtf8("）"));
+    coreSelBox->addItem(sysText);
+    coreSelBox->addItem(qFromUtf8("Xray（内置 ") + qFromUtf8(XCORE_VERSION) + qFromUtf8("）"));
+    coreSelBox->setCurrentIndex(idx);
+#endif
+}
+
+void V2RayLogic::setCoreSelector(QComboBox* box, QPushButton* redetect) {
+    coreSelBox = box;
+    redetectBtn = redetect;
+    refreshCoreCombo();
+    refreshCoreState();
+}
+
+void V2RayLogic::onRedetectCore() {
+    detectSystemXray();
+}
+
+void V2RayLogic::onCoreKindChanged(int index) {
+    if (coreProc && coreProc->isRunning()) {
+        appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("请先停止核心再切换内核"));
+        refreshCoreCombo();
+        return;
+    }
+    CoreKind k = CoreV2ray;
+    bool srcSystem = false;
+    if (index == 1) {
+        if (systemXrayPath.isEmpty()) {
+            appendLogWithPrefix(qFromUtf8("[核心]"),
+                qFromUtf8("未检测到系统 Xray，请点“重新检测”或改用内置版"));
+            refreshCoreCombo();
+            return;
+        }
+        k = CoreXray;
+        srcSystem = true;
+    } else if (index == 2) {
+        k = CoreXray;
+        srcSystem = false;
+    }
+    coreKind = k;
+    coreSourceSystem = srcSystem;
+    saveCoreSettings();
+    recomputeSupport();
+    refreshNodeList();
+    refreshCoreState();
+    appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("已切换内核：") + coreDisplayName());
+}
+
 void V2RayLogic::setTestWidgets(QPushButton* tcpSel, QPushButton* realSel,
                                 QPushButton* tcpAll, QPushButton* realAll,
                                 QPushButton* stopTest) {
@@ -759,14 +1029,30 @@ void V2RayLogic::removeNodesBySource(const QString& src) {
 }
 
 /* 仅 v2ray-core 能力：REALITY / XTLS / 未实现协议一律不支持 */
-bool V2RayLogic::nodeSupportedByCore(const V2Node& n) const {
-    if (n.security == "reality") { return false; }
-    if (!n.flow.isEmpty()) { return false; }
+bool V2RayLogic::nodeSupportedByCore(const V2Node& n, CoreKind kind) const {
     if (n.proto == "hysteria2") { return false; }
-    if (n.proto == "ss") { return true; }
-    if (n.proto != "vmess" && n.proto != "vless" && n.proto != "trojan") { return false; }
+    if (n.proto != "vmess" && n.proto != "vless"
+        && n.proto != "trojan" && n.proto != "ss") { return false; }
     if (!n.net.isEmpty() && n.net != "tcp" && n.net != "ws" && n.net != "grpc") { return false; }
+    bool reality = (n.security == "reality") || !n.flow.isEmpty();
+    if (!reality) { return true; }
+    if (kind == CoreV2ray) { return false; }
+    if (n.security == "reality" && n.pbk.isEmpty()) { return false; }
+    if (n.security == "reality" && coreSourceSystem) {
+        int ok = xraySystemVersionOk();
+        if (ok == 0) { return false; }
+    }
     return true;
+}
+
+bool V2RayLogic::nodeSupportedByCore(const V2Node& n) const {
+    return nodeSupportedByCore(n, coreKind);
+}
+
+void V2RayLogic::recomputeSupport() {
+    for (int i = 0; i < (int)nodes.count(); ++i) {
+        nodes[i].supported = nodeSupportedByCore(nodes[i], coreKind);
+    }
 }
 
 void V2RayLogic::loadNodes() {
@@ -1392,14 +1678,22 @@ void V2RayLogic::onDownloadCore() {
         onStopCore();
         return;
     }
+    if (coreKind == CoreXray && coreSourceSystem) {
+        appendLogWithPrefix(qFromUtf8("[核心下载]"),
+            qFromUtf8("当前使用系统 Xray，无需下载；如需内置版请切换内核"));
+        return;
+    }
     QFile::remove(zipPath());   /* C：清掉上次残留的半截包，保证本次下载/回退判定准确 */
-    dlZipName = v2ZipName();
+    dlCoreKind = (coreKind == CoreXray) ? 1 : 0;
+    dlZipName = v2ZipName(coreKind);
     dlTry = 0;
     startCoreDownload();
 }
 
 void V2RayLogic::startCoreDownload() {
-    QString url = QString(dlTry == 0 ? V2CORE_GH_PREFIX : V2CORE_GH_DIRECT) + dlZipName;
+    const char* proxy = (dlCoreKind == 1) ? XCORE_GH_PREFIX : V2CORE_GH_PREFIX;
+    const char* direct = (dlCoreKind == 1) ? XCORE_GH_DIRECT : V2CORE_GH_DIRECT;
+    QString url = QString(dlTry == 0 ? proxy : direct) + dlZipName;
     ensureDirs();
     coreDlBusy = true;
     setCoreDownloadBusy(true);
@@ -1507,7 +1801,7 @@ void V2RayLogic::onCoreDlDone() {
     unzipProc->addArgument("-o");
     unzipProc->addArgument(zipPath());
     unzipProc->addArgument("-d");
-    unzipProc->addArgument(coreDir());
+    unzipProc->addArgument(coreWorkDir());
     unzipProc->start();
 }
 void V2RayLogic::onCoreUnzipDone() {
@@ -1528,7 +1822,7 @@ void V2RayLogic::onCoreUnzipDone() {
     }
     if (coreInstalled()) {
         if (hasGeoFiles()) {
-            appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("v2ray-core ") + qFromUtf8(V2CORE_VERSION) + qFromUtf8(" 安装完成（geoip.dat / geosite.dat 已就绪）"));
+            appendLogWithPrefix(qFromUtf8("[核心下载]"), coreDisplayName() + qFromUtf8(" 安装完成（geoip.dat / geosite.dat 已就绪）"));
         } else {
             appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("v2ray-core 安装完成，但缺少 geoip.dat / geosite.dat"));
         }
@@ -1548,8 +1842,9 @@ void V2RayLogic::onCoreUnzipDone() {
 
 void V2RayLogic::onStartCore() {
     if (!coreInstalled()) {
-        appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心未安装，请先在“核心”页下载安装"));
-        setCoreMessage(qFromUtf8("状态：核心未安装（请先下载安装）"));
+        appendLogWithPrefix(qFromUtf8("[核心]"),
+            qFromUtf8("当前内核不可用（") + coreDisplayName() + qFromUtf8("），请先下载安装或切换内核"));
+        setCoreMessage(qFromUtf8("状态：当前内核不可用，请下载安装或切换"));
         return;
     }
     if (coreProc && coreProc->isRunning()) { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心已在运行")); return; }
@@ -1594,7 +1889,7 @@ void V2RayLogic::onStartCore() {
         }
     }
     V2Node node = nodes[idx];
-    if (!node.supported) {
+    if (!nodeSupportedByCore(node, coreKind)) {
         appendLogWithPrefix(qFromUtf8("[核心]"),
             qFromUtf8("该节点当前内核不支持（REALITY/XTLS-Vision 或未实现协议），请换节点"));
         setCoreMessage(qFromUtf8("状态：启动失败：该节点需要 Xray 内核（当前不支持）"));
@@ -1618,12 +1913,12 @@ void V2RayLogic::onStartCore() {
     connect(coreProc, SIGNAL(readyReadStdout()), this, SLOT(onCoreOutput()));
     connect(coreProc, SIGNAL(readyReadStderr()), this, SLOT(onCoreErrOutput()));
     connect(coreProc, SIGNAL(processExited()), this, SLOT(onCoreExit()));
-    QDir wd(coreDir());
+    QDir wd(coreWorkDir());
     coreProc->setWorkingDirectory(wd);
-    coreProc->addArgument("./v2ray");
+    coreProc->addArgument(coreBinaryPath());
     coreProc->addArgument("run");
     coreProc->addArgument("-c");
-    coreProc->addArgument("config_run.json");
+    coreProc->addArgument(coreConfigPath());
     coreProc->start();
     refreshCoreState();
     appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心启动中（节点：") + node.name + qFromUtf8("）"));
@@ -1861,15 +2156,15 @@ void V2RayLogic::startRealTest(int idx) {
         QTimer::singleShot(0, this, SLOT(onContinueTest()));
         return;
     }
-    writeUtf8File(coreDir() + "/config_test.json", cfg);
+    writeUtf8File(coreWorkDir() + "/config_test.json", cfg);
     if (testCoreProc) { delete testCoreProc; testCoreProc = 0; }
     testCoreProc = new QProcess(this);
-    QDir wd(coreDir());
+    QDir wd(coreWorkDir());
     testCoreProc->setWorkingDirectory(wd);
-    testCoreProc->addArgument("./v2ray");
+    testCoreProc->addArgument(coreBinaryPath());
     testCoreProc->addArgument("run");
     testCoreProc->addArgument("-c");
-    testCoreProc->addArgument("config_test.json");
+    testCoreProc->addArgument(coreWorkDir() + "/config_test.json");
     testCoreProc->start();
     appendLogWithPrefix(qFromUtf8("[测速]"),
         qFromUtf8("真连接测试中：") + nodes[idx].name);
@@ -1971,7 +2266,7 @@ void V2RayLogic::finishTest() {
 
 /* ── 生成 config_run.json ── */
 /* 生成代理出站对象（tag=proxy）；协议/参数不支持时返回空并设置 err */
-static QString v2BuildProxyOutbound(const V2Node& node, QString& err) {
+static QString v2BuildProxyOutbound(const V2Node& node, CoreKind kind, QString& err) {
     bool portOk = false;
     int portNum = node.port.toInt(&portOk);
     if (!portOk || portNum <= 0 || portNum > 65535) {
@@ -1993,7 +2288,21 @@ static QString v2BuildProxyOutbound(const V2Node& node, QString& err) {
     } else {
         QString stream;
         stream += "\"streamSettings\":{\"network\":\"" + net + "\"";
-        if (node.security == "tls") {
+        if (node.security == "reality" && kind == CoreXray) {
+            if (node.pbk.isEmpty()) {
+                err = qFromUtf8("REALITY 节点缺少 pbk");
+                return QString();
+            }
+            QString sn = node.sni.isEmpty() ? node.addr : node.sni;
+            QString fpr = node.fp.isEmpty() ? QString("chrome") : node.fp;
+            QString spx = node.spx.isEmpty() ? QString("/") : node.spx;
+            stream += ",\"security\":\"reality\",\"realitySettings\":{"
+                "\"serverName\":\"" + sn + "\","
+                "\"fingerprint\":\"" + fpr + "\","
+                "\"publicKey\":\"" + node.pbk + "\","
+                "\"shortId\":\"" + node.sid + "\","
+                "\"spiderX\":\"" + spx + "\"}";
+        } else if (node.security == "tls") {
             QString sn = node.sni.isEmpty() ? node.addr : node.sni;
             stream += ",\"security\":\"tls\",\"tlsSettings\":{\"serverName\":\"" + sn + "\"";
             if (node.allowInsecure) { stream += ",\"allowInsecure\":true"; }
@@ -2017,7 +2326,10 @@ static QString v2BuildProxyOutbound(const V2Node& node, QString& err) {
         } else if (node.proto == "vless") {
             outbound = "{\"protocol\":\"vless\",\"settings\":{\"vnext\":[{\"address\":\"" + node.addr
                 + "\",\"port\":" + node.port + ",\"users\":[{\"id\":\"" + node.uuid
-                + "\",\"encryption\":\"none\"}]}]},";
+                + "\",\"encryption\":\"none\""
+                + ((kind == CoreXray && !node.flow.isEmpty())
+                    ? ",\"flow\":\"" + node.flow + "\"" : QString())
+                + "}]}]},";
         } else {
             outbound = "{\"protocol\":\"trojan\",\"settings\":{\"servers\":[{\"address\":\"" + node.addr
                 + "\",\"port\":" + node.port + ",\"password\":\"" + node.uuid + "\"}]},";
@@ -2029,7 +2341,7 @@ static QString v2BuildProxyOutbound(const V2Node& node, QString& err) {
 }
 
 bool V2RayLogic::generateConfig(const V2Node& node, QString& err) {
-    if (!node.supported) {
+    if (!nodeSupportedByCore(node, coreKind)) {
         err = qFromUtf8("该节点需要 Xray 内核或协议未实现");
         return false;
     }
@@ -2037,7 +2349,7 @@ bool V2RayLogic::generateConfig(const V2Node& node, QString& err) {
     int lport = listenPort();
     if (lport < 0) { err = qFromUtf8("监听端口非法"); return false; }
     QString laddr = listenAddress();
-    QString outbound = v2BuildProxyOutbound(node, err);
+    QString outbound = v2BuildProxyOutbound(node, coreKind, err);
     if (outbound.isEmpty()) { return false; }
     QString cfg = "{\"log\":{\"loglevel\":\"warning\"},"
         "\"inbounds\":[{\"port\":" + QString::number(lport)
@@ -2073,14 +2385,14 @@ bool V2RayLogic::generateConfig(const V2Node& node, QString& err) {
         }
     }
     cfg += "}";
-    writeUtf8File(coreDir() + "/config_run.json", cfg);
+    writeUtf8File(coreConfigPath(), cfg);
     return true;
 }
 
 bool V2RayLogic::buildTestConfig(const V2Node& n, int port, QString& cfg) {
     if (!n.supported) { return false; }
     QString err;
-    QString outbound = v2BuildProxyOutbound(n, err);
+    QString outbound = v2BuildProxyOutbound(n, coreKind, err);
     if (outbound.isEmpty()) { return false; }
     cfg = "{\"log\":{\"loglevel\":\"warning\"},"
         "\"inbounds\":[{\"port\":" + QString::number(port)
@@ -2098,11 +2410,18 @@ void V2RayLogic::refreshCoreState() {
         s = qFromUtf8("状态：核心运行中（本地 SOCKS ")
             + listenAddress() + ":" + QString::number(rp > 0 ? rp : 10808) + qFromUtf8("）");
     } else if (coreInstalled()) {
-        s = qFromUtf8("状态：已安装 v2ray-core（固定 ") + qFromUtf8(V2CORE_VERSION) + qFromUtf8("）");
+        s = qFromUtf8("状态：已就绪 · ") + coreDisplayName()
+            + qFromUtf8(" @ ") + coreBinaryPath();
     } else {
-        s = qFromUtf8("状态：未安装 v2ray-core，请点击“下载安装”获取 ") + qFromUtf8(V2CORE_VERSION);
+        s = qFromUtf8("状态：") + coreDisplayName() + qFromUtf8(" 不可用，请下载安装或切换内核");
     }
     coreState->setText(s);
     startBtn->setEnabled(coreInstalled());
     stopBtn->setEnabled(coreProc && coreProc->isRunning());
+    if (coreDlBtn) {
+        bool needDl = !(coreKind == CoreXray && coreSourceSystem);
+        coreDlBtn->setEnabled(needDl);
+        coreDlBtn->setText(coreKind == CoreXray ? qFromUtf8("下载安装 Xray")
+                                                : qFromUtf8("下载安装 v2ray"));
+    }
 }
