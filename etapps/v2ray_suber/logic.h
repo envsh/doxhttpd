@@ -9,10 +9,14 @@
 
 #ifdef QT3_BUILD
 #include <qlistbox.h>
+#include <qvaluelist.h>
 typedef QListBox V2ListBox;
+typedef QValueList<int> V2IntList;
 #else
 #include <qlistwidget.h>
+#include <qlist.h>
 typedef QListWidget V2ListBox;
+typedef QList<int> V2IntList;
 #endif
 
 class QTextEdit;
@@ -24,19 +28,60 @@ class QCheckBox;
 class QComboBox;
 class QTimer;
 
-/* 单个节点（来自订阅解析） */
+/* 单个节点（来自订阅解析；字段覆盖持久化/配置生成/测速） */
 struct V2Node {
-    QString raw;    /* 原始分享链接 */
-    QString proto;  /* vmess / vless / trojan / ss */
-    QString name;   /* 备注 */
+    /* 身份（持久化/去重/选中恢复） */
+    QString id;
+    QString raw;        /* 原始分享链接 */
+    QString proto;      /* vmess / vless / trojan / ss / hysteria2 */
+    QString name;       /* URL 解码后的备注 */
     QString addr;
     QString port;
-    QString uuid;   /* vmess/vless 为 id，trojan 为 password */
-    QString net;    /* tcp / ws */
+
+    /* 凭据 */
+    QString uuid;       /* vmess/vless id；trojan password；ss password */
+    QString aid;        /* vmess alterId */
+    QString scy;        /* vmess security */
+    QString method;     /* ss 加密方法 */
+
+    /* 传输 */
+    QString net;        /* tcp / ws / grpc / h2 / httpupgrade */
     QString path;
     QString host;
-    QString tls;
+    QString serviceName;/* grpc serviceName */
+    QString headerType; /* tcp header */
+
+    /* 安全 */
+    QString security;   /* none / tls / reality */
+    QString sni;
+    QString alpn;
+    bool    allowInsecure;
+    QString fp;         /* reality fingerprint */
+    QString pbk;        /* reality publicKey */
+    QString sid;        /* reality shortId */
+    QString spx;        /* reality spiderX */
+    QString flow;       /* vless xtls */
+
+    /* 归属/生命周期 */
+    QString sourceSub;
+    QString updatedAt;
+
+    /* 测速：-2=未测，-1=失败，>0 毫秒 */
+    int     tcpMs;
+    int     realMs;
+    QString testedAt;
+
+    /* 当前 v2ray-core 能力 */
+    bool    supported;
+
+    V2Node() : allowInsecure(false), tcpMs(-2), realMs(-2), supported(false) {}
 };
+
+#ifdef QT3_BUILD
+typedef QValueList<V2Node> V2NodeList;
+#else
+typedef QList<V2Node> V2NodeList;
+#endif
 
 class V2RayLogic : public QObject {
     Q_OBJECT
@@ -53,6 +98,7 @@ public:
 
 public slots:
     void onSaveSettings();
+    void onSaveAllOnQuit();
     void onAddSubscription();
     void onDelSubscription();
     void onUpdateSubscription();
@@ -62,7 +108,17 @@ public slots:
     void onStopCore();
     void onCopyNodeLink();
     void onTestLatency();
+    void onTestTcpSelected();
+    void onTestTcpAll();
+    void onTestRealSelected();
+    void onTestRealAll();
+    void onStopTest();
     void onAutoUpdateTick();
+
+signals:
+    void nodesChanged();
+    void testProgress(int done, int total, int nodeIndex);
+    void testFinished();
 
 private slots:
     void onSubOutput();
@@ -78,6 +134,9 @@ private slots:
     void onLatOutput();
     void onLatErrOutput();
     void onLatExited();
+    void onContinueTest();
+    void onRealCoreReady();
+    void onRealCurlExited();
 
 private:
     QString baseDir() const;
@@ -94,6 +153,19 @@ private:
     void setCoreDownloadBusy(bool busy);
     void loadSubMeta();
     void saveSubMeta();
+    void loadNodes();
+    void saveNodes();
+    QString nodeId(const V2Node& n) const;
+    int  indexByNodeId(const QString& id) const;
+    void removeNodesBySource(const QString& src);
+    bool nodeSupportedByCore(const V2Node& n) const;
+    void appendNodeDedup(const V2Node& n);
+    void startTestBatch(bool real, bool all);
+    void startNextTest();
+    void finishTest();
+    int  pickFreePort();
+    void startRealTest(int idx);
+    bool buildTestConfig(const V2Node& n, int port, QString& cfg);
     void loadSubscriptions();
     void saveSubscriptions();
     void saveSubLast(const QString& content);
@@ -107,6 +179,7 @@ private:
     void parseSubscription(const QString& content);
     void parseVmess(const QString& line, V2Node& node, bool& ok, QString& err);
     void parseVlessTrojan(const QString& line, V2Node& node, bool& ok, QString& err);
+    void parseShadowsocks(const QString& line, V2Node& node, bool& ok, QString& err);
     bool generateConfig(const V2Node& node, QString& err);
     int  selectedNodeIndex();
     int  selectedSubIndex();
@@ -117,16 +190,15 @@ private:
     void startNextLatency();
 
     QStringList subs;          /* 订阅 URL 列表 */
-    V2Node nodes[512];
-    int nodeCount;
-    int nodeLatencyMs[512];    /* -1 = 失败/超时 */
-    bool nodeLatencyKnown[512];
+    V2NodeList nodes;
 
     QProcess* subProc;
     QProcess* dlProc;
     QProcess* unzipProc;
     QProcess* coreProc;
     QProcess* latProc;
+    QProcess* testCoreProc;    /* 真连接测试临时核心 */
+    QProcess* testCurlProc;    /* 真连接测试 curl */
     QByteArray subData;
     QByteArray dlErrData;      /* 核心下载 stderr（进度/错误） */
     QByteArray latErrData;     /* 延迟测试 stderr（curl -v trace） */
@@ -134,8 +206,13 @@ private:
     bool latBusy;
     bool latGotConnected;
     int  curLatIndex;
-    int  latQueueArr[512];
-    int  latQueueCount;
+    V2IntList testQueue;
+    bool testIsReal;
+    bool testCancel;
+    int  testDone;
+    int  testTotal;
+    int  testPort;             /* 真连接测试临时 SOCKS 端口 */
+    QString testUrl;           /* 默认 https://www.gstatic.com/generate_204 */
     QTime latTime;
 
     QLineEdit* subEdit;
