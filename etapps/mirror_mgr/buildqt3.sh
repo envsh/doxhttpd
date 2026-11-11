@@ -8,7 +8,7 @@ fi
 
 cd "$(dirname "$0")"
 mkdir -p build-qt3 && cd build-qt3
-/opt/qt338sh/bin/qmake -makefile ../plugin.pro
+$QTDIR/bin/qmake -makefile ../plugin.pro
 
 if [ x"$1" == x"c" ]; then
     make clean
@@ -20,7 +20,7 @@ ls -la ../../../qltox/plugins/uiapps/libmirror_mgr_ui.so
 ### for exe
 
 cd .. && mkdir -p build-exe && cd build-exe
-/opt/qt338sh/bin/qmake -makefile ../exe.pro
+$QTDIR/bin/qmake -makefile ../exe.pro
 if [ x"$1" == x"c" ]; then
     make clean
 fi
