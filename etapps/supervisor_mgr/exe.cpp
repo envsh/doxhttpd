@@ -1,10 +1,16 @@
 
 #include <qapplication.h>
+#include "LimeStyle.h"
+#include "ThemeManager.h"
 #include <qwidget.h>
 
 extern "C"
 int main(int argc, char** argv) {
 	QApplication app(argc, argv);
+
+    /* 默认深色主题（与 qltox 一致：LimeStyle + qtFusion dark） */
+    app.setStyle(new LimeStyle);
+    ThemeManager::setStyle("qtFusion", true);
 	
     extern QWidget* createSupervisorMgrMainWindow(void*);
     QWidget* w = createSupervisorMgrMainWindow(0);

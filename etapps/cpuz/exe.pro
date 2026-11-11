@@ -32,3 +32,6 @@ QMAKE_CXXFLAGS += -std=c++11
         QMAKE = $$QMAKE_EXE
     }
 }
+
+# 默认深色主题（LimeStyle + ThemeManager，复用 qlcomp）
+include(../limetheme.pri)

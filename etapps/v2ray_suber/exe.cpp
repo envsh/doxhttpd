@@ -1,5 +1,7 @@
 
 #include <qapplication.h>
+#include "LimeStyle.h"
+#include "ThemeManager.h"
 #include <qwidget.h>
 
 // #include "mainwin.h"
@@ -7,6 +9,10 @@
 extern "C"
 int main(int argc, char** argv) {
 	QApplication app(argc, argv);
+
+    /* 默认深色主题（与 qltox 一致：LimeStyle + qtFusion dark） */
+    app.setStyle(new LimeStyle);
+    ThemeManager::setStyle("qtFusion", true);
 
     extern QWidget* createV2raySuberMainWindow(void*);
     QWidget* w = createV2raySuberMainWindow(0);

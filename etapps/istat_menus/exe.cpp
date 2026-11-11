@@ -1,5 +1,7 @@
 
 #include <qapplication.h>
+#include "LimeStyle.h"
+#include "ThemeManager.h"
 #include <qwidget.h>
 
 extern QWidget* createIstatMainWindow(void*);
@@ -7,6 +9,10 @@ extern QWidget* createIstatMainWindow(void*);
 extern "C"
 int main(int argc, char** argv) {
 	QApplication app(argc, argv);
+
+    /* 默认深色主题（与 qltox 一致：LimeStyle + qtFusion dark） */
+    app.setStyle(new LimeStyle);
+    ThemeManager::setStyle("qtFusion", true);
 
     QWidget* w = createIstatMainWindow(0);
 #ifdef QT3_BUILD
