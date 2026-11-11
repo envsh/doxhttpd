@@ -113,13 +113,20 @@ public:
     void setUpdateWidgets(QPushButton* updBtn, QPushButton* updAllBtn, QLabel* nodeStatus);
     void setFavWidgets(V2Table* favList);
     void setTrafficWidget(QLabel* lbl);
+    QString nodeCountryTip(int row) const;
+    QString favCountryTip(int row) const;
     void setNodeViewWidgets(QLineEdit* filterEdit, QComboBox* sortBox);
     void setAutoUpdateWidgets(QCheckBox* chk, QComboBox* freq);
     void setCoreWidgets(QPushButton* dlBtn);
     void setCoreTestWidgets(QLabel* socksIcon, QLabel* socksText,
                             QLabel* httpIcon, QLabel* httpText, QLabel* msg);
+    void setCoreTestTimeWidget(QLabel* timeLabel);
+    void flushTrafficTotals();
     void setCoreTestChips(int socksKind, const QString& socksText,
                           int httpKind, const QString& httpText);
+    void setCoreTestTime(const QString& timeText);
+    void saveTestResult();
+    void restoreTestResult();
     void setCoreTestMessage(const QString& msg);
     void setActiveNodeWidget(QLabel* activeNodeLabel);
     void refreshActiveNodeLabel();
@@ -317,6 +324,13 @@ private:
     QLabel* coreTestHttpIcon;
     QLabel* coreTestHttpText;
     QLabel* coreTestMsg;
+    QLabel* coreTestTime;        /* 行尾唯一时间标签 */
+    /* 最近测试结果持久化（时间单独存，文本保持原始文案） */
+    QString lastTestSocks, lastTestHttp, lastTestMsg;
+    QString lastTestTime;        /* 上次测试完成时间（整行唯一） */
+    int     lastTestSocksKind, lastTestHttpKind;
+    QString probeStamp;          /* 本次测试的唯一时间戳 */
+    int     probeSocksKind;      /* gstatic 阶段0的 SOCKS 图标 kind */
     QLabel* activeNodeLabel;     /* 当前使用的节点 */
     QTextEdit* log;
     QPushButton* startBtn;
@@ -379,6 +393,10 @@ private:
     long long trafficUpLast, trafficDownLast;
     long long trafficUpRate, trafficDownRate;
     long long reqCountBase, reqCountLast;
+    /* 跨会话累计流量（settings 持久化：core/totalUp / core/totalDown） */
+    long long totalUpBase, totalDownBase;   /* 本次会话起点的累计基线 */
+    long long totalUp, totalDown;           /* 基线 + 本次会话实时值 */
+    int       totalFlushTick;               /* 每 30s 落盘一次 */
 
     /* 收藏页 */
     V2Table* favList;

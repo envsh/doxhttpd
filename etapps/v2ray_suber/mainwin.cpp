@@ -38,6 +38,35 @@ static void V2ComboAdd(QComboBox* c, const QString& s) {
 #endif
 }
 
+#ifdef QT3_BUILD
+/* 国旗列单元格 tooltip：显示国家信息（国家列已隐藏） */
+class V2FlagTip : public QToolTip {
+public:
+    V2FlagTip(V2Table* t, V2RayLogic* lg, bool fav)
+        : QToolTip(t->viewport()), m_t(t), m_logic(lg), m_fav(fav), m_col(2) {}
+    void maybeTip(const QPoint& p) {
+        if (!m_t || !m_logic) { return; }
+        /* QTable 的 viewport 是 4000x4000 裁剪 viewport（基准 -2000,-2000），
+           p 需经官方 API 转内容坐标，rect 也须用 contentsToViewport 回写 */
+        QPoint cp = m_t->viewportToContents(p);
+        int r = m_t->rowAt(cp.y());
+        int c = m_t->columnAt(cp.x());
+        if (r < 0 || c != m_col) { hide(); return; }
+        QString tipText = m_fav ? m_logic->favCountryTip(r)
+                                : m_logic->nodeCountryTip(r);
+        if (tipText.isEmpty()) { hide(); return; }
+        QRect cr = m_t->cellGeometry(r, c);
+        QRect vr(m_t->contentsToViewport(cr.topLeft()), cr.size());
+        QToolTip::tip(vr, tipText);
+    }
+private:
+    V2Table* m_t;
+    V2RayLogic* m_logic;
+    bool m_fav;
+    int  m_col;
+};
+#endif
+
 /* 表格右键：按光标落点选中行，供菜单动作使用 */
 static void V2PrepareRow(V2Table* t) {
     if (!t) { return; }
@@ -248,6 +277,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     QLabel* testHttpIcon = new QLabel(corePage);
     QLabel* testHttpText = new QLabel(corePage);
     QLabel* testMsg = new QLabel(corePage);
+    QLabel* testTime = new QLabel(corePage);   /* 行尾唯一时间 */
     testRow->addWidget(testPrefix);
     testRow->addWidget(testSocksIcon);
     testRow->addWidget(testSocksText);
@@ -255,6 +285,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     testRow->addWidget(testHttpIcon);
     testRow->addWidget(testHttpText);
     testRow->addWidget(testMsg);
+    testRow->addWidget(testTime);
     testRow->addStretch(1);
     coreLayout->addLayout(testRow);
 
@@ -293,6 +324,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     logic->setCoreWidgets(dlBtn);
     logic->setCoreTestWidgets(testSocksIcon, testSocksText,
                               testHttpIcon, testHttpText, testMsg);
+    logic->setCoreTestTimeWidget(testTime);
     logic->setActiveNodeWidget(activeNodeLabel);
     logic->setTrafficWidget(trafficLabel);
     logic->setNodeViewWidgets(nodeFilterEdit, nodeSortBox);
@@ -408,6 +440,12 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     nodeList->setContextMenuPolicy(Qt::CustomContextMenu);
     QObject::connect(nodeList, SIGNAL(customContextMenuRequested(const QPoint&)),
                      nodeCtx, SLOT(call()));
+#endif
+
+#ifdef QT3_BUILD
+    /* 国旗列 tooltip（Qt3；Qt4 走 QTableWidgetItem::setToolTip） */
+    (new V2FlagTip(nodeList, logic, false));
+    (new V2FlagTip(favList, logic, true));
 #endif
 
     /* ── 收藏表右键菜单（logic 已创建，可挂槽） ── */
