@@ -69,3 +69,6 @@ QMAKE_CXXFLAGS += -std=c++11
         QMAKE = $$QMAKE_EXE
     }
 }
+
+# nanopb（geoip.dat 离线解析，vendor 源码）
+include(../../vendor/pb_geoip.pri)
