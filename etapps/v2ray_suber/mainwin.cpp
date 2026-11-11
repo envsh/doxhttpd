@@ -120,6 +120,20 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     /* ── Tab: 节点 ── */
     QWidget* nodePage = new QWidget(tabs);
     QVBoxLayout* nodeLayout = new QVBoxLayout(nodePage, 6, 4);
+    /* 过滤 + 排序行（视图层，不动节点数据） */
+    QHBoxLayout* nodeFilterRow = new QHBoxLayout(0, 4, 4);
+    nodeFilterRow->addWidget(new QLabel(qFromUtf8("过滤："), nodePage));
+    QLineEdit* nodeFilterEdit = new QLineEdit(nodePage);
+    nodeFilterRow->addWidget(nodeFilterEdit);
+    nodeFilterRow->addWidget(new QLabel(qFromUtf8("排序："), nodePage));
+    QComboBox* nodeSortBox = new QComboBox(nodePage);
+    V2ComboAdd(nodeSortBox, qFromUtf8("默认顺序"));
+    V2ComboAdd(nodeSortBox, qFromUtf8("真连延时 ↑"));
+    V2ComboAdd(nodeSortBox, qFromUtf8("TCP 延时 ↑"));
+    V2ComboAdd(nodeSortBox, qFromUtf8("名称 A→Z"));
+    nodeFilterRow->addWidget(nodeSortBox);
+    nodeFilterRow->addStretch(1);
+    nodeLayout->addLayout(nodeFilterRow);
 #ifdef QT3_BUILD
     V2Table* nodeList = new QTable(0, 0, nodePage);
     nodeList->setReadOnly(true);
@@ -152,6 +166,24 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     nodeLayout->addWidget(nodeHint);
     tabs->addTab(nodePage, qFromUtf8("节点"));
 
+    /* ── Tab: 收藏 ── */
+    QWidget* favPage = new QWidget(tabs);
+    QVBoxLayout* favLayout = new QVBoxLayout(favPage, 6, 4);
+#ifdef QT3_BUILD
+    V2Table* favList = new QTable(0, 0, favPage);
+    favList->setReadOnly(true);
+    favList->setSelectionMode(QTable::SingleRow);
+#else
+    V2Table* favList = new QTableWidget(favPage);
+    favList->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    favList->setSelectionBehavior(QAbstractItemView::SelectRows);
+    favList->setSelectionMode(QAbstractItemView::SingleSelection);
+#endif
+    favLayout->addWidget(favList);
+    QLabel* favHint = new QLabel(qFromUtf8("提示：在“节点”页右键“加入/取消收藏”；此处右键可启动核心/复制链接/取消收藏"), favPage);
+    favLayout->addWidget(favHint);
+    tabs->addTab(favPage, qFromUtf8("收藏"));
+
     /* ── Tab: 核心 ── */
     QWidget* corePage = new QWidget(tabs);
     QVBoxLayout* coreLayout = new QVBoxLayout(corePage, 6, 4);
@@ -160,6 +192,9 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     /* 当前使用的节点（独立一行，不参与测试结果覆盖） */
     QLabel* activeNodeLabel = new QLabel(qFromUtf8("当前节点：—"), corePage);
     coreLayout->addWidget(activeNodeLabel);
+    /* 实时流量（速率/累计/请求数），核心未运行时显示占位 */
+    QLabel* trafficLabel = new QLabel(qFromUtf8("流量：—（核心未运行）"), corePage);
+    coreLayout->addWidget(trafficLabel);
     QHBoxLayout* coreBtnRow = new QHBoxLayout(0, 4, 4);
     QPushButton* dlBtn = new QPushButton(qFromUtf8("下载安装"), corePage);
     QPushButton* startBtn = new QPushButton(qFromUtf8("启动核心"), corePage);
@@ -259,6 +294,13 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     logic->setCoreTestWidgets(testSocksIcon, testSocksText,
                               testHttpIcon, testHttpText, testMsg);
     logic->setActiveNodeWidget(activeNodeLabel);
+    logic->setTrafficWidget(trafficLabel);
+    logic->setNodeViewWidgets(nodeFilterEdit, nodeSortBox);
+    logic->setFavWidgets(favList);
+    QObject::connect(nodeFilterEdit, SIGNAL(textChanged(const QString&)),
+                     logic, SLOT(onNodeFilterChanged()));
+    QObject::connect(nodeSortBox, SIGNAL(activated(int)),
+                     logic, SLOT(onNodeSortChanged()));
     logic->setCoreSelector(coreSel, redetectBtn);
     logic->setTestWidgets(tcpSelBtn, realSelBtn, tcpAllBtn, realAllBtn, stopTestBtn);
     /* B：控件变化即时落盘（另外 aboutToQuit 再兜底一次） */
@@ -322,6 +364,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     QPopupMenu* nodeMenu = new QPopupMenu(w);
     nodeMenu->insertItem(qFromUtf8("用此节点启动核心"), logic, SLOT(onStartCore()));
     nodeMenu->insertItem(qFromUtf8("复制节点链接"), logic, SLOT(onCopyNodeLink()));
+    nodeMenu->insertItem(qFromUtf8("加入/取消收藏"), logic, SLOT(onToggleFavorite()));
     nodeMenu->insertSeparator();
     nodeMenu->insertItem(qFromUtf8("查询国家（选中）"), logic, SLOT(onLookupCountrySelected()));
     nodeMenu->insertItem(qFromUtf8("查询国家（全部未确定）"), logic, SLOT(onLookupCountryAll()));
@@ -339,6 +382,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     QMenu* nodeMenu = new QMenu(w);
     nodeMenu->addAction(qFromUtf8("用此节点启动核心"), logic, SLOT(onStartCore()));
     nodeMenu->addAction(qFromUtf8("复制节点链接"), logic, SLOT(onCopyNodeLink()));
+    nodeMenu->addAction(qFromUtf8("加入/取消收藏"), logic, SLOT(onToggleFavorite()));
     nodeMenu->addSeparator();
     nodeMenu->addAction(qFromUtf8("查询国家（选中）"), logic, SLOT(onLookupCountrySelected()));
     nodeMenu->addAction(qFromUtf8("查询国家（全部未确定）"), logic, SLOT(onLookupCountryAll()));
@@ -366,6 +410,31 @@ QWidget* createV2raySuberMainWindow(void* parent) {
                      nodeCtx, SLOT(call()));
 #endif
 
+    /* ── 收藏表右键菜单（logic 已创建，可挂槽） ── */
+#ifdef QT3_BUILD
+    QPopupMenu* favMenu = new QPopupMenu(w);
+    favMenu->insertItem(qFromUtf8("用此节点启动核心"), logic, SLOT(onStartFavCore()));
+    favMenu->insertItem(qFromUtf8("复制节点链接"), logic, SLOT(onCopyFavLink()));
+    favMenu->insertItem(qFromUtf8("取消收藏"), logic, SLOT(onUnfavFav()));
+#else
+    QMenu* favMenu = new QMenu(w);
+    favMenu->addAction(qFromUtf8("用此节点启动核心"), logic, SLOT(onStartFavCore()));
+    favMenu->addAction(qFromUtf8("复制节点链接"), logic, SLOT(onCopyFavLink()));
+    favMenu->addAction(qFromUtf8("取消收藏"), logic, SLOT(onUnfavFav()));
+#endif
+    LambdaSlot* favCtx = new LambdaSlot(0, [=] {
+        V2PrepareRow(favList);
+        favMenu->popup(QCursor::pos());
+    });
+#ifdef QT3_BUILD
+    QObject::connect(favList, SIGNAL(contextMenuRequested(int,int,const QPoint&)),
+                     favCtx, SLOT(call()));
+#else
+    favList->setContextMenuPolicy(Qt::CustomContextMenu);
+    QObject::connect(favList, SIGNAL(customContextMenuRequested(const QPoint&)),
+                     favCtx, SLOT(call()));
+#endif
+
     /* 主窗销毁日志：exe 与 qltox 插件双形态共用（destroyed→LambdaSlot） */
     LambdaSlot* logSlot = new LambdaSlot(0, [] {
         qWarning("[mainwin] destroyed: V2raySuberMain");
@@ -385,6 +454,8 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     v2Tip(stopTestBtn, qFromUtf8("停止当前测速队列"));
     v2Tip(autoChk, qFromUtf8("开启后按设定频率自动执行“更新全部订阅”"));
     v2Tip(autoFreq, qFromUtf8("自动更新间隔（默认 2 小时）"));
+    v2Tip(nodeFilterEdit, qFromUtf8("按名称/国家/地址/协议实时过滤节点列表"));
+    v2Tip(nodeSortBox, qFromUtf8("按延时/名称排序（仅调整显示顺序，不改动数据）"));
     v2Tip(updBtn, qFromUtf8("用 curl 拉取选中订阅地址并解析节点"));
     v2Tip(updAllBtn, qFromUtf8("用 curl 拉取全部订阅地址并解析节点"));
 

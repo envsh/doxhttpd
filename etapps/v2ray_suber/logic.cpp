@@ -128,6 +128,49 @@ static void v2ComboSetCurrent(QComboBox* c, int i) {
     c->setCurrentIndex(i);
 #endif
 }
+/* 统计文本文件行数（access.log 请求数用） */
+static long long v2CountLines(const QString& path) {
+    QFile f(path);
+    if (!f.open(IO_ReadOnly)) { return 0; }
+    long long n = 0;
+    QTextStream ts(&f);
+    while (!ts.atEnd()) {
+        ts.readLine();
+        ++n;
+    }
+    f.close();
+    return n;
+}
+
+/* 字节/速率格式化（流量显示用） */
+static QString v2Bytes(long long b) {
+    if (b < 0) { return QString("0 B"); }
+    if (b < 1024) { return QString::number((long)b) + " B"; }
+    if (b < 1024 * 1024) {
+        return QString::number(b / 1024.0, 'f', 1) + " KB";
+    }
+    if (b < 1024LL * 1024 * 1024) {
+        return QString::number(b / 1048576.0, 'f', 1) + " MB";
+    }
+    return QString::number(b / 1073741824.0, 'f', 2) + " GB";
+}
+
+static QString v2BytesRate(long long bytesPerSec) {
+    return v2Bytes(bytesPerSec) + "/s";
+}
+
+static bool v2LatBetter(int a, int b);   /* 定义在测速段，此处前置声明 */
+
+/* 完整日期时间戳（测试结果标注用） */
+static QString v2NowStamp() {
+#ifdef QT3_BUILD
+    return QDate::currentDate().toString("yyyy-MM-dd") + " "
+         + QTime::currentTime().toString("hh:mm:ss");
+#else
+    return QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+#endif
+}
+
 static void v2TableInit(V2Table* t, const QStringList& cols) {
 #ifdef QT3_BUILD
     t->setNumCols((int)cols.count());
@@ -361,6 +404,17 @@ V2RayLogic::V2RayLogic(QObject* parent)
     coreTestHttpIcon = 0;
     coreTestHttpText = 0;
     coreTestMsg = 0;
+    trafficLabel = 0;
+    trafficTimer = 0;
+    statsProc = 0;
+    apiPort = 0;
+    trafficUpBase = trafficDownBase = 0;
+    trafficUpLast = trafficDownLast = 0;
+    trafficUpRate = trafficDownRate = 0;
+    reqCountBase = reqCountLast = 0;
+    favList = 0;
+    nodeFilterEdit = 0;
+    nodeSortBox = 0;
     activeNodeLabel = 0;
     log = 0;
     startBtn = 0;
@@ -476,6 +530,15 @@ QString V2RayLogic::coreWorkDir() const {
 QString V2RayLogic::coreConfigPath() const {
     return coreWorkDir() + "/config_run.json";
 }
+
+/* geo 文件实际所在目录：xrayDir → coreDir 依次探测 */
+QString V2RayLogic::geoAssetDir() const {
+    if (fileExists(xrayDir() + "/geoip.dat")
+        && fileExists(xrayDir() + "/geosite.dat")) { return xrayDir(); }
+    if (fileExists(coreDir() + "/geoip.dat")
+        && fileExists(coreDir() + "/geosite.dat")) { return coreDir(); }
+    return QString();
+}
 QString V2RayLogic::coreBinaryPath() const {
     if (coreKind == CoreV2ray) { return coreDir() + "/v2ray"; }
     if (coreSourceSystem && !systemXrayPath.isEmpty()) { return systemXrayPath; }
@@ -506,8 +569,7 @@ bool V2RayLogic::coreInstalled() const {
 }
 
 bool V2RayLogic::hasGeoFiles() const {
-    return fileExists(coreWorkDir() + "/geoip.dat")
-        && fileExists(coreWorkDir() + "/geosite.dat");
+    return !geoAssetDir().isEmpty();
 }
 
 /* ── 订阅列表管理 ── */
@@ -679,11 +741,13 @@ static QPixmap v2StatusIcon(int kind) {
 void V2RayLogic::refreshNodeList() {
     if (!nodeList) { return; }
     if (v2TableCols(nodeList) == 0) {
+        /* 列顺序：可用/状态 紧跟端口，测速列前置 */
         QStringList cols;
         cols << qFromUtf8("名称") << qFromUtf8("协议") << qFromUtf8("国旗")
              << qFromUtf8("国家") << qFromUtf8("地址") << qFromUtf8("端口")
-             << qFromUtf8("传输") << qFromUtf8("安全") << "TCP(ms)"
-             << qFromUtf8("真连(ms)") << qFromUtf8("可用") << qFromUtf8("状态");
+             << qFromUtf8("可用") << qFromUtf8("状态")
+             << qFromUtf8("真连(ms)") << "TCP(ms)"
+             << qFromUtf8("传输") << qFromUtf8("安全");
         v2TableInit(nodeList, cols);
 #ifdef QT3_BUILD
         nodeList->setColumnWidth(0, 200);
@@ -692,11 +756,11 @@ void V2RayLogic::refreshNodeList() {
         nodeList->setColumnWidth(3, 90);
         nodeList->setColumnWidth(4, 170);
         nodeList->setColumnWidth(5, 60);
-        nodeList->setColumnWidth(6, 60);
+        nodeList->setColumnWidth(6, 48);
         nodeList->setColumnWidth(7, 70);
-        nodeList->setColumnWidth(8, 70);
-        nodeList->setColumnWidth(9, 80);
-        nodeList->setColumnWidth(10, 48);
+        nodeList->setColumnWidth(8, 80);
+        nodeList->setColumnWidth(9, 70);
+        nodeList->setColumnWidth(10, 60);
         nodeList->setColumnWidth(11, 70);
 #else
         nodeList->horizontalHeader()->setStretchLastSection(false);
@@ -706,17 +770,82 @@ void V2RayLogic::refreshNodeList() {
         nodeList->setColumnWidth(3, 90);
         nodeList->setColumnWidth(4, 170);
         nodeList->setColumnWidth(5, 60);
-        nodeList->setColumnWidth(6, 60);
+        nodeList->setColumnWidth(6, 48);
         nodeList->setColumnWidth(7, 70);
-        nodeList->setColumnWidth(8, 70);
-        nodeList->setColumnWidth(9, 80);
-        nodeList->setColumnWidth(10, 48);
+        nodeList->setColumnWidth(8, 80);
+        nodeList->setColumnWidth(9, 70);
+        nodeList->setColumnWidth(10, 60);
         nodeList->setColumnWidth(11, 70);
 #endif
     }
+    /* 视图层过滤 + 排序（不动 nodes 主数据/activeNode） */
+    V2IndexList view;
+    for (int i = 0; i < (int)nodes.count(); ++i) { view.append(i); }
+    if (nodeFilterEdit) {
+        QString f = nodeFilterEdit->text();
+#ifdef QT3_BUILD
+        f = f.stripWhiteSpace();
+#else
+        f = f.trimmed();
+#endif
+        if (!f.isEmpty()) {
+            V2IndexList fv;
+            for (int i = 0; i < (int)nodes.count(); ++i) {
+                const V2Node& n = nodes[i];
+                bool hit = false;
+                hit = hit || n.name.find(f, false) >= 0;
+                hit = hit || n.country.find(f, false) >= 0;
+                hit = hit || n.countryName.find(f, false) >= 0;
+                hit = hit || n.addr.find(f, false) >= 0;
+                hit = hit || n.proto.find(f, false) >= 0;
+                if (hit) { fv.append(i); }
+            }
+            view = fv;
+        }
+    }
+    if (nodeSortBox) {
+        int mode = -1;
+#ifdef QT3_BUILD
+        mode = nodeSortBox->currentItem();
+#else
+        mode = nodeSortBox->currentIndex();
+#endif
+        if (mode == 1 || mode == 2) {
+            /* 按延时稳定排序（未测/失败按 v2LatBetter 沉底），插入排序 */
+            for (int k = 1; k < (int)view.count(); ++k) {
+                int key = view[k];
+                int j = k - 1;
+                while (j >= 0) {
+                    const V2Node& a = nodes[key];
+                    const V2Node& b = nodes[view[j]];
+                    int ma = (mode == 1) ? a.realMs : a.tcpMs;
+                    int mb = (mode == 1) ? b.realMs : b.tcpMs;
+                    if (v2LatBetter(ma, mb)) {
+                        view[j + 1] = view[j];
+                        --j;
+                    } else {
+                        break;
+                    }
+                }
+                view[j + 1] = key;
+            }
+        } else if (mode == 3) {
+            for (int k = 1; k < (int)view.count(); ++k) {
+                int key = view[k];
+                int j = k - 1;
+                while (j >= 0 && nodes[key].name < nodes[view[j]].name) {
+                    view[j + 1] = view[j];
+                    --j;
+                }
+                view[j + 1] = key;
+            }
+        }
+    }
+    nodeViewIdx = view;
     v2TableClear(nodeList);
-    v2TableSetRows(nodeList, (int)nodes.count());
-    for (int i = 0; i < (int)nodes.count(); ++i) {
+    v2TableSetRows(nodeList, (int)view.count());
+    for (int r = 0; r < (int)view.count(); ++r) {
+        int i = view[r];
         const V2Node& n = nodes[i];
         QString name = n.name.isEmpty()
             ? (qFromUtf8("节点") + QString::number(i + 1)) : n.name;
@@ -751,36 +880,173 @@ void V2RayLogic::refreshNodeList() {
         } else if (n.realMs == -1) {
             avail = 1;
         }
-        v2TableSetCell(nodeList, i, 0, name);
-        v2TableSetCell(nodeList, i, 1, n.proto);
+        v2TableSetCell(nodeList, r, 0, name);
+        v2TableSetCell(nodeList, r, 1, n.proto);
         if (!flag.isNull()) {
 #ifdef QT3_BUILD
-            nodeList->setPixmap(i, 2, flag);
+            nodeList->setPixmap(r, 2, flag);
 #else
             QTableWidgetItem* fi = new QTableWidgetItem();
             fi->setIcon(QIcon(flag));
-            nodeList->setItem(i, 2, fi);
+            nodeList->setItem(r, 2, fi);
 #endif
         }
-        v2TableSetCell(nodeList, i, 3, geoText);
-        v2TableSetCell(nodeList, i, 4, n.addr);
-        v2TableSetCell(nodeList, i, 5, n.port);
-        v2TableSetCell(nodeList, i, 6, n.net.isEmpty() ? QString("tcp") : n.net);
-        v2TableSetCell(nodeList, i, 7, n.security.isEmpty() ? QString("none") : n.security);
-        v2TableSetCell(nodeList, i, 8, tcp);
-        v2TableSetCell(nodeList, i, 9, real);
+        v2TableSetCell(nodeList, r, 3, geoText);
+        v2TableSetCell(nodeList, r, 4, n.addr);
+        v2TableSetCell(nodeList, r, 5, n.port);
+        /* 列顺序：6=可用 7=状态 8=真连 9=TCP 10=传输 11=安全 */
 #ifdef QT3_BUILD
-        nodeList->setPixmap(i, 10, v2StatusIcon(avail));
+        nodeList->setPixmap(r, 6, v2StatusIcon(avail));
 #else
         {
             QTableWidgetItem* ai = new QTableWidgetItem();
             ai->setIcon(QIcon(v2StatusIcon(avail)));
-            nodeList->setItem(i, 10, ai);
+            nodeList->setItem(r, 6, ai);
         }
 #endif
-        v2TableSetCell(nodeList, i, 11, st);
+        v2TableSetCell(nodeList, r, 7, st);
+        v2TableSetCell(nodeList, r, 8, real);
+        v2TableSetCell(nodeList, r, 9, tcp);
+        v2TableSetCell(nodeList, r, 10, n.net.isEmpty() ? QString("tcp") : n.net);
+        v2TableSetCell(nodeList, r, 11, n.security.isEmpty() ? QString("none") : n.security);
     }
     emit nodesChanged();
+    refreshFavList();
+}
+
+/* ── 收藏页列表 ── */
+int V2RayLogic::favNodeIndex(int row) const {
+    if (row < 0 || !favList) { return -1; }
+    int k = 0;
+    for (int i = 0; i < (int)nodes.count(); ++i) {
+        if (!nodes[i].favorite) { continue; }
+        if (k == row) { return i; }
+        ++k;
+    }
+    return -1;
+}
+
+void V2RayLogic::refreshFavList() {
+    if (!favList) { return; }
+    if (v2TableCols(favList) == 0) {
+        QStringList cols;
+        cols << qFromUtf8("名称") << qFromUtf8("协议") << qFromUtf8("国旗")
+             << qFromUtf8("国家") << qFromUtf8("地址") << qFromUtf8("端口")
+             << qFromUtf8("真连(ms)") << qFromUtf8("可用");
+        v2TableInit(favList, cols);
+#ifdef QT3_BUILD
+        favList->setColumnWidth(0, 200);
+        favList->setColumnWidth(1, 60);
+        favList->setColumnWidth(2, 40);
+        favList->setColumnWidth(3, 90);
+        favList->setColumnWidth(4, 170);
+        favList->setColumnWidth(5, 60);
+        favList->setColumnWidth(6, 80);
+        favList->setColumnWidth(7, 48);
+#else
+        favList->setColumnWidth(0, 200);
+        favList->setColumnWidth(1, 60);
+        favList->setColumnWidth(2, 40);
+        favList->setColumnWidth(3, 90);
+        favList->setColumnWidth(4, 170);
+        favList->setColumnWidth(5, 60);
+        favList->setColumnWidth(6, 80);
+        favList->setColumnWidth(7, 48);
+#endif
+    }
+    int cnt = 0;
+    for (int i = 0; i < (int)nodes.count(); ++i) {
+        if (nodes[i].favorite) { ++cnt; }
+    }
+    v2TableClear(favList);
+    v2TableSetRows(favList, cnt);
+    int r = 0;
+    for (int i = 0; i < (int)nodes.count(); ++i) {
+        const V2Node& n = nodes[i];
+        if (!n.favorite) { continue; }
+        QString name = n.name.isEmpty()
+            ? (qFromUtf8("节点") + QString::number(i + 1)) : n.name;
+        QString real = (n.realMs == -2) ? qFromUtf8("—")
+                     : (n.realMs < 0 ? qFromUtf8("超时") : QString::number(n.realMs));
+        QString geoText = n.country.isEmpty() ? qFromUtf8("—")
+            : (n.countryName.isEmpty() ? n.country
+               : n.country + " " + n.countryName);
+        QPixmap flag;
+        if (n.country.length() == 2) { flag = v2FlagPixmap(n.country, 14); }
+        int avail = 2;
+        if (!n.supported) {
+            avail = 1;
+        } else if (n.realMs > 0) {
+            avail = 0;
+        } else if (n.realMs == -1) {
+            avail = 1;
+        }
+        v2TableSetCell(favList, r, 0, name);
+        v2TableSetCell(favList, r, 1, n.proto);
+        if (!flag.isNull()) {
+#ifdef QT3_BUILD
+            favList->setPixmap(r, 2, flag);
+#else
+            QTableWidgetItem* fi = new QTableWidgetItem();
+            fi->setIcon(QIcon(flag));
+            favList->setItem(r, 2, fi);
+#endif
+        }
+        v2TableSetCell(favList, r, 3, geoText);
+        v2TableSetCell(favList, r, 4, n.addr);
+        v2TableSetCell(favList, r, 5, n.port);
+        v2TableSetCell(favList, r, 6, real);
+#ifdef QT3_BUILD
+        favList->setPixmap(r, 7, v2StatusIcon(avail));
+#else
+        {
+            QTableWidgetItem* ai = new QTableWidgetItem();
+            ai->setIcon(QIcon(v2StatusIcon(avail)));
+            favList->setItem(r, 7, ai);
+        }
+#endif
+        ++r;
+    }
+}
+
+/* ── 收藏操作 ── */
+void V2RayLogic::onToggleFavorite() {
+    int idx = selectedNodeIndex();
+    if (idx < 0) { appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("请先选中节点")); return; }
+    nodes[idx].favorite = !nodes[idx].favorite;
+    saveNodes();
+    refreshNodeList();
+    appendLogWithPrefix(qFromUtf8("[收藏]"),
+        (nodes[idx].favorite ? qFromUtf8("已加入收藏：") : qFromUtf8("已取消收藏："))
+        + nodes[idx].name);
+}
+
+void V2RayLogic::onUnfavFav() {
+    if (!favList) { return; }
+    int row = v2TableRow(favList);
+    int idx = favNodeIndex(row);
+    if (idx < 0) { appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("请先选中收藏节点")); return; }
+    nodes[idx].favorite = false;
+    saveNodes();
+    refreshNodeList();
+    appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("已取消收藏：") + nodes[idx].name);
+}
+
+void V2RayLogic::onCopyFavLink() {
+    if (!favList) { return; }
+    int row = v2TableRow(favList);
+    int idx = favNodeIndex(row);
+    if (idx < 0) { appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("请先选中收藏节点")); return; }
+    QApplication::clipboard()->setText(nodes[idx].raw);
+    appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("已复制节点链接：") + nodes[idx].name);
+}
+
+void V2RayLogic::onStartFavCore() {
+    if (!favList) { return; }
+    int row = v2TableRow(favList);
+    int idx = favNodeIndex(row);
+    if (idx < 0) { appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("请先选中收藏节点")); return; }
+    startCoreAtIndex(idx);
 }
 
 void V2RayLogic::setRouteWidgets(QCheckBox* bypassCnCheck_, QCheckBox* bypassLanCheck_) {
@@ -792,7 +1058,7 @@ void V2RayLogic::setRouteWidgets(QCheckBox* bypassCnCheck_, QCheckBox* bypassLan
     if (bypassLanCheck) { bypassLanCheck->setChecked(st.valueBool("bypassLan", true)); }
     if (bypassCnCheck && !hasGeoFiles()) {
         appendLogWithPrefix(qFromUtf8("[核心]"),
-            qFromUtf8("提示：核心目录缺少 geoip.dat / geosite.dat，勾选“绕过中国大陆”将不生效（重新下载安装核心即可）"));
+            qFromUtf8("提示：未找到 geoip.dat / geosite.dat（xray/ 与 core/ 目录），勾选“绕过中国大陆”将不生效（重新下载安装核心即可）"));
     }
 }
 
@@ -880,17 +1146,68 @@ void V2RayLogic::setCoreTestChips(int socksKind, const QString& socksText,
     if (coreTestSocksIcon && socksKind >= 0) {
         coreTestSocksIcon->setPixmap(v2StatusIcon(socksKind));
     }
-    if (coreTestSocksText) { coreTestSocksText->setText(socksText); }
+    /* 测试结果（非“测试中…”）追加完整日期时间 */
+    QString stamp = v2NowStamp();
+    QString sTxt = socksText;
+    QString hTxt = httpText;
+    if (socksKind >= 0 && !sTxt.isEmpty()
+        && !sTxt.endsWith(qFromUtf8("…"))) {
+        sTxt += qFromUtf8(" [") + stamp + "]";
+    }
+    if (httpKind >= 0 && !hTxt.isEmpty()
+        && !hTxt.endsWith(qFromUtf8("…"))) {
+        hTxt += qFromUtf8(" [") + stamp + "]";
+    }
+    if (coreTestSocksText) { coreTestSocksText->setText(sTxt); }
     if (coreTestHttpIcon && httpKind >= 0) {
         coreTestHttpIcon->setPixmap(v2StatusIcon(httpKind));
     }
-    if (coreTestHttpText) { coreTestHttpText->setText(httpText); }
+    if (coreTestHttpText) { coreTestHttpText->setText(hTxt); }
     if (coreTestMsg) { coreTestMsg->setText(QString()); }
 }
 
 void V2RayLogic::setCoreTestMessage(const QString& msg) {
-    if (coreTestMsg) { coreTestMsg->setText(msg); }
+    if (!coreTestMsg) { return; }
+    if (msg.isEmpty() || msg.endsWith(qFromUtf8("…"))) {
+        coreTestMsg->setText(msg);
+        return;
+    }
+    coreTestMsg->setText(msg + qFromUtf8(" [") + v2NowStamp() + "]");
 }
+
+void V2RayLogic::setTrafficWidget(QLabel* lbl) {
+    trafficLabel = lbl;
+    refreshTrafficLabel();
+}
+
+void V2RayLogic::refreshTrafficLabel() {
+    if (!trafficLabel) { return; }
+    bool running = coreProc && coreProc->isRunning();
+    if (!running || apiPort <= 0) {
+        trafficLabel->setText(qFromUtf8("流量：—（核心未运行）"));
+        return;
+    }
+    trafficLabel->setText(qFromUtf8("速度：↑ ")
+        + v2BytesRate(trafficUpRate) + qFromUtf8(" ↓ ")
+        + v2BytesRate(trafficDownRate)
+        + qFromUtf8(" · 流量：↑ ") + v2Bytes(trafficUpLast)
+        + qFromUtf8(" ↓ ") + v2Bytes(trafficDownLast)
+        + qFromUtf8(" · 请求 ") + QString::number(reqCountLast)
+        + qFromUtf8(" 次"));
+}
+
+void V2RayLogic::setFavWidgets(V2Table* fav) {
+    favList = fav;
+    refreshFavList();
+}
+
+void V2RayLogic::setNodeViewWidgets(QLineEdit* filterEdit, QComboBox* sortBox) {
+    nodeFilterEdit = filterEdit;
+    nodeSortBox = sortBox;
+}
+
+void V2RayLogic::onNodeFilterChanged() { refreshNodeList(); }
+void V2RayLogic::onNodeSortChanged() { refreshNodeList(); }
 
 void V2RayLogic::setActiveNodeWidget(QLabel* lbl) {
     activeNodeLabel = lbl;
@@ -1882,6 +2199,8 @@ void V2RayLogic::loadNodes() {
                     n.tcpMs = j ? j->valueint : -2;
                     j = cJSON_GetObjectItem(it, "realMs");
                     n.realMs = j ? j->valueint : -2;
+                    j = cJSON_GetObjectItem(it, "favorite");
+                    n.favorite = j ? (j->valueint != 0) : false;
                     if (n.country.isEmpty()) { applyCountryFromName(n); }
                     n.id = nodeId(n);
                     if (n.id.isEmpty()) { continue; }
@@ -1951,6 +2270,7 @@ void V2RayLogic::saveNodes() {
         cJSON_AddNumberToObject(o, "allowInsecure", n.allowInsecure ? 1 : 0);
         cJSON_AddNumberToObject(o, "tcpMs", n.tcpMs);
         cJSON_AddNumberToObject(o, "realMs", n.realMs);
+        cJSON_AddNumberToObject(o, "favorite", n.favorite ? 1 : 0);
         cJSON_AddItemToArray(arr, o);
     }
     char* txt = cJSON_PrintUnformatted(root);
@@ -2007,9 +2327,13 @@ int V2RayLogic::selectedSubIndex() {
 }
 int V2RayLogic::selectedNodeIndex() {
     if (!nodeList) { return -1; }
-    int idx = v2TableRow(nodeList);
-    if (idx < 0 || idx >= (int)nodes.count()) { return -1; }
-    return idx;
+    int row = v2TableRow(nodeList);
+    if (!nodeViewIdx.isEmpty()) {
+        if (row < 0 || row >= (int)nodeViewIdx.count()) { return -1; }
+        return nodeViewIdx[row];
+    }
+    if (row < 0 || row >= (int)nodes.count()) { return -1; }
+    return row;
 }
 
 void V2RayLogic::onAddSubscription() {
@@ -2789,7 +3113,134 @@ void V2RayLogic::onCoreUnzipDone() {
     }
 }
 
+/* ── 实时流量：stats api 轮询 + access.log 请求数 ── */
+void V2RayLogic::resetTrafficCounters() {
+    /* 核心重启后 counters 从 0 开始 */
+    trafficUpBase = 0;
+    trafficDownBase = 0;
+    trafficUpLast = 0;
+    trafficDownLast = 0;
+    trafficUpRate = 0;
+    trafficDownRate = 0;
+    /* access.log 跨运行追加：以当前行数为基线 */
+    reqCountBase = v2CountLines(baseDir() + "/access.log");
+    reqCountLast = 0;
+    refreshTrafficLabel();
+}
+
+void V2RayLogic::startTrafficPoll() {
+    if (trafficTimer) { trafficTimer->stop(); }
+    if (!trafficTimer) {
+        trafficTimer = new QTimer(this);
+        connect(trafficTimer, SIGNAL(timeout()), this, SLOT(onTrafficPoll()));
+    }
+    trafficTimer->start(2000);
+}
+
+void V2RayLogic::stopTrafficPoll() {
+    if (trafficTimer) { trafficTimer->stop(); }
+    if (statsProc) {
+        if (statsProc->isRunning()) { statsProc->tryTerminate(); }
+        delete statsProc;
+        statsProc = 0;
+    }
+    apiPort = 0;
+    trafficUpRate = 0;
+    trafficDownRate = 0;
+    refreshTrafficLabel();
+}
+
+void V2RayLogic::onTrafficPoll() {
+    if (!(coreProc && coreProc->isRunning())) { stopTrafficPoll(); return; }
+    if (apiPort <= 0) { return; }
+    if (statsProc && statsProc->isRunning()) { return; }
+    if (statsProc) { delete statsProc; }
+    statsProc = new QProcess(this);
+    connect(statsProc, SIGNAL(processExited()), this, SLOT(onStatsExited()));
+    QDir wd(coreWorkDir());
+    statsProc->setWorkingDirectory(wd);
+    statsProc->addArgument(coreBinaryPath());
+    statsProc->addArgument("api");
+    statsProc->addArgument("statsquery");
+    statsProc->addArgument("--server=127.0.0.1:" + QString::number(apiPort));
+    statsProc->start();
+}
+
+/* 从 stats JSON 提取 inbound uplink/downlink 总和（排除 api 入站） */
+static long long v2StatsSum(const QString& js, const char* suffix) {
+    long long sum = 0;
+    int pos = 0;
+    while (true) {
+        int np = js.find("\"name\"", pos);
+        if (np < 0) { break; }
+        int nstart = np + 6;
+        while (nstart < (int)js.length()
+               && (js.at(nstart) == ':' || js.at(nstart).isSpace())) { ++nstart; }
+        if (nstart >= (int)js.length() || js.at(nstart) != '"') { pos = nstart > np ? nstart : np + 6; continue; }
+        ++nstart;
+        int nend = js.find('"', nstart);
+        if (nend < 0) { break; }
+        pos = nend + 1;
+        QString name = js.mid(nstart, nend - nstart);
+        if (!name.endsWith(suffix) || !name.startsWith("inbound>>>")
+            || name.contains(">>>api>>>")) { continue; }
+        /* name 后找最近的 "value": N 或 "value":"N"（Xray 数字 / v2ray 字符串） */
+        int vp = js.find("\"value\"", pos);
+        int nextName = js.find("\"name\"", pos);
+        if (vp < 0 || (nextName >= 0 && vp > nextName)) { continue; }
+        int vstart = vp + 7;                 /* 跳过 "value" */
+        while (vstart < (int)js.length()
+               && (js.at(vstart) == ':' || js.at(vstart).isSpace())) { ++vstart; }
+        if (vstart >= (int)js.length()) { break; }
+        int vend;
+        long long v;
+        if (js.at(vstart) == '"') {
+            vend = js.find('"', vstart + 1);
+            if (vend < 0) { break; }
+            v = js.mid(vstart + 1, vend - vstart - 1).toLongLong();
+        } else {
+            vend = vstart;
+            while (vend < (int)js.length()
+                   && (js.at(vend).isDigit())) { ++vend; }
+            if (vend == vstart) { pos = vstart; continue; }
+            v = js.mid(vstart, vend - vstart).toLongLong();
+        }
+        pos = vend + 1;
+        sum += v;
+    }
+    return sum;
+}
+
+void V2RayLogic::onStatsExited() {
+    if (!statsProc) { return; }
+#ifdef QT3_BUILD
+    QByteArray out = statsProc->readStdout();
+#else
+    QByteArray out = statsProc->readAllStandardOutput();
+#endif
+    bool running = coreProc && coreProc->isRunning();
+    delete statsProc;
+    statsProc = 0;
+    if (!running) { return; }
+    QString js = qFromUtf8(out.data(), (int)out.size());
+    long long up = v2StatsSum(js, "uplink");
+    long long down = v2StatsSum(js, "downlink");
+    if (up <= 0 && down <= 0) { refreshTrafficLabel(); return; }
+    trafficUpLast = (up - trafficUpBase > 0) ? (up - trafficUpBase) : 0;
+    trafficDownLast = (down - trafficDownBase > 0) ? (down - trafficDownBase) : 0;
+    /* 每 2 秒采样一次 → 速率 = 增量 / 2 */
+    trafficUpRate = trafficUpLast / 2;
+    trafficDownRate = trafficDownLast / 2;
+    reqCountLast = v2CountLines(baseDir() + "/access.log") - reqCountBase;
+    if (reqCountLast < 0) { reqCountLast = 0; }
+    refreshTrafficLabel();
+}
+
 void V2RayLogic::onStartCore() {
+    startCoreAtIndex(-1);
+}
+
+void V2RayLogic::startCoreAtIndex(int idxIn) {
     if (!coreInstalled()) {
         appendLogWithPrefix(qFromUtf8("[核心]"),
             qFromUtf8("当前内核不可用（") + coreDisplayName() + qFromUtf8("），请先下载安装或切换内核"));
@@ -2832,7 +3283,7 @@ void V2RayLogic::onStartCore() {
             qFromUtf8("注意：监听地址 ") + laddr + qFromUtf8(" 会把 SOCKS 端口暴露给局域网/外部"));
     }
     saveSettings();
-    int idx = selectedNodeIndex();
+    int idx = (idxIn >= 0) ? idxIn : selectedNodeIndex();
     if (idx < 0) {
         if (nodes.count() >= 1) {
             idx = 0;
@@ -2872,11 +3323,28 @@ void V2RayLogic::onStartCore() {
     connect(coreProc, SIGNAL(processExited()), this, SLOT(onCoreExit()));
     QDir wd(coreWorkDir());
     coreProc->setWorkingDirectory(wd);
+    /* geo 资产目录环境变量（系统内核也生效，修复“绕过中国大陆”找不到 geo 文件） */
+    QString assetDir = geoAssetDir();
+    if (!assetDir.isEmpty()) {
+        /* Qt3 QProcess 无 setEnvironment：子进程继承父进程 env，直接 setenv */
+        QByteArray assetBa = QFile::encodeName(assetDir);
+#ifdef QT3_BUILD
+        setenv("XRAY_LOCATION_ASSET", assetBa.data(), 1);
+        setenv("V2RAY_LOCATION_ASSET", assetBa.data(), 1);
+#else
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert("XRAY_LOCATION_ASSET", assetDir);
+        env.insert("V2RAY_LOCATION_ASSET", assetDir);
+        coreProc->setProcessEnvironment(env);
+#endif
+    }
     coreProc->addArgument(coreBinaryPath());
     coreProc->addArgument("run");
     coreProc->addArgument("-c");
     coreProc->addArgument(coreConfigPath());
     coreProc->start();
+    resetTrafficCounters();
+    startTrafficPoll();
     /* 记录“用户期望运行”，供下次启动恢复 */
     {
         QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
@@ -2908,7 +3376,38 @@ void V2RayLogic::onCoreExit() {
         st.setValue("core/runningLast", 0);
         st.sync();
     }
-    appendLogWithPrefix(qFromUtf8("[核心]"), stopped ? qFromUtf8("核心已停止") : qFromUtf8("核心已退出"));
+    /* 退出码（Qt3 exitStatus()：normalExit=退出码；否则视为异常终止） */
+    QString exitDesc;
+    if (coreProc) {
+#ifdef QT3_BUILD
+        if (coreProc->normalExit()) {
+            exitDesc = qFromUtf8("（退出码 ")
+                + QString::number(coreProc->exitStatus()) + qFromUtf8("）");
+        } else {
+            int sig = -coreProc->exitStatus();
+            exitDesc = (sig > 0)
+                ? (qFromUtf8("（异常终止：信号 ") + QString::number(sig)
+                   + qFromUtf8("）"))
+                : qFromUtf8("（异常终止）");
+        }
+#else
+        if (coreProc->exitStatus() == QProcess::NormalExit) {
+            exitDesc = qFromUtf8("（退出码 ")
+                + QString::number(coreProc->exitCode()) + qFromUtf8("）");
+        } else {
+            exitDesc = qFromUtf8("（异常终止：信号 ")
+                + QString::number(coreProc->exitCode()) + qFromUtf8("）");
+        }
+#endif
+    }
+    QString stopDesc = exitDesc;
+    if (stopped && stopDesc == qFromUtf8("（异常终止）")) {
+        stopDesc = qFromUtf8("（已请求停止）");
+    }
+    appendLogWithPrefix(qFromUtf8("[核心]"),
+        stopped ? (qFromUtf8("核心已停止") + stopDesc)
+                : (qFromUtf8("核心已退出") + exitDesc));
+    stopTrafficPoll();
     refreshCoreState();
     refreshActiveNodeLabel();
     setCoreMessage(stopped ? qFromUtf8("状态：核心已停止")
@@ -3332,15 +3831,46 @@ bool V2RayLogic::generateConfig(const V2Node& node, QString& err) {
     QString laddr = listenAddress();
     QString outbound = v2BuildProxyOutbound(node, coreKind, err);
     if (outbound.isEmpty()) { return false; }
-    QString cfg = "{\"log\":{\"loglevel\":\"warning\"},"
-        "\"inbounds\":["
-        "{\"port\":" + QString::number(sport) + ",\"listen\":\"" + laddr
+    /* stats/api 端口：15490 起找空闲位（避开 SOCKS/HTTP 端口） */
+    apiPort = 0;
+    for (int p = 15490; p <= 15499; ++p) {
+        if (p != sport && p != hport) { apiPort = p; break; }
+    }
+    QString accessPath = baseDir() + "/access.log";
+    QString cfg = "{\"log\":{\"access\":\"" + accessPath
+        + "\",\"loglevel\":\"warning\"},";
+    if (apiPort > 0) {
+        cfg += "\"stats\":{},"
+            "\"policy\":{\"system\":{\"statsInboundUplink\":true,"
+            "\"statsInboundDownlink\":true}},"
+            "\"api\":{\"tag\":\"api\",\"services\":[\"StatsService\"]},";
+    }
+    cfg += "\"inbounds\":["
+        "{\"tag\":\"socks\",\"port\":" + QString::number(sport)
+        + ",\"listen\":\"" + laddr
         + "\",\"protocol\":\"socks\",\"settings\":{\"udp\":true}},"
-        "{\"port\":" + QString::number(hport) + ",\"listen\":\"" + laddr
-        + "\",\"protocol\":\"http\",\"settings\":{}}],"
+        "{\"tag\":\"http\",\"port\":" + QString::number(hport)
+        + ",\"listen\":\"" + laddr
+        + "\",\"protocol\":\"http\",\"settings\":{}}"
+        + (apiPort > 0
+           ? (QString(",{\"tag\":\"api\",\"port\":")
+              + QString::number(apiPort)
+              + ",\"listen\":\"127.0.0.1\",\"protocol\":\"dokodemo-door\","
+                "\"settings\":{\"address\":\"127.0.0.1\"}}")
+           : QString())
+        + "],"
         "\"outbounds\":[" + outbound
-        + ",{\"protocol\":\"freedom\",\"tag\":\"direct\",\"settings\":{}}]";
+        + ",{\"protocol\":\"freedom\",\"tag\":\"direct\",\"settings\":{}}";
+    if (apiPort > 0) {
+        cfg += ",{\"protocol\":\"freedom\",\"tag\":\"api\",\"settings\":{}}]";
+    } else {
+        cfg += "]";
+    }
     QStringList rules;
+    if (apiPort > 0) {
+        /* stats api 路由必须放在所有规则之前（否则会被 geoip:cn direct 截走） */
+        rules.append("{\"type\":\"field\",\"inboundTag\":[\"api\"],\"outboundTag\":\"api\"}");
+    }
     bool lanOn = (bypassLanCheck && bypassLanCheck->isChecked());
     if (lanOn) {
         /* A：绕过局域网——显式私有 CIDR（不依赖 geoip.dat） */

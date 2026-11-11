@@ -79,13 +79,19 @@ struct V2Node {
     /* 当前 v2ray-core 能力 */
     bool    supported;
 
-    V2Node() : allowInsecure(false), tcpMs(-2), realMs(-2), supported(false) {}
+    /* 收藏 */
+    bool    favorite;
+
+    V2Node() : allowInsecure(false), tcpMs(-2), realMs(-2),
+               supported(false), favorite(false) {}
 };
 
 #ifdef QT3_BUILD
 typedef QValueList<V2Node> V2NodeList;
+typedef QValueList<int> V2IndexList;
 #else
 typedef QList<V2Node> V2NodeList;
+typedef QList<int> V2IndexList;
 #endif
 
 /* 内核类型：v2ray-core / Xray-core */
@@ -105,6 +111,9 @@ public:
     void setListenWidgets(QComboBox* addrBox, QLineEdit* socksPortEdit,
                           QLineEdit* httpPortEdit);
     void setUpdateWidgets(QPushButton* updBtn, QPushButton* updAllBtn, QLabel* nodeStatus);
+    void setFavWidgets(V2Table* favList);
+    void setTrafficWidget(QLabel* lbl);
+    void setNodeViewWidgets(QLineEdit* filterEdit, QComboBox* sortBox);
     void setAutoUpdateWidgets(QCheckBox* chk, QComboBox* freq);
     void setCoreWidgets(QPushButton* dlBtn);
     void setCoreTestWidgets(QLabel* socksIcon, QLabel* socksText,
@@ -149,6 +158,14 @@ public slots:
     void onCoreKindChanged(int index);
     void onAutoUpdateTick();
     void onAutoUpdateSettingsChanged();
+    void onToggleFavorite();
+    void onStartFavCore();
+    void onCopyFavLink();
+    void onUnfavFav();
+    void onNodeFilterChanged();
+    void onNodeSortChanged();
+    void onTrafficPoll();
+    void onStatsExited();
 
 signals:
     void nodesChanged();
@@ -207,6 +224,14 @@ private:
     int  indexByNodeId(const QString& id) const;
     void removeNodesBySource(const QString& src);
     void pruneSubNodesForUpdate(const QString& src);
+    void refreshFavList();
+    int  favNodeIndex(int row) const;
+    void startCoreAtIndex(int idx);
+    QString geoAssetDir() const;
+    void startTrafficPoll();
+    void stopTrafficPoll();
+    void resetTrafficCounters();
+    void refreshTrafficLabel();
     bool nodeSupportedByCore(const V2Node& n) const;
     bool nodeSupportedByCore(const V2Node& n, CoreKind kind) const;
     void recomputeSupport();
@@ -344,6 +369,24 @@ private:
     QCheckBox* autoUpdateChk;
     QComboBox* autoUpdateFreqBox;
     bool autoUpdateEnabled;
+
+    /* 实时流量（stats api 轮询 + access.log 请求数） */
+    QLabel* trafficLabel;
+    QTimer* trafficTimer;
+    QProcess* statsProc;
+    int apiPort;
+    long long trafficUpBase, trafficDownBase;
+    long long trafficUpLast, trafficDownLast;
+    long long trafficUpRate, trafficDownRate;
+    long long reqCountBase, reqCountLast;
+
+    /* 收藏页 */
+    V2Table* favList;
+
+    /* 节点页视图过滤/排序（不动 nodes 主数据） */
+    QLineEdit* nodeFilterEdit;
+    QComboBox* nodeSortBox;
+    V2IndexList nodeViewIdx;
 
     /* 核心下载进度（百分比，-1 = 未知） */
     int dlProgressPct;
