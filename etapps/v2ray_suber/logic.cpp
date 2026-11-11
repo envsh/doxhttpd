@@ -94,8 +94,17 @@ static QStringList splitLines(const QString& content) {
 #endif
 }
 
-/* C：按目标架构选择内核包名 */
+/* C：按目标平台/架构选择内核包名 */
 static QString v2ZipName(CoreKind kind) {
+#if defined(__APPLE__)
+  #if defined(__aarch64__)
+    return (kind == CoreXray) ? QString("Xray-macos-arm64-v8a.zip")
+                              : QString("v2ray-macos-arm64-v8a.zip");
+  #else
+    return (kind == CoreXray) ? QString("Xray-macos-64.zip")
+                              : QString("v2ray-macos-64.zip");
+  #endif
+#else
     if (kind == CoreXray) {
 #if defined(__aarch64__)
         return QString("Xray-linux-arm64-v8a.zip");
@@ -115,6 +124,7 @@ static QString v2ZipName(CoreKind kind) {
     return QString("v2ray-linux-32.zip");
 #else
     return QString("v2ray-linux-64.zip");
+#endif
 #endif
 }
 
@@ -3518,6 +3528,16 @@ void V2RayLogic::startCoreAtIndex(int idxIn) {
         return;
     }
     coreStopRequested = false;
+    {
+        /* 核心文件不可执行（例如内置下载到了其它平台的包）：明确报错，避免"启动中"假象 */
+        QFileInfo fi(coreBinaryPath());
+        if (!fi.exists() || !fi.isExecutable()) {
+            appendLogWithPrefix(qFromUtf8("[核心]"),
+                qFromUtf8("核心不可执行（可能是其它平台的包）：") + coreBinaryPath());
+            setCoreMessage(qFromUtf8("状态：启动失败：核心不可执行（请重新下载核心）"));
+            return;
+        }
+    }
     if (coreProc) { delete coreProc; coreProc = 0; }
     coreProc = new QProcess34(this);
     QProcess34::connectStdout(coreProc, this, SLOT(onCoreOutput()));
@@ -3545,6 +3565,7 @@ void V2RayLogic::startCoreAtIndex(int idxIn) {
     coreProc->addArgument("-c");
     coreProc->addArgument(coreConfigPath());
     coreProc->start();
+    QTimer::singleShot(600, this, SLOT(checkCoreStarted()));
     resetTrafficCounters();
     startTrafficPoll();
     /* 记录核心进程 PID */
@@ -3575,6 +3596,32 @@ void V2RayLogic::onCoreErrOutput() {
     if ((int)out.size() <= 0) { return; }
     appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("(err) ") + qFromUtf8(out.data(), (int)out.size()));
 }
+void V2RayLogic::checkCoreStarted() {
+    if (appQuitting || !coreProc) { return; }
+    if (coreProc->isRunning()) { return; }
+    /* 启动失败：Qt4 的 exec 失败只有 errorString 能看到（如 Exec format error） */
+    QString why;
+#ifdef QT3_BUILD
+    why = qFromUtf8("进程未能运行");
+#else
+    why = coreProc->errorString();
+    if (why.isEmpty()) { why = qFromUtf8("进程未能运行"); }
+#endif
+    appendLogWithPrefix(qFromUtf8("[核心]"),
+        qFromUtf8("核心启动失败：") + coreBinaryPath() + qFromUtf8("（") + why
+        + qFromUtf8("）——若是内置内核，可能是其它平台的包，请重新下载"));
+    setCoreMessage(qFromUtf8("状态：启动失败（") + why + qFromUtf8("）"));
+    {
+        QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+        st.setValue("core/runningLast", 0);   /* 启动失败不自动恢复 */
+        st.setValue("core/lastPid", 0);
+        st.sync();
+    }
+    if (coreProc) { coreProc->deleteLater(); coreProc = 0; }
+    refreshCoreState();
+    refreshActiveNodeLabel();
+}
+
 void V2RayLogic::onCoreExit() {
     bool stopped = coreStopRequested;
     coreStopRequested = false;
@@ -3869,6 +3916,21 @@ void V2RayLogic::startRealTest(int idx) {
         QTimer::singleShot(0, this, SLOT(onContinueTest()));
         return;
     }
+    {
+        /* 核心文件不可执行（例如下载到其它平台的包）：直接跳过并说明原因 */
+        QFileInfo fi(coreBinaryPath());
+        if (!fi.exists() || !fi.isExecutable()) {
+            appendLogWithPrefix(qFromUtf8("[测速]"),
+                qFromUtf8("临时核心不可执行（可能是其它平台的包）：") + coreBinaryPath());
+            nodes[idx].realMs = -1;
+            nodes[idx].testedAt = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+            ++testDone;
+            refreshNodeList();
+            saveNodes();
+            QTimer::singleShot(0, this, SLOT(onContinueTest()));
+            return;
+        }
+    }
     writeUtf8File(coreWorkDir() + "/config_test.json", cfg);
     if (testCoreProc) { delete testCoreProc; testCoreProc = 0; }
     testCoreProc = new QProcess34(this);
@@ -3922,9 +3984,35 @@ void V2RayLogic::onTestCoreErrOutput() {
 }
 
 /* 等临时核心真正监听 testPort（最多 3s），就绪后再跑 curl */
+/* 等临时核心真正监听 testPort（最多 3s），就绪后再跑 curl */
 void V2RayLogic::waitTestCoreReady() {
     if (testCancel) { finishTest(); return; }
     if (v2PortReady(testPort)) { onRealCoreReady(); return; }
+    /* 进程已经不在运行：立刻报出真实原因（Qt4 的 exec 失败只有 errorString 能看到） */
+    if (testCoreProc && !testCoreProc->isRunning()) {
+        QString why;
+#ifdef QT3_BUILD
+        why = qFromUtf8("进程未能运行");
+#else
+        why = testCoreProc->errorString();
+        if (why.isEmpty()) { why = qFromUtf8("进程未能运行"); }
+#endif
+        appendLogWithPrefix(qFromUtf8("[测速]"),
+            qFromUtf8("临时核心启动失败：") + coreBinaryPath()
+            + qFromUtf8("（") + why + qFromUtf8("），跳过该节点"));
+        testCoreProc->deleteLater();
+        testCoreProc = 0;
+        int idxBad = curLatIndex;
+        if (idxBad >= 0 && idxBad < (int)nodes.count()) {
+            nodes[idxBad].realMs = -1;
+            nodes[idxBad].testedAt = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+        }
+        ++testDone;
+        refreshNodeList();
+        saveNodes();
+        QTimer::singleShot(0, this, SLOT(onContinueTest()));
+        return;
+    }
     if (++testCoreWaitTries > 30) {
         appendLogWithPrefix(qFromUtf8("[测速]"),
             qFromUtf8("临时核心 3 秒内未监听 127.0.0.1:")

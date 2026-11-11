@@ -144,6 +144,7 @@ public slots:
     void onDownloadCore();
     void onStartCore();
     void onStopCore();
+    void checkCoreStarted();   /* 启动后自检：进程未运行则报真实原因 */
     void onCopyNodeLink();
     void onTestLatency();
     void onTestTcpSelected();
