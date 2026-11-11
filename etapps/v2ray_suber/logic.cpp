@@ -484,6 +484,11 @@ V2RayLogic::V2RayLogic(QObject* parent)
     lastTestHttpKind = 2;
     trafficLabel = 0;
     trafficTimer = 0;
+    coreStateTimer = 0;
+    coreRunningKnown = false;
+    coreStartPending = false;
+    testCoreAdvancePending = false;
+    coreFailTicks = 0;
     statsProc = 0;
     apiPort = 0;
     trafficUpBase = trafficDownBase = 0;
@@ -528,6 +533,7 @@ V2RayLogic::V2RayLogic(QObject* parent)
     testRealAllBtn = 0;
     testStopBtn = 0;
     coreStopRequested = false;
+    coreStartSignaled = false;
     appQuitting = false;
     dlTry = 0;
     autoUpdateIntervalMin = 120;
@@ -564,6 +570,11 @@ V2RayLogic::V2RayLogic(QObject* parent)
     connect(qApp, SIGNAL(aboutToQuit()), this, SLOT(onSaveAllOnQuit()));
     /* 退出时统一终止所有子进程，避免残留 xray/v2ray/curl */
     connect(qApp, SIGNAL(aboutToQuit()), this, SLOT(shutdownProcesses()));
+    /* 核心状态同步：1s 检查一次进程状态变化（信号之外的自愈兜底，
+     * 也覆盖 Qt4 下 start() 后短暂 Starting 的竞态） */
+    coreStateTimer = new QTimer(this);
+    connect(coreStateTimer, SIGNAL(timeout()), this, SLOT(onCoreStateTick()));
+    coreStateTimer->start(1000);
 }
 
 void V2RayLogic::setWidgets(QLineEdit* subEdit_, V2Table* subList_, V2Table* nodeList_,
@@ -1622,7 +1633,7 @@ void V2RayLogic::detectSystemXray() {
     }
     if (found != systemXrayPath) { systemXrayVersion = QString(); }
     systemXrayPath = found;
-    if (detectProc) { delete detectProc; detectProc = 0; }
+    if (detectProc) { return; }          /* 上一次探测未结束：不 delete，等其退出槽 */
     if (found.isEmpty()) {
         systemXrayVersion = QString();
         appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("未检测到系统 Xray（可下载内置版）"));
@@ -1905,7 +1916,7 @@ void V2RayLogic::startNextGeo() {
         QTimer::singleShot(0, this, SLOT(startNextGeo()));
         return;
     }
-    if (geoProc) { delete geoProc; geoProc = 0; }
+    if (geoProc) { return; }             /* 上一次国家查询未结束：不 delete */
     geoData.resize(0);
     geoProc = new QProcess34(this);
     QProcess34::connectStdout(geoProc, this, SLOT(onGeoOutput()));
@@ -2030,8 +2041,7 @@ void V2RayLogic::probeStartPort(int which) {
     if (port < 0) { port = (which == 0) ? 10808 : 10809; }
     if (probeProc) {
         if (probeProc->isRunning()) { probeProc->tryTerminate(); }
-        delete probeProc;
-        probeProc = 0;
+        probeProc = 0;                    /* 已退出：仅释放引用，删除由退出槽负责 */
     }
     probeProc = new QProcess34(this);
     QProcess34::connectExited(probeProc, this, SLOT(onProbeExited()));
@@ -2054,8 +2064,7 @@ void V2RayLogic::probeStartGstatic(int which) {
     if (port < 0) { port = (which == 0) ? 10808 : 10809; }
     if (probeProc) {
         if (probeProc->isRunning()) { probeProc->tryTerminate(); }
-        delete probeProc;
-        probeProc = 0;
+        probeProc = 0;                    /* 已退出：仅释放引用，删除由退出槽负责 */
     }
     probeProc = new QProcess34(this);
     QProcess34::connectExited(probeProc, this, SLOT(onProbeExited()));
@@ -2606,7 +2615,10 @@ void V2RayLogic::onDelSubscription() {
     refreshSubList();
 }
 void V2RayLogic::startSubFetch(const QString& url) {
-    if (subProc) { delete subProc; subProc = 0; }
+    if (subProc) {
+        appendLogWithPrefix(qFromUtf8("[订阅]"), qFromUtf8("上一次订阅更新仍在收尾，请稍候"));
+        return;
+    }
     subData.resize(0);
     subProc = new QProcess34(this);
     QProcess34::connectStdout(subProc, this, SLOT(onSubOutput()));
@@ -3224,7 +3236,7 @@ void V2RayLogic::startCoreDownload() {
                               : qFromUtf8("状态：正在下载核心（直连 GitHub）…"));
     dlProgressPct = -1;
     dlErrData.resize(0);
-    if (dlProc) { delete dlProc; dlProc = 0; }
+    if (dlProc) { return; }              /* 上一次下载未结束：不 delete */
     dlProc = new QProcess34(this);
     QProcess34::connectStdout(dlProc, this, SLOT(onCoreDlOutput()));
     QProcess34::connectStderr(dlProc, this, SLOT(onCoreDlErrOutput()));
@@ -3317,7 +3329,7 @@ void V2RayLogic::onCoreDlDone() {
     }
     appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("下载完成（进度 100%），正在解压..."));
     setCoreMessage(qFromUtf8("状态：正在解压安装…"));
-    if (unzipProc) { delete unzipProc; unzipProc = 0; }
+    if (unzipProc) { return; }           /* 上一次解压未结束：不 delete */
     unzipProc = new QProcess34(this);
     QProcess34::connectExited(unzipProc, this, SLOT(onCoreUnzipDone()));
     unzipProc->addArgument("unzip");
@@ -3404,11 +3416,8 @@ void V2RayLogic::startTrafficPoll() {
 
 void V2RayLogic::stopTrafficPoll() {
     if (trafficTimer) { trafficTimer->stop(); }
-    if (statsProc) {
-        if (statsProc->isRunning()) { statsProc->tryTerminate(); }
-        delete statsProc;
-        statsProc = 0;
-    }
+    if (statsProc && statsProc->isRunning()) { statsProc->tryTerminate(); }
+    /* 删除由 onStatsExited 负责，避免 Destroyed while process is still running */
     apiPort = 0;
     trafficUpRate = 0;
     trafficDownRate = 0;
@@ -3419,7 +3428,7 @@ void V2RayLogic::onTrafficPoll() {
     if (!(coreProc && coreProc->isRunning())) { stopTrafficPoll(); return; }
     if (apiPort <= 0) { return; }
     if (statsProc && statsProc->isRunning()) { return; }
-    if (statsProc) { delete statsProc; }
+    if (statsProc) { return; }           /* 上一次查询未结束：不 delete，下一轮再来 */
     statsProc = new QProcess34(this);
     QProcess34::connectExited(statsProc, this, SLOT(onStatsExited()));
     QDir wd(coreWorkDir());
@@ -3603,7 +3612,11 @@ void V2RayLogic::startCoreAtIndex(int idxIn) {
             return;
         }
     }
-    if (coreProc) { delete coreProc; coreProc = 0; }
+    if (coreProc) {
+        /* 旧核心尚未退出：绝不 delete；等 onCoreExit 里收尾后再启动 */
+        appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("上一次核心尚未退出，请稍候再启动"));
+        return;
+    }
     coreProc = new QProcess34(this);
     QProcess34::connectStdout(coreProc, this, SLOT(onCoreOutput()));
     QProcess34::connectStderr(coreProc, this, SLOT(onCoreErrOutput()));
@@ -3646,23 +3659,30 @@ void V2RayLogic::startCoreAtIndex(int idxIn) {
         refreshActiveNodeLabel();
         return;
     }
-    QTimer::singleShot(600, this, SLOT(checkCoreStarted()));
-    resetTrafficCounters();
-    startTrafficPoll();
-    /* 记录核心进程 PID */
-    {
-        QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
-        st.setValue("core/lastPid", (int)coreProc->processIdentifier());
-        st.sync();
-    }
+    coreStartSignaled = false;
+    coreRunningKnown = false;   /* 新进程：强制状态同步刷新 */
+    coreStartPending = true;    /* 期望运行：连续未运行 3 个周期才判失败 */
+    coreFailTicks = 0;
+#ifdef QT3_BUILD
+    /* Qt3：start() 同步返回 true 即已运行（launchFinished 只对 launch() 有效） */
+    onCoreStarted();
+#else
+    /* Qt4+：start() 异步，等 started()（此时 state()==Running）再刷新 */
+    QObject::connect(coreProc, SIGNAL(started()), this, SLOT(onCoreStarted()));
+  #if QT_VERSION >= 0x050600
+    QObject::connect(coreProc, SIGNAL(errorOccurred(QProcess::ProcessError)), this, SLOT(onCoreError()));
+  #else
+    QObject::connect(coreProc, SIGNAL(error(QProcess::ProcessError)), this, SLOT(onCoreError()));
+  #endif
+    QTimer::singleShot(0, this, SLOT(onCoreStateTick()));
+#endif
+    setCoreMessage(qFromUtf8("状态：核心启动中…"));
     /* 记录“用户期望运行”，供下次启动恢复 */
     {
         QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
         st.setValue("core/runningLast", 1);
         st.sync();
     }
-    refreshCoreState();
-    refreshActiveNodeLabel();
     appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心启动中（节点：") + node.name + qFromUtf8("）"));
 }
 void V2RayLogic::onCoreOutput() {
@@ -3677,10 +3697,51 @@ void V2RayLogic::onCoreErrOutput() {
     if ((int)out.size() <= 0) { return; }
     appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("(err) ") + qFromUtf8(out.data(), (int)out.size()));
 }
-void V2RayLogic::checkCoreStarted() {
-    if (appQuitting || !coreProc) { return; }
-    if (coreProc->isRunning()) { return; }
-    /* 启动失败：Qt4 的 exec 失败只有 errorString 能看到（如 Exec format error） */
+void V2RayLogic::onCoreStarted() {
+    /* 信号/立即触发入口：交给持续状态机统一处理（幂等） */
+    coreStartPending = true;
+    onCoreStateTick();
+}
+
+/* 权威状态来源：每 1s 检查一次，连续周期判定，不依赖单次检测
+ * - 变为运行中：一次性初始化（PID/流量采样/界面/日志）
+ * - 运行中 → 未运行：刷新界面（崩溃、外部 kill、正常退出都能跟上）
+ * - 已请求启动但连续 3 个周期都未运行：判定启动失败并给出 errorString */
+void V2RayLogic::onCoreStateTick() {
+    if (!coreProc) { return; }
+    bool running = coreProc->isRunning();
+    if (running) {
+        coreFailTicks = 0;
+        if (!coreRunningKnown) {
+            coreRunningKnown = true;
+            coreStartPending = false;
+            resetTrafficCounters();
+            startTrafficPoll();
+            {
+                QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+                st.setValue("core/lastPid", (int)coreProc->processIdentifier());
+                st.sync();
+            }
+            refreshCoreState();
+            refreshActiveNodeLabel();
+            appendLogWithPrefix(qFromUtf8("[核心]"),
+                qFromUtf8("核心已启动（PID ")
+                + QString::number((long)coreProc->processIdentifier()) + qFromUtf8("）"));
+        }
+        return;
+    }
+    /* 未运行 */
+    if (coreRunningKnown) {
+        coreRunningKnown = false;
+        refreshCoreState();
+        refreshActiveNodeLabel();
+        return;
+    }
+    if (!coreStartPending) { return; }
+    if (++coreFailTicks < 3) { return; }   /* 连续 3 个周期（≈3s）才判失败 */
+    coreStartPending = false;
+    testCoreAdvancePending = false;
+    coreFailTicks = 0;
     QString why;
 #ifdef QT3_BUILD
     why = qFromUtf8("进程未能运行");
@@ -3694,18 +3755,36 @@ void V2RayLogic::checkCoreStarted() {
     setCoreMessage(qFromUtf8("状态：启动失败（") + why + qFromUtf8("）"));
     {
         QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
-        st.setValue("core/runningLast", 0);   /* 启动失败不自动恢复 */
+        st.setValue("core/runningLast", 0);
         st.setValue("core/lastPid", 0);
         st.sync();
     }
-    if (coreProc) { coreProc->deleteLater(); coreProc = 0; }
+    coreProc->deleteLater();
+    coreProc = 0;
     refreshCoreState();
     refreshActiveNodeLabel();
 }
 
+void V2RayLogic::onCoreError() {
+    QString why;
+#ifdef QT3_BUILD
+    why = qFromUtf8("启动失败");
+#else
+    if (coreProc) { why = coreProc->errorString(); }
+    if (why.isEmpty()) { why = qFromUtf8("启动失败"); }
+#endif
+    appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心启动/运行错误：") + why);
+    refreshCoreState();
+}
+
+
 void V2RayLogic::onCoreExit() {
     bool stopped = coreStopRequested;
     coreStopRequested = false;
+    coreRunningKnown = false;   /* 退出后状态同步复位 */
+    coreStartPending = false;
+    testCoreAdvancePending = false;
+    coreFailTicks = 0;
     /* 退出中保留 runningLast；其它情况（手动停止/异常退出）置 0，避免下次自动拉起重启失败的核心 */
     if (!appQuitting) {
         QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
@@ -3797,6 +3876,10 @@ void V2RayLogic::startTestBatch(bool real, bool all) {
         appendLogWithPrefix(qFromUtf8("[测速]"), qFromUtf8("已有测试在进行中"));
         return;
     }
+    if (testCoreProc || testCurlProc) {
+        appendLogWithPrefix(qFromUtf8("[测速]"), qFromUtf8("上一轮测试仍在收尾，请稍候"));
+        return;
+    }
     testQueue.clear();
     if (all) {
         for (int i = 0; i < (int)nodes.count(); ++i) { testQueue.append(i); }
@@ -3860,7 +3943,7 @@ void V2RayLogic::startNextTest() {
     curLatIndex = idx;
     latGotConnected = false;
     latErrData.resize(0);
-    if (latProc) { delete latProc; latProc = 0; }
+    if (latProc) { return; }             /* 上一次 TCP 测试未结束：不 delete */
     latProc = new QProcess34(this);
     QProcess34::connectStdout(latProc, this, SLOT(onLatOutput()));
     QProcess34::connectStderr(latProc, this, SLOT(onLatErrOutput()));
@@ -4022,10 +4105,15 @@ void V2RayLogic::startRealTest(int idx) {
             return;
         }
     }
-    if (testCoreProc) { delete testCoreProc; testCoreProc = 0; }
+    if (testCoreProc) {
+        /* 上一轮临时核心尚未退出：绝不 delete，等 onTestCoreGone 后重试 */
+        QTimer::singleShot(200, this, SLOT(onContinueTest()));
+        return;
+    }
     testCoreProc = new QProcess34(this);
     QProcess34::connectStdout(testCoreProc, this, SLOT(onTestCoreOutput()));
     QProcess34::connectStderr(testCoreProc, this, SLOT(onTestCoreErrOutput()));
+    QProcess34::connectExited(testCoreProc, this, SLOT(onTestCoreGone()));
     QDir wd(coreWorkDir());
     testCoreProc->setWorkingDirectory(wd);
     testCoreProc->addArgument(coreBinaryPath());
@@ -4074,7 +4162,22 @@ void V2RayLogic::onTestCoreErrOutput() {
     }
 }
 
-/* 等临时核心真正监听 testPort（最多 3s），就绪后再跑 curl */
+/* 临时核心退出：只在这里删除（进程确已退出），并按需推进下一个节点 */
+void V2RayLogic::onTestCoreGone() {
+    QObject* o = const_cast<QObject*>(sender());
+    if (o == testCoreProc) { testCoreProc = 0; }
+    if (o) { o->deleteLater(); }
+    if (testCoreAdvancePending) {
+        testCoreAdvancePending = false;
+        QTimer::singleShot(0, this, SLOT(onContinueTest()));
+    }
+}
+/* 结束当前节点后推进：临时核心仍在运行则等它的退出槽，绝不 delete 运行中的进程 */
+void V2RayLogic::advanceAfterTestCore() {
+    if (testCoreProc) { testCoreAdvancePending = true; return; }
+    QTimer::singleShot(0, this, SLOT(onContinueTest()));
+}
+
 /* 等临时核心真正监听 testPort（最多 3s），就绪后再跑 curl */
 void V2RayLogic::waitTestCoreReady() {
     if (testCancel) { finishTest(); return; }
@@ -4101,14 +4204,14 @@ void V2RayLogic::waitTestCoreReady() {
         ++testDone;
         refreshNodeList();
         saveNodes();
-        QTimer::singleShot(0, this, SLOT(onContinueTest()));
+        advanceAfterTestCore();
         return;
     }
     if (++testCoreWaitTries > 30) {
         appendLogWithPrefix(qFromUtf8("[测速]"),
             qFromUtf8("临时核心 3 秒内未监听 127.0.0.1:")
             + QString::number(testPort) + qFromUtf8("，跳过该节点"));
-        if (testCoreProc) { testCoreProc->tryTerminate(); testCoreProc->deleteLater(); testCoreProc = 0; }
+        if (testCoreProc) { testCoreProc->tryTerminate(); }   /* 删除由 onTestCoreGone 负责 */
         int idx = curLatIndex;
         if (idx >= 0 && idx < (int)nodes.count()) {
             nodes[idx].realMs = -1;
@@ -4117,7 +4220,7 @@ void V2RayLogic::waitTestCoreReady() {
         ++testDone;
         refreshNodeList();
         saveNodes();
-        QTimer::singleShot(0, this, SLOT(onContinueTest()));
+        advanceAfterTestCore();
         return;
     }
     QTimer::singleShot(100, this, SLOT(waitTestCoreReady()));
@@ -4207,17 +4310,19 @@ void V2RayLogic::onRealCurlExited() {
             + QString::number(exitCode) + qFromUtf8("，") + why
             + (es.isEmpty() ? QString() : qFromUtf8("；") + es) + qFromUtf8("）"));
     }
-    if (testCoreProc) { testCoreProc->tryTerminate(); testCoreProc->deleteLater(); testCoreProc = 0; }
+    if (testCoreProc) { testCoreProc->tryTerminate(); }   /* 删除由 onTestCoreGone 负责 */
     ++testDone;
     refreshNodeList();
     saveNodes();
     emit testProgress(testDone, testTotal, idx);
-    QTimer::singleShot(120, this, SLOT(onContinueTest()));
+    advanceAfterTestCore();
 }
 
 void V2RayLogic::finishTest() {
-    if (testCoreProc) { testCoreProc->tryTerminate(); testCoreProc->deleteLater(); testCoreProc = 0; }
-    if (testCurlProc) { testCurlProc->deleteLater(); testCurlProc = 0; }
+    /* 运行中的进程只终止不删除：testCoreProc 由 onTestCoreGone、testCurlProc 由
+     * onRealCurlExited 在退出后各自收尾 */
+    if (testCoreProc) { testCoreProc->tryTerminate(); }
+    if (testCurlProc && testCurlProc->isRunning()) { testCurlProc->tryTerminate(); }
     testQueue.clear();
     testIsReal = false;
     testCancel = false;

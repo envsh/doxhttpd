@@ -144,7 +144,12 @@ public slots:
     void onDownloadCore();
     void onStartCore();
     void onStopCore();
-    void checkCoreStarted();   /* 启动后自检：进程未运行则报真实原因 */
+    /* 启动失败判定已并入 onCoreStateTick 的连续周期检测 */
+    void onCoreStarted();      /* started()/launchFinished()：刷新 PID/按钮/流量采样 */
+    void onCoreError();        /* error()/errorOccurred()：启动或运行错误 */
+    void onTestCoreGone();     /* 临时核心退出：此处才删除并推进下一个节点 */
+    void advanceAfterTestCore();
+    void onCoreStateTick();    /* 1s 状态同步（进程状态变化才刷新） */
     void onCopyNodeLink();
     void onTestLatency();
     void onTestTcpSelected();
@@ -392,6 +397,8 @@ private:
     /* 实时流量（stats api 轮询 + access.log 请求数） */
     QLabel* trafficLabel;
     QTimer* trafficTimer;
+    QTimer* coreStateTimer;      /* 1s 状态同步：进程状态变化即刷新界面（信号之外的兜底）
+                                  * 兼修 Qt4 下 start() 后短暂 Starting 导致的状态不刷新 */
     QProcess34* statsProc;
     int apiPort;
     long long trafficUpBase, trafficDownBase;
@@ -417,6 +424,11 @@ private:
     QString dlZipName;      /* C：按架构选择的包名 */
 
     bool coreStopRequested; /* 区分手动停止 / 异常退出 */
+    bool coreStartSignaled; /* 是否已收到 started 信号（用于兜底判断） */
+    bool coreRunningKnown;  /* 上一次已知的核心运行状态（状态同步用） */
+    bool coreStartPending;  /* 已请求启动、尚未确认运行（连续未运行 → 判失败） */
+    bool testCoreAdvancePending; /* 临时核心退出后需要推进下一个节点 */
+    int  coreFailTicks;     /* 连续未运行周期计数（1s/次） */
     bool appQuitting;       /* 退出中：不覆盖 runningLast，便于下次恢复 */
     QString curSubUrl;      /* 当前更新中的订阅（写 sub_meta 用） */
     QMap<QString, QString> subMeta;  /* url -> "hh:mm:ss|节点数" */
