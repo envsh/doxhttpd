@@ -259,18 +259,20 @@ static QString v2NowStamp() {
 #endif
 }
 
-static void v2TableInit(V2Table* t, const QStringList& cols) {
+/* multi=true 用于节点表/收藏表（多选），订阅表保持单选 */
+static void v2TableInit(V2Table* t, const QStringList& cols, bool multi = false) {
 #ifdef QT3_BUILD
     t->setNumCols((int)cols.count());
     t->setColumnLabels(cols);
     t->setReadOnly(true);
-    t->setSelectionMode(QTable::SingleRow);
+    t->setSelectionMode(multi ? QTable::MultiRow : QTable::SingleRow);
 #else
     t->setColumnCount((int)cols.count());
     t->setHorizontalHeaderLabels(cols);
     t->setEditTriggers(QAbstractItemView::NoEditTriggers);
     t->setSelectionBehavior(QAbstractItemView::SelectRows);
-    t->setSelectionMode(QAbstractItemView::SingleSelection);
+    t->setSelectionMode(multi ? QAbstractItemView::ExtendedSelection
+                              : QAbstractItemView::SingleSelection);
 #endif
 }
 static void v2TableClear(V2Table* t) {
@@ -869,7 +871,7 @@ void V2RayLogic::refreshNodeList() {
              << qFromUtf8("可用") << qFromUtf8("状态")
              << qFromUtf8("真连(ms)") << "TCP(ms)"
              << qFromUtf8("传输") << qFromUtf8("安全");
-        v2TableInit(nodeList, cols);
+        v2TableInit(nodeList, cols, true);
 #ifdef QT3_BUILD
         nodeList->setColumnWidth(0, 200);
         nodeList->setColumnWidth(1, 60);
@@ -969,6 +971,7 @@ void V2RayLogic::refreshNodeList() {
         }
     }
     nodeViewIdx = view;
+    QStringList keepIds = selectedNodeIds();   /* 刷新前记录选中 id，刷新后恢复 */
     v2TableClear(nodeList);
     v2TableSetRows(nodeList, (int)view.count());
     for (int r = 0; r < (int)view.count(); ++r) {
@@ -1043,6 +1046,7 @@ void V2RayLogic::refreshNodeList() {
         v2TableSetCell(nodeList, r, 9, n.net.isEmpty() ? QString("tcp") : n.net);
         v2TableSetCell(nodeList, r, 10, n.security.isEmpty() ? QString("none") : n.security);
     }
+    restoreNodeSelection(keepIds);
     emit nodesChanged();
     refreshFavList();
 }
@@ -1089,12 +1093,21 @@ int V2RayLogic::favNodeIndex(int row) const {
 
 void V2RayLogic::refreshFavList() {
     if (!favList) { return; }
+    /* 刷新前记录收藏表选中的节点 id，刷新后恢复多选 */
+    QStringList keepIds;
+    {
+        V2IndexList fsel = selectedFavIndexes();
+        for (int i = 0; i < (int)fsel.count(); ++i) {
+            int idx = fsel[i];
+            if (idx >= 0 && idx < (int)nodes.count()) { keepIds.append(nodes[idx].id); }
+        }
+    }
     if (v2TableCols(favList) == 0) {
         QStringList cols;
         cols << qFromUtf8("名称") << qFromUtf8("协议") << qFromUtf8("国旗")
              << qFromUtf8("地址") << qFromUtf8("端口")
              << qFromUtf8("真连(ms)") << qFromUtf8("可用");
-        v2TableInit(favList, cols);
+        v2TableInit(favList, cols, true);
 #ifdef QT3_BUILD
         favList->setColumnWidth(0, 200);
         favList->setColumnWidth(1, 60);
@@ -1172,38 +1185,86 @@ void V2RayLogic::refreshFavList() {
 #endif
         ++r;
     }
+    /* 恢复收藏表多选（按节点 id） */
+    if (!keepIds.isEmpty()) {
+#ifdef QT3_BUILD
+        favList->clearSelection();
+        for (int row = 0; row < (int)cnt; ++row) {
+            int idx = favNodeIndex(row);
+            if (idx >= 0 && idx < (int)nodes.count() && keepIds.contains(nodes[idx].id)) {
+                favList->addSelection(QTableSelection(row, 0, row, 0));
+            }
+        }
+#else
+        favList->clearSelection();
+        for (int row = 0; row < (int)cnt; ++row) {
+            int idx = favNodeIndex(row);
+            if (idx >= 0 && idx < (int)nodes.count() && keepIds.contains(nodes[idx].id)) {
+                QModelIndex mi = favList->model()->index(row, 0);
+                favList->selectionModel()->select(mi, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+            }
+        }
+#endif
+    }
 }
 
 /* ── 收藏操作 ── */
 void V2RayLogic::onToggleFavorite() {
-    int idx = selectedNodeIndex();
-    if (idx < 0) { appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("请先选中节点")); return; }
-    nodes[idx].favorite = !nodes[idx].favorite;
+    V2IndexList sel = selectedNodeIndexes();
+    if ((int)sel.count() <= 0) {
+        appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("请先选中节点"));
+        return;
+    }
+    /* 全部已收藏 → 批量取消；否则批量加入（多选常见语义） */
+    bool allFav = true;
+    for (int i = 0; i < (int)sel.count(); ++i) {
+        if (!nodes[sel[i]].favorite) { allFav = false; break; }
+    }
+    int n = 0;
+    for (int i = 0; i < (int)sel.count(); ++i) {
+        int idx = sel[i];
+        bool want = !allFav;
+        if (nodes[idx].favorite != want) { nodes[idx].favorite = want; ++n; }
+    }
     saveNodes();
     refreshNodeList();
+
     appendLogWithPrefix(qFromUtf8("[收藏]"),
-        (nodes[idx].favorite ? qFromUtf8("已加入收藏：") : qFromUtf8("已取消收藏："))
-        + nodes[idx].name);
+        (allFav ? qFromUtf8("已取消收藏 ") : qFromUtf8("已加入收藏 "))
+        + QString::number(n) + qFromUtf8(" 个节点"));
 }
 
 void V2RayLogic::onUnfavFav() {
-    if (!favList) { return; }
-    int row = v2TableRow(favList);
-    int idx = favNodeIndex(row);
-    if (idx < 0) { appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("请先选中收藏节点")); return; }
-    nodes[idx].favorite = false;
+    V2IndexList sel = selectedFavIndexes();
+    if ((int)sel.count() <= 0) {
+        appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("请先选中收藏节点"));
+        return;
+    }
+    int n = 0;
+    for (int i = 0; i < (int)sel.count(); ++i) {
+        int idx = sel[i];
+        if (nodes[idx].favorite) { nodes[idx].favorite = false; ++n; }
+    }
     saveNodes();
     refreshNodeList();
-    appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("已取消收藏：") + nodes[idx].name);
+    appendLogWithPrefix(qFromUtf8("[收藏]"),
+        qFromUtf8("已取消收藏 ") + QString::number(n) + qFromUtf8(" 个节点"));
 }
 
 void V2RayLogic::onCopyFavLink() {
-    if (!favList) { return; }
-    int row = v2TableRow(favList);
-    int idx = favNodeIndex(row);
-    if (idx < 0) { appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("请先选中收藏节点")); return; }
-    QApplication::clipboard()->setText(nodes[idx].raw);
-    appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("已复制节点链接：") + nodes[idx].name);
+    V2IndexList sel = selectedFavIndexes();
+    if ((int)sel.count() <= 0) {
+        appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("请先选中收藏节点"));
+        return;
+    }
+    QString all;
+    for (int i = 0; i < (int)sel.count(); ++i) {
+        if (i > 0) { all += "\n"; }
+        all += nodes[sel[i]].raw;
+    }
+    QApplication::clipboard()->setText(all);
+    appendLogWithPrefix(qFromUtf8("[收藏]"),
+        qFromUtf8("已复制 ") + QString::number((int)sel.count()) + qFromUtf8(" 个节点链接"));
 }
 
 void V2RayLogic::onStartFavCore() {
@@ -2220,6 +2281,18 @@ bool V2RayLogic::geoipDatLookup(const QString& ip, QString& cc) const {
 }
 
 void V2RayLogic::startGeoLookup(bool all) {
+    V2IndexList idxs;
+    if (all) {
+        for (int i = 0; i < (int)nodes.count(); ++i) { idxs.append(i); }
+    } else {
+        V2IndexList sel = selectedNodeIndexes();
+        for (int i = 0; i < (int)sel.count(); ++i) { idxs.append(sel[i]); }
+    }
+    startGeoLookupFor(idxs);
+}
+
+/* 对国家查询用显式索引集合（支持多选） */
+void V2RayLogic::startGeoLookupFor(const V2IndexList& idxs) {
     if (geoBusy) {
         appendLog(qFromUtf8("国家查询已在进行中"));
         return;
@@ -2227,9 +2300,9 @@ void V2RayLogic::startGeoLookup(bool all) {
     geoToolPath = findGeoTool();
     geoToolOk = !geoToolPath.isEmpty();
     geoQueue.clear();
-    int sel = selectedNodeIndex();
-    for (int i = 0; i < (int)nodes.count(); ++i) {
-        if (!all && i != sel) { continue; }
+    for (int k = 0; k < (int)idxs.count(); ++k) {
+        int i = idxs[k];
+        if (i < 0 || i >= (int)nodes.count()) { continue; }
         if (!nodes[i].country.isEmpty()) { continue; }
         if (!v2IsIpLiteral(nodes[i].addr)) { continue; }
         geoQueue.append(i);
@@ -2351,11 +2424,12 @@ void V2RayLogic::onGeoExited() {
 }
 
 void V2RayLogic::onLookupCountrySelected() {
-    if (selectedNodeIndex() < 0) {
+    V2IndexList sel = selectedNodeIndexes();
+    if ((int)sel.count() <= 0) {
         appendLog(qFromUtf8("请先选中节点"));
         return;
     }
-    startGeoLookup(false);
+    startGeoLookupFor(sel);
 }
 void V2RayLogic::onLookupCountryAll() { startGeoLookup(true); }
 void V2RayLogic::onClearGeoCache() {
@@ -2962,6 +3036,103 @@ int V2RayLogic::selectedNodeIndex() {
     }
     if (row < 0 || row >= (int)nodes.count()) { return -1; }
     return row;
+}
+
+/* 节点表选中集合：Qt3 遍历 QTableSelection 行区间；Qt4 用 selectedRows(0) */
+V2IndexList V2RayLogic::selectedNodeIndexes() {
+    V2IndexList out;
+    if (!nodeList) { return out; }
+#ifdef QT3_BUILD
+    for (int i = 0; i < nodeList->numSelections(); ++i) {
+        QTableSelection sel = nodeList->selection(i);
+        for (int r = sel.topRow(); r <= sel.bottomRow(); ++r) {
+            int idx = -1;
+            if (!nodeViewIdx.isEmpty()) {
+                if (r >= 0 && r < (int)nodeViewIdx.count()) { idx = nodeViewIdx[r]; }
+            } else {
+                idx = r;
+            }
+            if (idx >= 0 && idx < (int)nodes.count() && !out.contains(idx)) { out.append(idx); }
+        }
+    }
+#else
+    QModelIndexList rows = nodeList->selectionModel()->selectedRows(0);
+    for (int i = 0; i < rows.count(); ++i) {
+        int r = rows[i].row();
+        int idx = -1;
+        if (!nodeViewIdx.isEmpty()) {
+            if (r >= 0 && r < (int)nodeViewIdx.count()) { idx = nodeViewIdx[r]; }
+        } else {
+            idx = r;
+        }
+        if (idx >= 0 && idx < (int)nodes.count() && !out.contains(idx)) { out.append(idx); }
+    }
+#endif
+    if (out.isEmpty()) {
+        int idx = selectedNodeIndex();
+        if (idx >= 0) { out.append(idx); }
+    }
+    return out;
+}
+
+/* 收藏表选中集合（视图行 → nodes 索引） */
+V2IndexList V2RayLogic::selectedFavIndexes() {
+    V2IndexList out;
+    if (!favList) { return out; }
+#ifdef QT3_BUILD
+    for (int i = 0; i < favList->numSelections(); ++i) {
+        QTableSelection sel = favList->selection(i);
+        for (int r = sel.topRow(); r <= sel.bottomRow(); ++r) {
+            int idx = favNodeIndex(r);
+            if (idx >= 0 && !out.contains(idx)) { out.append(idx); }
+        }
+    }
+#else
+    QModelIndexList rows = favList->selectionModel()->selectedRows(0);
+    for (int i = 0; i < rows.count(); ++i) {
+        int idx = favNodeIndex(rows[i].row());
+        if (idx >= 0 && !out.contains(idx)) { out.append(idx); }
+    }
+#endif
+    if (out.isEmpty()) {
+        int idx = favNodeIndex(v2TableRow(favList));
+        if (idx >= 0) { out.append(idx); }
+    }
+    return out;
+}
+
+/* 记录当前选中节点的 id（刷新后按 id 恢复选择） */
+QStringList V2RayLogic::selectedNodeIds() {
+    QStringList ids;
+    V2IndexList sel = selectedNodeIndexes();
+    for (int i = 0; i < (int)sel.count(); ++i) {
+        int idx = sel[i];
+        if (idx >= 0 && idx < (int)nodes.count()) { ids.append(nodes[idx].id); }
+    }
+    return ids;
+}
+
+void V2RayLogic::restoreNodeSelection(const QStringList& ids) {
+    if (!nodeList || ids.isEmpty()) { return; }
+    V2IndexList rows;
+    for (int r = 0; r < (int)nodeViewIdx.count(); ++r) {
+        int idx = nodeViewIdx[r];
+        if (idx >= 0 && idx < (int)nodes.count() && ids.contains(nodes[idx].id)) { rows.append(r); }
+    }
+    if (rows.isEmpty()) { return; }
+#ifdef QT3_BUILD
+    nodeList->clearSelection();
+    for (int i = 0; i < (int)rows.count(); ++i) {
+        nodeList->addSelection(QTableSelection(rows[i], 0, rows[i], 0));
+    }
+#else
+    nodeList->clearSelection();
+    QItemSelectionModel* sm = nodeList->selectionModel();
+    for (int i = 0; i < (int)rows.count(); ++i) {
+        QModelIndex mi = nodeList->model()->index(rows[i], 0);
+        sm->select(mi, QItemSelectionModel::Select | QItemSelectionModel::Rows);
+    }
+#endif
 }
 
 void V2RayLogic::onAddSubscription() {
@@ -3902,6 +4073,13 @@ void V2RayLogic::onStatsExited() {
 }
 
 void V2RayLogic::onStartCore() {
+    V2IndexList sel = selectedNodeIndexes();
+    if ((int)sel.count() > 1) {
+        appendLogWithPrefix(qFromUtf8("[核心]"),
+            qFromUtf8("选中了 ") + QString::number((int)sel.count())
+            + qFromUtf8(" 个节点；启动核心请只选一个节点"));
+        return;
+    }
     startCoreAtIndex(-1);
 }
 
@@ -4236,18 +4414,27 @@ void V2RayLogic::onStopCore() {
     refreshActiveNodeLabel();
 }
 void V2RayLogic::onCopyNodeLink() {
-    int idx = selectedNodeIndex();
-    if (idx < 0) { appendLogWithPrefix(qFromUtf8("[节点]"), qFromUtf8("请先选中要复制的节点")); return; }
-    QApplication::clipboard()->setText(nodes[idx].raw);
-    appendLogWithPrefix(qFromUtf8("[节点]"), qFromUtf8("已复制节点链接"));
+    V2IndexList sel = selectedNodeIndexes();
+    if ((int)sel.count() <= 0) {
+        appendLogWithPrefix(qFromUtf8("[节点]"), qFromUtf8("请先选中要复制的节点"));
+        return;
+    }
+    QString all;
+    for (int i = 0; i < (int)sel.count(); ++i) {
+        if (i > 0) { all += "\n"; }
+        all += nodes[sel[i]].raw;
+    }
+    QApplication::clipboard()->setText(all);
+    appendLogWithPrefix(qFromUtf8("[节点]"),
+        qFromUtf8("已复制 ") + QString::number((int)sel.count()) + qFromUtf8(" 个节点链接"));
 }
 
 /* ── 延迟测试（curl 实现，队列串行，不阻塞 UI） ── */
 /* ── 测速：TCP（传输层）/ 真连接（经临时核心访问 204） ── */
 void V2RayLogic::onTestLatency() { onTestTcpSelected(); }
-void V2RayLogic::onTestTcpSelected() { startTestBatch(false, false); }
+void V2RayLogic::onTestTcpSelected() { startTestBatchFor(false, selectedNodeIndexes()); }
 void V2RayLogic::onTestTcpAll() { startTestBatch(false, true); }
-void V2RayLogic::onTestRealSelected() { startTestBatch(true, false); }
+void V2RayLogic::onTestRealSelected() { startTestBatchFor(true, selectedNodeIndexes()); }
 void V2RayLogic::onTestRealAll() { startTestBatch(true, true); }
 
 void V2RayLogic::onStopTest() {
@@ -4257,6 +4444,43 @@ void V2RayLogic::onStopTest() {
     if (testCurlProc) { testCurlProc->tryTerminate(); }
     if (testCoreProc) { testCoreProc->tryTerminate(); }
     appendLogWithPrefix(qFromUtf8("[测速]"), qFromUtf8("已请求停止测试"));
+}
+
+void V2RayLogic::startTestBatchFor(bool real, const V2IndexList& idxs) {
+    if ((int)idxs.count() <= 0) {
+        appendLogWithPrefix(qFromUtf8("[测速]"), qFromUtf8("请先选中要测试的节点"));
+        return;
+    }
+    if (latBusy || testTotal > 0) {
+        appendLogWithPrefix(qFromUtf8("[测速]"), qFromUtf8("已有测试在进行中"));
+        return;
+    }
+    if (testCoreProc || testCurlProc) {
+        appendLogWithPrefix(qFromUtf8("[测速]"), qFromUtf8("上一轮测试仍在收尾，请稍候"));
+        return;
+    }
+    testQueue.clear();
+    for (int i = 0; i < (int)idxs.count(); ++i) {
+        int idx = idxs[i];
+        if (idx >= 0 && idx < (int)nodes.count()) { testQueue.append(idx); }
+    }
+    if ((int)testQueue.count() <= 0) { return; }
+    testIsReal = real;
+    testCancel = false;
+    testDone = 0;
+    testTotal = (int)testQueue.count();
+    v2SetTestBtns(testTcpSelBtn, testRealSelBtn, testTcpAllBtn, testRealAllBtn, testStopBtn, true);
+    if (nodeStatus) {
+        nodeStatus->setText(qFromUtf8("测试中：0/") + QString::number(testTotal));
+    }
+    appendLogWithPrefix(qFromUtf8("[测速]"),
+        (real ? qFromUtf8("开始真连接批量测试，共 ") : qFromUtf8("开始 TCP 批量测试，共 "))
+        + QString::number(testTotal) + qFromUtf8(" 个节点"));
+    if (real) {
+        appendLogWithPrefix(qFromUtf8("[测速]"),
+            qFromUtf8("核心：") + coreBinaryPath());
+    }
+    startNextTest();
 }
 
 void V2RayLogic::startTestBatch(bool real, bool all) {
@@ -4272,12 +4496,12 @@ void V2RayLogic::startTestBatch(bool real, bool all) {
     if (all) {
         for (int i = 0; i < (int)nodes.count(); ++i) { testQueue.append(i); }
     } else {
-        int idx = selectedNodeIndex();
-        if (idx < 0) {
+        V2IndexList sel = selectedNodeIndexes();
+        if ((int)sel.count() <= 0) {
             appendLogWithPrefix(qFromUtf8("[测速]"), qFromUtf8("请先选中要测试的节点"));
             return;
         }
-        testQueue.append(idx);
+        for (int i = 0; i < (int)sel.count(); ++i) { testQueue.append(sel[i]); }
     }
     if ((int)testQueue.count() <= 0) { return; }
     testIsReal = real;

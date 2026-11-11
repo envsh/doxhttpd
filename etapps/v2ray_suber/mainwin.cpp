@@ -80,7 +80,14 @@ static void V2PrepareRow(V2Table* t) {
     int r = t->rowAt(t->viewport()->mapFromGlobal(gp).y());
 #endif
     if (r < 0) { r = t->currentRow(); }   /* 键盘唤起/光标不在表内时回退 */
-    if (r >= 0) { t->setCurrentCell(r, 0); }
+    if (r < 0) { return; }
+#ifdef QT3_BUILD
+    /* 右键落在已选中的行内：保持多选，不重置选择 */
+    if (t->isSelected(r, 0)) { return; }
+#else
+    if (t->selectionModel()->isRowSelected(r, QModelIndex())) { return; }
+#endif
+    t->setCurrentCell(r, 0);
 }
 
 extern "C"
@@ -166,12 +173,12 @@ QWidget* createV2raySuberMainWindow(void* parent) {
 #ifdef QT3_BUILD
     V2Table* nodeList = new QTable(0, 0, nodePage);
     nodeList->setReadOnly(true);
-    nodeList->setSelectionMode(QTable::SingleRow);
+    nodeList->setSelectionMode(QTable::MultiRow);
 #else
     V2Table* nodeList = new QTableWidget(nodePage);
     nodeList->setEditTriggers(QAbstractItemView::NoEditTriggers);
     nodeList->setSelectionBehavior(QAbstractItemView::SelectRows);
-    nodeList->setSelectionMode(QAbstractItemView::SingleSelection);
+    nodeList->setSelectionMode(QAbstractItemView::ExtendedSelection);
 #endif
     nodeLayout->addWidget(nodeList);
     QHBoxLayout* nodeBtnRow = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
@@ -201,12 +208,12 @@ QWidget* createV2raySuberMainWindow(void* parent) {
 #ifdef QT3_BUILD
     V2Table* favList = new QTable(0, 0, favPage);
     favList->setReadOnly(true);
-    favList->setSelectionMode(QTable::SingleRow);
+    favList->setSelectionMode(QTable::MultiRow);
 #else
     V2Table* favList = new QTableWidget(favPage);
     favList->setEditTriggers(QAbstractItemView::NoEditTriggers);
     favList->setSelectionBehavior(QAbstractItemView::SelectRows);
-    favList->setSelectionMode(QAbstractItemView::SingleSelection);
+    favList->setSelectionMode(QAbstractItemView::ExtendedSelection);
 #endif
     favLayout->addWidget(favList);
     QLabel* favHint = new QLabel(qFromUtf8("提示：在“节点”页右键“加入/取消收藏”；此处右键可启动核心/复制链接/取消收藏"), favPage);

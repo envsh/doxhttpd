@@ -172,6 +172,11 @@ public slots:
     void onAutoUpdateTick();
     void onAutoUpdateSettingsChanged();
     void onToggleFavorite();
+    /* 多选支持：节点表/收藏表选中集合（Qt3 QTable::MultiRow / Qt4 ExtendedSelection） */
+    V2IndexList selectedNodeIndexes();
+    V2IndexList selectedFavIndexes();
+    QStringList selectedNodeIds();               /* 刷新后保持选择用 */
+    void restoreNodeSelection(const QStringList& ids);
     void onStartFavCore();
     void onCopyFavLink();
     void onUnfavFav();
@@ -261,6 +266,7 @@ private:
     void applyCountryFromName(V2Node& n) const;
     QString countryNameOf(const QString& cc) const;
     void startGeoLookup(bool all);
+    void startGeoLookupFor(const V2IndexList& idxs);
     void geoipDatProbe();                       /* 启动只探测 geoip.dat 是否存在（不解析） */
     bool geoipDatReady();                       /* 首次查询时才加载（优先读缓存） */
     bool geoipDatLookup(const QString& ip, QString& cc) const;
@@ -269,6 +275,7 @@ private:
     QString findGeoTool() const;
     void appendNodeDedup(const V2Node& n);
     void startTestBatch(bool real, bool all);
+    void startTestBatchFor(bool real, const V2IndexList& idxs);
     void startNextTest();
     void finishTest();
     int  pickFreePort();
