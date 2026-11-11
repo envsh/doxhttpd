@@ -20,11 +20,11 @@ QWidget* createLinkSwiftMainWindow(void* parent) {
 #endif
     w->resize(640, 500);
 
-    QVBoxLayout* mainLayout = new QVBoxLayout(w, 8, 6);
+    QVBoxLayout* mainLayout = (QVBoxLayout*)qNewBoxLayout(w, QBoxLayout::TopToBottom, 8, 6);
 
     // ── 平台选择 ──
     QGroupBox* platBox = new QGroupBox(qFromUtf8("网盘平台"), w);
-    QHBoxLayout* platLayout = new QHBoxLayout(platBox, 6, 4);
+    QHBoxLayout* platLayout = (QHBoxLayout*)qNewBoxLayout(platBox, QBoxLayout::LeftToRight, 6, 4);
     QLabel* platLabel = new QLabel(qFromUtf8("平台："), platBox);
     QComboBox* platCombo = new QComboBox(platBox);
     platCombo->insertItem(qFromUtf8("百度网盘"));
@@ -56,15 +56,19 @@ QWidget* createLinkSwiftMainWindow(void* parent) {
 
     // ── 认证信息 ──
     QGroupBox* authBox = new QGroupBox(qFromUtf8("认证信息（Cookie/Token）"), w);
-    QVBoxLayout* authLayout = new QVBoxLayout(authBox, 6, 4);
+    QVBoxLayout* authLayout = (QVBoxLayout*)qNewBoxLayout(authBox, QBoxLayout::TopToBottom, 6, 4);
     QTextEdit* authEdit = new QTextEdit(authBox);
+#ifdef QT3_BUILD
     authEdit->setTextFormat(Qt::PlainText);
+#else
+    authEdit->setAcceptRichText(false);
+#endif
     authLayout->addWidget(authEdit);
     mainLayout->addWidget(authBox);
 
     // ── 下载器设置 ──
     QGroupBox* dlBox = new QGroupBox(qFromUtf8("下载器"), w);
-    QHBoxLayout* dlLayout = new QHBoxLayout(dlBox, 6, 4);
+    QHBoxLayout* dlLayout = (QHBoxLayout*)qNewBoxLayout(dlBox, QBoxLayout::LeftToRight, 6, 4);
     QLabel* dlLabel = new QLabel(qFromUtf8("类型："), dlBox);
     QComboBox* dlCombo = new QComboBox(dlBox);
     dlCombo->insertItem(qFromUtf8("Aria2 (RPC)"));
@@ -83,7 +87,7 @@ QWidget* createLinkSwiftMainWindow(void* parent) {
     mainLayout->addWidget(dlBox);
 
     // ── 操作按钮 ──
-    QHBoxLayout* btnLayout = new QHBoxLayout(0, 4, 4);
+    QHBoxLayout* btnLayout = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     QPushButton* fetchBtn = new QPushButton(qFromUtf8("获取直链"), w);
     QPushButton* copyBtn = new QPushButton(qFromUtf8("复制全部"), w);
     QPushButton* pushBtn = new QPushButton(qFromUtf8("推送到下载器"), w);
@@ -97,9 +101,13 @@ QWidget* createLinkSwiftMainWindow(void* parent) {
 
     // ── 结果/日志 ──
     QGroupBox* logBox = new QGroupBox(qFromUtf8("直链结果"), w);
-    QVBoxLayout* logLayout = new QVBoxLayout(logBox, 6, 4);
+    QVBoxLayout* logLayout = (QVBoxLayout*)qNewBoxLayout(logBox, QBoxLayout::TopToBottom, 6, 4);
     QTextEdit* logEdit = new QTextEdit(logBox);
+#ifdef QT3_BUILD
     logEdit->setTextFormat(Qt::PlainText);
+#else
+    logEdit->setAcceptRichText(false);
+#endif
     logEdit->setReadOnly(true);
     logLayout->addWidget(logEdit);
     mainLayout->addWidget(logBox);

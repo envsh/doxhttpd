@@ -18,15 +18,15 @@ QWidget* createBookmarkMgrMainWindow(void* parent) {
 #endif
     w->resize(560, 420);
 
-    QVBoxLayout* mainLayout = new QVBoxLayout(w, 8, 6);
+    QVBoxLayout* mainLayout = (QVBoxLayout*)qNewBoxLayout(w, QBoxLayout::TopToBottom, 8, 6);
 
     QGroupBox* listBox = new QGroupBox(qFromUtf8("书签列表"), w);
-    QVBoxLayout* listLayout = new QVBoxLayout(listBox, 6, 4);
+    QVBoxLayout* listLayout = (QVBoxLayout*)qNewBoxLayout(listBox, QBoxLayout::TopToBottom, 6, 4);
     QListBox* listBoxCtrl = new QListBox(listBox);
     listLayout->addWidget(listBoxCtrl);
     mainLayout->addWidget(listBox);
 
-    QHBoxLayout* btnLayout = new QHBoxLayout(0, 4, 4);
+    QHBoxLayout* btnLayout = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     QPushButton* addBtn = new QPushButton(qFromUtf8("添加"), w);
     QPushButton* delBtn = new QPushButton(qFromUtf8("删除"), w);
     QPushButton* openBtn = new QPushButton(qFromUtf8("打开"), w);

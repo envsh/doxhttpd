@@ -19,9 +19,9 @@ QWidget* createFmtCodecMainWindow(void* parent) {
 #endif
     w->resize(640, 420);
 
-    QVBoxLayout* mainLayout = new QVBoxLayout(w, 8, 6);
+    QVBoxLayout* mainLayout = (QVBoxLayout*)qNewBoxLayout(w, QBoxLayout::TopToBottom, 8, 6);
 
-    QHBoxLayout* topLayout = new QHBoxLayout(0, 4, 4);
+    QHBoxLayout* topLayout = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     QLabel* typeLabel = new QLabel(qFromUtf8("类型："), w);
     QComboBox* typeCombo = new QComboBox(w);
     typeCombo->insertItem(qFromUtf8("JSON"));
@@ -39,19 +39,27 @@ QWidget* createFmtCodecMainWindow(void* parent) {
     topLayout->addWidget(clearBtn);
     mainLayout->addLayout(topLayout);
 
-    QHBoxLayout* editLayout = new QHBoxLayout(0, 6, 6);
+    QHBoxLayout* editLayout = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 6, 6);
 
     QGroupBox* inBox = new QGroupBox(qFromUtf8("输入"), w);
-    QVBoxLayout* inLayout = new QVBoxLayout(inBox, 4, 2);
+    QVBoxLayout* inLayout = (QVBoxLayout*)qNewBoxLayout(inBox, QBoxLayout::TopToBottom, 4, 2);
     QTextEdit* inEdit = new QTextEdit(inBox);
+#ifdef QT3_BUILD
     inEdit->setTextFormat(Qt::PlainText);
+#else
+    inEdit->setAcceptRichText(false);
+#endif
     inLayout->addWidget(inEdit);
     editLayout->addWidget(inBox);
 
     QGroupBox* outBox = new QGroupBox(qFromUtf8("输出"), w);
-    QVBoxLayout* outLayout = new QVBoxLayout(outBox, 4, 2);
+    QVBoxLayout* outLayout = (QVBoxLayout*)qNewBoxLayout(outBox, QBoxLayout::TopToBottom, 4, 2);
     QTextEdit* outEdit = new QTextEdit(outBox);
+#ifdef QT3_BUILD
     outEdit->setTextFormat(Qt::PlainText);
+#else
+    outEdit->setAcceptRichText(false);
+#endif
     outEdit->setReadOnly(true);
     outLayout->addWidget(outEdit);
     editLayout->addWidget(outBox);

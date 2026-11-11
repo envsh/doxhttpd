@@ -19,17 +19,17 @@ QWidget* createM3u8dlMainWindow(void* parent) {
 #endif
     w->resize(560, 420);
 
-    QVBoxLayout* mainLayout = new QVBoxLayout(w, 8, 6);
+    QVBoxLayout* mainLayout = (QVBoxLayout*)qNewBoxLayout(w, QBoxLayout::TopToBottom, 8, 6);
 
     QGroupBox* urlBox = new QGroupBox(qFromUtf8("下载地址"), w);
-    QVBoxLayout* urlLayout = new QVBoxLayout(urlBox, 6, 4);
+    QVBoxLayout* urlLayout = (QVBoxLayout*)qNewBoxLayout(urlBox, QBoxLayout::TopToBottom, 6, 4);
     QLineEdit* urlEdit = new QLineEdit(urlBox);
     urlEdit->setText(qFromUtf8("请输入 m3u8 地址"));
     urlLayout->addWidget(urlEdit);
     mainLayout->addWidget(urlBox);
 
     QGroupBox* dirBox = new QGroupBox(qFromUtf8("保存目录"), w);
-    QHBoxLayout* dirLayout = new QHBoxLayout(dirBox, 6, 4);
+    QHBoxLayout* dirLayout = (QHBoxLayout*)qNewBoxLayout(dirBox, QBoxLayout::LeftToRight, 6, 4);
     QLineEdit* dirEdit = new QLineEdit(dirBox);
     dirEdit->setText(qFromUtf8("./download"));
     QPushButton* browseBtn = new QPushButton(qFromUtf8("浏览..."), dirBox);
@@ -37,7 +37,7 @@ QWidget* createM3u8dlMainWindow(void* parent) {
     dirLayout->addWidget(browseBtn);
     mainLayout->addWidget(dirBox);
 
-    QHBoxLayout* btnLayout = new QHBoxLayout(0, 4, 4);
+    QHBoxLayout* btnLayout = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     QPushButton* startBtn = new QPushButton(qFromUtf8("开始下载"), w);
     QPushButton* stopBtn = new QPushButton(qFromUtf8("停止"), w);
     btnLayout->addWidget(startBtn);
@@ -46,9 +46,13 @@ QWidget* createM3u8dlMainWindow(void* parent) {
     mainLayout->addLayout(btnLayout);
 
     QGroupBox* logBox = new QGroupBox(qFromUtf8("日志"), w);
-    QVBoxLayout* logLayout = new QVBoxLayout(logBox, 6, 4);
+    QVBoxLayout* logLayout = (QVBoxLayout*)qNewBoxLayout(logBox, QBoxLayout::TopToBottom, 6, 4);
     QTextEdit* logEdit = new QTextEdit(logBox);
+#ifdef QT3_BUILD
     logEdit->setTextFormat(Qt::PlainText);
+#else
+    logEdit->setAcceptRichText(false);
+#endif
     logEdit->setReadOnly(true);
     logLayout->addWidget(logEdit);
     mainLayout->addWidget(logBox);

@@ -19,10 +19,10 @@ QWidget* createMirrorMgrMainWindow(void* parent) {
 #endif
     w->resize(480, 380);
 
-    QVBoxLayout* mainLayout = new QVBoxLayout(w, 8, 6);
+    QVBoxLayout* mainLayout = (QVBoxLayout*)qNewBoxLayout(w, QBoxLayout::TopToBottom, 8, 6);
 
     QGroupBox* toolBox = new QGroupBox(qFromUtf8("工具"), w);
-    QHBoxLayout* toolLayout = new QHBoxLayout(toolBox, 6, 4);
+    QHBoxLayout* toolLayout = (QHBoxLayout*)qNewBoxLayout(toolBox, QBoxLayout::LeftToRight, 6, 4);
     QButtonGroup* toolGroup = new QButtonGroup(toolBox);
     QRadioButton* pipBtn = new QRadioButton(qFromUtf8("pip"), toolBox);
     QRadioButton* npmBtn = new QRadioButton(qFromUtf8("npm"), toolBox);
@@ -38,7 +38,7 @@ QWidget* createMirrorMgrMainWindow(void* parent) {
     mainLayout->addWidget(toolBox);
 
     QGroupBox* mirrorBox = new QGroupBox(qFromUtf8("镜像源"), w);
-    QVBoxLayout* mirrorLayout = new QVBoxLayout(mirrorBox, 6, 4);
+    QVBoxLayout* mirrorLayout = (QVBoxLayout*)qNewBoxLayout(mirrorBox, QBoxLayout::TopToBottom, 6, 4);
     QButtonGroup* mirrorGroup = new QButtonGroup(mirrorBox);
     QRadioButton* officialBtn = new QRadioButton(qFromUtf8("官方源（默认）"), mirrorBox);
     QRadioButton* aliyunBtn = new QRadioButton(qFromUtf8("阿里云镜像"), mirrorBox);
@@ -55,7 +55,7 @@ QWidget* createMirrorMgrMainWindow(void* parent) {
     mirrorLayout->addWidget(ustcBtn);
     mainLayout->addWidget(mirrorBox);
 
-    QHBoxLayout* btnLayout = new QHBoxLayout(0, 4, 4);
+    QHBoxLayout* btnLayout = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     QPushButton* applyBtn = new QPushButton(qFromUtf8("应用"), w);
     QPushButton* restoreBtn = new QPushButton(qFromUtf8("恢复默认"), w);
     btnLayout->addWidget(applyBtn);

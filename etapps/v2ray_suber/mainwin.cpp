@@ -94,15 +94,15 @@ QWidget* createV2raySuberMainWindow(void* parent) {
 #endif
     w->resize(640, 480);
 
-    QVBoxLayout* mainLayout = new QVBoxLayout(w, 8, 6);
+    QVBoxLayout* mainLayout = (QVBoxLayout*)qNewBoxLayout(w, QBoxLayout::TopToBottom, 8, 6);
 
     QTabWidget* tabs = new QTabWidget(w);
     mainLayout->addWidget(tabs);
 
     /* ── Tab: 订阅 ── */
     QWidget* subPage = new QWidget(tabs);
-    QVBoxLayout* subLayout = new QVBoxLayout(subPage, 6, 4);
-    QHBoxLayout* subTop = new QHBoxLayout(0, 4, 4);
+    QVBoxLayout* subLayout = (QVBoxLayout*)qNewBoxLayout(subPage, QBoxLayout::TopToBottom, 6, 4);
+    QHBoxLayout* subTop = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     QLineEdit* subEdit = new QLineEdit(subPage);
     subTop->addWidget(subEdit);
     QPushButton* addBtn = new QPushButton(qFromUtf8("添加"), subPage);
@@ -115,7 +115,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     subTop->addWidget(updAllBtn);
     subLayout->addLayout(subTop);
     /* 自动更新开关 + 频率 */
-    QHBoxLayout* autoRow = new QHBoxLayout(0, 4, 4);
+    QHBoxLayout* autoRow = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     QCheckBox* autoChk = new QCheckBox(qFromUtf8("自动更新订阅"), subPage);
     autoChk->setChecked(true);
     QComboBox* autoFreq = new QComboBox(subPage);
@@ -148,9 +148,9 @@ QWidget* createV2raySuberMainWindow(void* parent) {
 
     /* ── Tab: 节点 ── */
     QWidget* nodePage = new QWidget(tabs);
-    QVBoxLayout* nodeLayout = new QVBoxLayout(nodePage, 6, 4);
+    QVBoxLayout* nodeLayout = (QVBoxLayout*)qNewBoxLayout(nodePage, QBoxLayout::TopToBottom, 6, 4);
     /* 过滤 + 排序行（视图层，不动节点数据） */
-    QHBoxLayout* nodeFilterRow = new QHBoxLayout(0, 4, 4);
+    QHBoxLayout* nodeFilterRow = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     nodeFilterRow->addWidget(new QLabel(qFromUtf8("过滤："), nodePage));
     QLineEdit* nodeFilterEdit = new QLineEdit(nodePage);
     nodeFilterRow->addWidget(nodeFilterEdit);
@@ -174,7 +174,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     nodeList->setSelectionMode(QAbstractItemView::SingleSelection);
 #endif
     nodeLayout->addWidget(nodeList);
-    QHBoxLayout* nodeBtnRow = new QHBoxLayout(0, 4, 4);
+    QHBoxLayout* nodeBtnRow = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     QPushButton* copyBtn = new QPushButton(qFromUtf8("复制节点链接"), nodePage);
     QPushButton* tcpSelBtn = new QPushButton(qFromUtf8("TCP(选中)"), nodePage);
     QPushButton* realSelBtn = new QPushButton(qFromUtf8("真连接(选中)"), nodePage);
@@ -197,7 +197,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
 
     /* ── Tab: 收藏 ── */
     QWidget* favPage = new QWidget(tabs);
-    QVBoxLayout* favLayout = new QVBoxLayout(favPage, 6, 4);
+    QVBoxLayout* favLayout = (QVBoxLayout*)qNewBoxLayout(favPage, QBoxLayout::TopToBottom, 6, 4);
 #ifdef QT3_BUILD
     V2Table* favList = new QTable(0, 0, favPage);
     favList->setReadOnly(true);
@@ -215,7 +215,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
 
     /* ── Tab: 核心 ── */
     QWidget* corePage = new QWidget(tabs);
-    QVBoxLayout* coreLayout = new QVBoxLayout(corePage, 6, 4);
+    QVBoxLayout* coreLayout = (QVBoxLayout*)qNewBoxLayout(corePage, QBoxLayout::TopToBottom, 6, 4);
     QLabel* coreState = new QLabel(qFromUtf8("状态：检测中"), corePage);
     coreLayout->addWidget(coreState);
     /* 当前使用的节点（独立一行，不参与测试结果覆盖） */
@@ -224,7 +224,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     /* 实时流量（速率/累计/请求数），核心未运行时显示占位 */
     QLabel* trafficLabel = new QLabel(qFromUtf8("流量：—（核心未运行）"), corePage);
     coreLayout->addWidget(trafficLabel);
-    QHBoxLayout* coreBtnRow = new QHBoxLayout(0, 4, 4);
+    QHBoxLayout* coreBtnRow = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     QPushButton* dlBtn = new QPushButton(qFromUtf8("下载安装"), corePage);
     QPushButton* startBtn = new QPushButton(qFromUtf8("启动核心"), corePage);
     QPushButton* stopBtn = new QPushButton(qFromUtf8("停止核心"), corePage);
@@ -235,7 +235,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     coreLayout->addLayout(coreBtnRow);
 
     /* 内核选择：v2ray / Xray（系统）/ Xray（内置） */
-    QHBoxLayout* coreSelRow = new QHBoxLayout(0, 4, 4);
+    QHBoxLayout* coreSelRow = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     coreSelRow->addWidget(new QLabel(qFromUtf8("核心："), corePage));
     QComboBox* coreSel = new QComboBox(corePage);
     coreSelRow->addWidget(coreSel);
@@ -245,7 +245,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     coreLayout->addLayout(coreSelRow);
 
     /* D：SOCKS 监听地址 / 端口 */
-    QHBoxLayout* listenRow = new QHBoxLayout(0, 4, 4);
+    QHBoxLayout* listenRow = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     listenRow->addWidget(new QLabel(qFromUtf8("监听地址："), corePage));
     QComboBox* listenAddr = new QComboBox(corePage);
     listenAddr->setEditable(true);
@@ -270,7 +270,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     coreLayout->addLayout(listenRow);
     coreLayout->addWidget(new QLabel(qFromUtf8("默认 SOCKS 10808 / HTTP 10809（仅本机）；0.0.0.0 会向局域网暴露"), corePage));
     /* 测试按钮结果：图标 + 文字（绿勾/红叉/灰线），独立一行 */
-    QHBoxLayout* testRow = new QHBoxLayout(0, 4, 4);
+    QHBoxLayout* testRow = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     QLabel* testPrefix = new QLabel(qFromUtf8("测试结果："), corePage);
     QLabel* testSocksIcon = new QLabel(corePage);
     QLabel* testSocksText = new QLabel(corePage);
@@ -305,9 +305,13 @@ QWidget* createV2raySuberMainWindow(void* parent) {
 
     /* ── Tab: 日志 ── */
     QWidget* logPage = new QWidget(tabs);
-    QVBoxLayout* logLayout = new QVBoxLayout(logPage, 6, 4);
+    QVBoxLayout* logLayout = (QVBoxLayout*)qNewBoxLayout(logPage, QBoxLayout::TopToBottom, 6, 4);
     QTextEdit* logEdit = new QTextEdit(logPage);
+#ifdef QT3_BUILD
     logEdit->setTextFormat(Qt::PlainText);
+#else
+    logEdit->setAcceptRichText(false);
+#endif
     logEdit->setReadOnly(true);
     logLayout->addWidget(logEdit);
     tabs->addTab(logPage, qFromUtf8("日志"));
