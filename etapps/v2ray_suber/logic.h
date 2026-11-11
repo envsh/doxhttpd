@@ -183,6 +183,7 @@ private slots:
     void onSubOutput();
     void onSubErrOutput();
     void onSubFetched();
+    void startNextPendingSub();   /* 延迟到下个事件循环启动，避免在子进程退出槽里重入 */
     void onCoreDlOutput();
     void onCoreDlErrOutput();
     void onCoreDlDone();
@@ -271,7 +272,7 @@ private:
     bool coreInstalled() const;
     bool hasGeoFiles() const;
     QString maybeDecodeBase64(const QString& in);
-    void parseSubscription(const QString& content);
+    void parseSubscription(const QString& content, const QString& src);
     void parseVmess(const QString& line, V2Node& node, bool& ok, QString& err);
     void parseVlessTrojan(const QString& line, V2Node& node, bool& ok, QString& err);
     void parseShadowsocks(const QString& line, V2Node& node, bool& ok, QString& err);
@@ -280,7 +281,6 @@ private:
     int  selectedSubIndex();
     void clearNodes();
     void startSubFetch(const QString& url);
-    void startNextPendingSub();
     void updateAllSubscriptions();
     void startNextLatency();
 

@@ -2390,7 +2390,7 @@ void V2RayLogic::loadNodes() {
         QString last = readUtf8File(baseDir() + "/sub_last.txt");
         if (!last.isEmpty()) {
             curSubUrl = subs.count() > 0 ? subs[0] : QString();
-            parseSubscription(last);
+            parseSubscription(last, curSubUrl);
             saveNodes();
         }
     }
@@ -2557,8 +2557,8 @@ void V2RayLogic::startSubFetch(const QString& url) {
     subProc->addArgument("--max-time");
     subProc->addArgument("30");
     subProc->addArgument(url);
+    curSubUrl = url;            /* 先定来源，再启动：退出槽里 prune/parse 只用已定的来源 */
     subProc->start();
-    curSubUrl = url;
     setUpdateBusy(true, qFromUtf8("更新中：") + url);
     appendLogWithPrefix(qFromUtf8("[订阅]"), qFromUtf8("正在更新：") + url);
 }
@@ -2639,15 +2639,23 @@ void V2RayLogic::onSubFetched() {
     fetchOk = (subProc->exitStatus() == QProcess::NormalExit)
         && (subProc->exitCode() == 0);
 #endif
+    QString src = curSubUrl;         /* 本次抓取的来源快照（之后只用它） */
+    int exitCode = -1;
+#ifdef QT3_BUILD
+    if (subProc->normalExit()) { exitCode = subProc->exitStatus(); }
+#else
+    if (subProc->exitStatus() == QProcess::NormalExit) { exitCode = subProc->exitCode(); }
+#endif
     baAppend(subData, subProc->readStdout());
     delete subProc;
     subProc = 0;
     QString content = qFromUtf8(subData.data(), (int)subData.size());
     if (!fetchOk || content.isEmpty()) {
         appendLogWithPrefix(qFromUtf8("[订阅]"),
-            qFromUtf8("更新失败（网络/HTTP 错误），已保留原节点列表"));
+            qFromUtf8("更新失败（网络/HTTP 错误，curl 退出码 ")
+            + QString::number(exitCode) + qFromUtf8("），已保留原节点列表：") + src);
         if (!updatingAll) { setUpdateBusy(false, qFromUtf8("更新失败（已保留原节点）")); }
-        if (updatingAll) { startNextPendingSub(); }
+        if (updatingAll) { QTimer::singleShot(0, this, SLOT(startNextPendingSub())); }
         return;
     }
     QString plain = maybeDecodeBase64(content);
@@ -2655,7 +2663,7 @@ void V2RayLogic::onSubFetched() {
         appendLogWithPrefix(qFromUtf8("[订阅]"),
             qFromUtf8("订阅内容未发现节点链接（可能不是有效订阅），已保留原节点列表"));
         if (!updatingAll) { setUpdateBusy(false, qFromUtf8("更新失败（内容无效，已保留原节点）")); }
-        if (updatingAll) { startNextPendingSub(); }
+        if (updatingAll) { QTimer::singleShot(0, this, SLOT(startNextPendingSub())); }
         return;
     }
     /* C：记录原选中节点 id（跨订阅更新也能恢复） */
@@ -2663,8 +2671,8 @@ void V2RayLogic::onSubFetched() {
     int prevIdx = selectedNodeIndex();
     if (prevIdx >= 0) { prevId = nodes[prevIdx].id; }
     saveSubLast(plain);
-    pruneSubNodesForUpdate(curSubUrl);       /* 保留在用/真连可用，清理未测/失败 */
-    parseSubscription(plain);
+    pruneSubNodesForUpdate(src);       /* 保留在用/真连可用，清理未测/失败 */
+    parseSubscription(plain, src);
     refreshNodeList();
     {
         QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
@@ -2685,15 +2693,21 @@ void V2RayLogic::onSubFetched() {
     saveNodes();
     startGeoLookup(true);
     /* A：记录该订阅的更新时间/节点数 */
-    subMeta.insert(curSubUrl,
-        QTime::currentTime().toString("hh:mm:ss") + "|" + QString::number((int)nodes.count()));
+    int subNodes = 0;
+    for (int k = 0; k < (int)nodes.count(); ++k) {
+        if (nodes[k].sourceSub == src) { ++subNodes; }
+    }
+    subMeta.insert(src,
+        QTime::currentTime().toString("hh:mm:ss") + "|" + QString::number(subNodes));
     saveSubMeta();
     refreshSubList();
-    appendLogWithPrefix(qFromUtf8("[订阅]"), qFromUtf8("更新完成，共 ") + QString::number((int)nodes.count()) + qFromUtf8(" 个节点"));
+    appendLogWithPrefix(qFromUtf8("[订阅]"),
+        qFromUtf8("更新完成：该订阅 ") + QString::number(subNodes)
+        + qFromUtf8(" 个节点，列表共 ") + QString::number((int)nodes.count()) + qFromUtf8(" 个"));
     if (!updatingAll) {
-        setUpdateBusy(false, qFromUtf8("更新完成：") + QString::number((int)nodes.count()) + qFromUtf8(" 个节点"));
+        setUpdateBusy(false, qFromUtf8("更新完成：") + QString::number((int)nodes.count()) + qFromUtf8(" 个节点（列表共）"));
     }
-    if (updatingAll) { startNextPendingSub(); }
+    if (updatingAll) { QTimer::singleShot(0, this, SLOT(startNextPendingSub())); }
 }
 
 /* 订阅内容若是 base64 整包则解码；含分享链接明文则原样返回 */
@@ -2866,7 +2880,7 @@ void V2RayLogic::applyCountryFromName(V2Node& n) const {
     }
 }
 
-void V2RayLogic::parseSubscription(const QString& content) {
+void V2RayLogic::parseSubscription(const QString& content, const QString& src) {
     QStringList lines = splitLines(content);
     QString now = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
     for (int i = 0; i < (int)lines.count(); ++i) {
@@ -2913,7 +2927,7 @@ void V2RayLogic::parseSubscription(const QString& content) {
                                     : (node.addr + ":" + node.port);
             node.supported = false;
             node.id = nodeId(node);
-            node.sourceSub = curSubUrl;
+            node.sourceSub = src;
             node.updatedAt = now;
             appendNodeDedup(node);
             appendLog(qFromUtf8("提示：hysteria2 节点暂不支持启动（已保留展示）"));
@@ -2923,7 +2937,7 @@ void V2RayLogic::parseSubscription(const QString& content) {
         }
         if (ok) {
             applyCountryFromName(node);
-            node.sourceSub = curSubUrl;
+            node.sourceSub = src;
             node.updatedAt = now;
             appendNodeDedup(node);
             continue;
