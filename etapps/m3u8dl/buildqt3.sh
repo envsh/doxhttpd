@@ -2,7 +2,12 @@
 set -x
 
 if [ x"$QTDIR" == x"" ]; then
-    QTDIR=/opt/qt338sh
+	osname=$(uname)
+	if [ x"$osname" == x"Darwin" ]; then
+		QTDIR=/opt/local/libexec/qt4
+	else
+		QTDIR=/opt/qt338sh
+	fi
     export QTDIR
 fi
 
