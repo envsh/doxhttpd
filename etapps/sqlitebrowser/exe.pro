@@ -1,6 +1,7 @@
 TEMPLATE = app
 TARGET = sqlitebrowser_ui
 CONFIG += plugin qt
+macx: CONFIG -= app_bundle
 QT = core gui widgets
 
 INCLUDEPATH += ../../qlcomp ../

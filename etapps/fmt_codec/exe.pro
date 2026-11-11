@@ -1,6 +1,7 @@
 TEMPLATE = app
 TARGET = fmt_codec_ui
 CONFIG += plugin qt
+macx: CONFIG -= app_bundle
 QT = core gui widgets
 
 INCLUDEPATH += ../../qlcomp ../

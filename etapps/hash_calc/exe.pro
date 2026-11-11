@@ -1,6 +1,7 @@
 TEMPLATE = app
 TARGET = hash_calc_ui
 CONFIG += plugin qt
+macx: CONFIG -= app_bundle
 QT = core gui widgets
 
 INCLUDEPATH += ../../qlcomp ../

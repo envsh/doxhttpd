@@ -1,10 +1,11 @@
 TEMPLATE = app
 TARGET = bookmark_mgr_ui
 CONFIG += plugin qt
+macx: CONFIG -= app_bundle
 QT = core gui widgets
 
 INCLUDEPATH += ../../qlcomp ../
-SOURCES = exe.cpp main.cpp mainwin.cpp ../../qlcomp/compat34.cpp ../../qlcomp/appsetup.cpp
+SOURCES = exe.cpp main.cpp mainwin.cpp ../../qlcomp/compat34.cpp ../../qlcomp/qlistwidget34.cpp ../../qlcomp/appsetup.cpp
 HEADERS = ../../qlcomp/appsetup.h ../../qlcomp/lambdaslot.h
 LIBS += ../build-qt3/cJSON.o ../build-qt3/table_compat.o
 # DESTDIR = ../../../qltox/plugins/uiapps

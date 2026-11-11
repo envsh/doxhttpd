@@ -1,10 +1,11 @@
 TEMPLATE = app
 TARGET = dotfile_cleaner_ui
 CONFIG += plugin qt
+macx: CONFIG -= app_bundle
 QT = core gui widgets
 
 INCLUDEPATH += ../../qlcomp ../
-SOURCES = exe.cpp main.cpp mainwin.cpp ../../qlcomp/compat34.cpp ../../qlcomp/appsetup.cpp
+SOURCES = exe.cpp main.cpp mainwin.cpp ../../qlcomp/compat34.cpp ../../qlcomp/qlistwidget34.cpp ../../qlcomp/appsetup.cpp
 HEADERS = ../../qlcomp/appsetup.h ../../qlcomp/lambdaslot.h
 # DESTDIR = ../../../qltox/plugins/uiapps
 

@@ -3,24 +3,7 @@
 #include <qwidget.h>
 #include <qlabel.h>
 #include <qpushbutton.h>
-#ifdef QT3_BUILD
-#include <qlistbox.h>
-#else
-#include <qlistwidget.h>
-/* Qt4 无 QListBox：用 QListWidget 包装同名 API */
-class QListBox : public QListWidget {
-public:
-    explicit QListBox(QWidget* parent = 0) : QListWidget(parent) {}
-    void insertItem(const QString& t) { addItem(t); }
-    QString text(int i) const {
-        QListWidgetItem* it = item(i);
-        return it ? it->text() : QString();
-    }
-    int currentItem() const { return currentRow(); }
-    void setCurrentItem(int i) { setCurrentRow(i); }
-    void removeItem(int i) { QListWidgetItem* it = takeItem(i); delete it; }
-};
-#endif
+#include "qlistwidget34.h"
 #include <qcheckbox.h>
 #include <qgroupbox.h>
 #include <qlayout.h>
@@ -40,11 +23,11 @@ QWidget* createDotfileCleanerMainWindow(void* parent) {
 
     QGroupBox* fileBox = new QGroupBox(qFromUtf8("待清理文件"), w);
     QVBoxLayout* fileLayout = (QVBoxLayout*)qNewBoxLayout(fileBox, QBoxLayout::TopToBottom, 6, 4);
-    QListBox* fileList = new QListBox(fileBox);
-    fileList->insertItem(qFromUtf8(".bash_history"));
-    fileList->insertItem(qFromUtf8(".zsh_history"));
-    fileList->insertItem(qFromUtf8(".cache/"));
-    fileList->insertItem(qFromUtf8(".local/share/Trash/"));
+    QListWidget34* fileList = new QListWidget34(fileBox);
+    fileList->addItem(qFromUtf8(".bash_history"));
+    fileList->addItem(qFromUtf8(".zsh_history"));
+    fileList->addItem(qFromUtf8(".cache/"));
+    fileList->addItem(qFromUtf8(".local/share/Trash/"));
     fileLayout->addWidget(fileList);
     mainLayout->addWidget(fileBox);
 

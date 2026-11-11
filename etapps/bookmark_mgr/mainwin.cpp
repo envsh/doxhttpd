@@ -3,24 +3,7 @@
 #include <qwidget.h>
 #include <qlabel.h>
 #include <qpushbutton.h>
-#ifdef QT3_BUILD
-#include <qlistbox.h>
-#else
-#include <qlistwidget.h>
-/* Qt4 无 QListBox：用 QListWidget 包装同名 API */
-class QListBox : public QListWidget {
-public:
-    explicit QListBox(QWidget* parent = 0) : QListWidget(parent) {}
-    void insertItem(const QString& t) { addItem(t); }
-    QString text(int i) const {
-        QListWidgetItem* it = item(i);
-        return it ? it->text() : QString();
-    }
-    int currentItem() const { return currentRow(); }
-    void setCurrentItem(int i) { setCurrentRow(i); }
-    void removeItem(int i) { QListWidgetItem* it = takeItem(i); delete it; }
-};
-#endif
+#include "qlistwidget34.h"
 #include <qgroupbox.h>
 #include <qlayout.h>
 
@@ -39,7 +22,7 @@ QWidget* createBookmarkMgrMainWindow(void* parent) {
 
     QGroupBox* listBox = new QGroupBox(qFromUtf8("书签列表"), w);
     QVBoxLayout* listLayout = (QVBoxLayout*)qNewBoxLayout(listBox, QBoxLayout::TopToBottom, 6, 4);
-    QListBox* listBoxCtrl = new QListBox(listBox);
+    QListWidget34* listBoxCtrl = new QListWidget34(listBox);
     listLayout->addWidget(listBoxCtrl);
     mainLayout->addWidget(listBox);
 

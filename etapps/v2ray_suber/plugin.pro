@@ -4,9 +4,46 @@ CONFIG += plugin qt
 QT = core gui widgets
 
 INCLUDEPATH += ../../qlcomp ../
-INCLUDEPATH += /usr/include/harfbuzz /usr/include/freetype2
+
+# FreeType2 自动检测
+FREETYPE_LIBS = $$system(pkg-config --libs freetype2 2>/dev/null)
+FREETYPE_CFLAGS = $$system(pkg-config --cflags freetype2 2>/dev/null)
+!isEmpty(FREETYPE_LIBS) {
+    QMAKE_CXXFLAGS += $$FREETYPE_CFLAGS
+    INCLUDEPATH += $$system(pkg-config --cflags-only-I freetype2 2>/dev/null|sed 's/-I//g')
+    LIBS += $$FREETYPE_LIBS
+    message("FreeType2: detected via pkg-config")
+} else {
+    macx {
+        INCLUDEPATH += /opt/local/include/freetype2
+        LIBS += -L/opt/local/lib
+    } else {
+        INCLUDEPATH += /usr/include/freetype2
+    }
+    LIBS += -lfreetype
+    message("FreeType2: pkg-config not found, using fallback paths")
+}
+
+# HarfBuzz 自动检测
+HARFBUZZ_LIBS = $$system(pkg-config --libs harfbuzz 2>/dev/null)
+HARFBUZZ_CFLAGS = $$system(pkg-config --cflags harfbuzz 2>/dev/null)
+!isEmpty(HARFBUZZ_LIBS) {
+    QMAKE_CXXFLAGS += $$HARFBUZZ_CFLAGS
+    INCLUDEPATH += $$system(pkg-config --cflags-only-I harfbuzz 2>/dev/null|sed 's/-I//g')
+    LIBS += $$HARFBUZZ_LIBS
+    message("HarfBuzz: detected via pkg-config")
+} else {
+    macx {
+        INCLUDEPATH += /opt/local/include/harfbuzz
+        LIBS += -L/opt/local/lib
+    } else {
+        INCLUDEPATH += /usr/include/harfbuzz
+    }
+    LIBS += -lharfbuzz
+    message("HarfBuzz: pkg-config not found, using fallback paths")
+}
+
 SOURCES = main.cpp mainwin.cpp logic.cpp v2flag.cpp ../../qlcomp/compat34.cpp ../../qlcomp/qthooks.cpp ../../qlcomp/cJSON.c ../../qlcomp/qsettings34.cpp
-LIBS += -lharfbuzz -lfreetype
 HEADERS = logic.h v2flag.h ../../qlcomp/qsettings34.h ../../qlcomp/lambdaslot.h
 DESTDIR = ../../../qltox/plugins/uiapps
 
