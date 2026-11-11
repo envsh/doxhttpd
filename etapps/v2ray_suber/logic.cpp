@@ -613,6 +613,8 @@ void V2RayLogic::setWidgets(QLineEdit* subEdit_, V2Table* subList_, V2Table* nod
     }
     refreshCoreState();
     appendLog(qFromUtf8("V2Ray 订阅管理器已就绪（核心版本固定 ") + qFromUtf8(V2CORE_VERSION) + qFromUtf8("）"));
+    /* 启动即报告 geoip.dat 可用性：成功/未找到/解析失败都会有一条日志 */
+    geoipDatReady();
 }
 
 QString V2RayLogic::baseDir() const {
@@ -1826,8 +1828,9 @@ struct V2Geo4Rec { unsigned int lo; unsigned int hi; QString cc; };
 struct V2Geo6Rec { quint64 l1; quint64 l2; quint64 h1; quint64 h2; QString cc; };
 static std::vector<V2Geo4Rec> g_geo4;
 static std::vector<V2Geo6Rec> g_geo6;
-static bool g_geoLoadTried = false;
 static bool g_geoLoaded = false;
+static bool g_geoWarned = false;
+static QString g_geoPath;          /* 实际加载的 geoip.dat 路径 */
 
 static bool v2Geo4Less(const V2Geo4Rec& a, const V2Geo4Rec& b) { return a.lo < b.lo; }
 static bool v2Geo6Less(const V2Geo6Rec& a, const V2Geo6Rec& b) {
@@ -2002,24 +2005,45 @@ static bool v2IsIpLiteral(const QString& a) {
     return true;
 }
 
-/* 懒加载 geoip.dat：内置内核目录优先，其次系统 Xray 的 share 目录 */
+/* 懒加载 geoip.dat：内置内核目录优先，其次系统 Xray 数据目录。
+ * 失败不缓存（更新/下载核心后可再次尝试），每次都会真正去查文件。 */
 bool V2RayLogic::geoipDatReady() {
-    if (g_geoLoadTried) { return g_geoLoaded; }
-    g_geoLoadTried = true;
+    if (g_geoLoaded) { return true; }
     const QString paths[] = {
         xrayDir() + "/geoip.dat",
         coreDir() + "/geoip.dat",
         QString("/usr/share/xray/geoip.dat"),
         QString("/usr/local/share/xray/geoip.dat"),
         QString("/opt/local/share/xray/geoip.dat"),
-        QString("/opt/homebrew/share/xray/geoip.dat")
+        QString("/opt/homebrew/share/xray/geoip.dat"),
+        QString("/etc/xray/geoip.dat"),
+        QString("/opt/local/etc/xray/geoip.dat"),
+        QString("/opt/homebrew/etc/xray/geoip.dat"),
+        QString("/usr/local/etc/xray/geoip.dat")
     };
+    QStringList tried;
+    QString failPath;
     for (int i = 0; i < (int)(sizeof(paths) / sizeof(paths[0])); ++i) {
-        if (fileExists(paths[i]) && v2GeoipLoadFile(paths[i])) {
+        tried.append(paths[i]);
+        if (!fileExists(paths[i])) { continue; }
+        if (v2GeoipLoadFile(paths[i])) {
             g_geoLoaded = true;
+            g_geoPath = paths[i];
             appendLogWithPrefix(qFromUtf8("[国家]"),
-                qFromUtf8("已加载 geoip.dat：") + paths[i]);
+                qFromUtf8("geoip.dat：") + paths[i] + qFromUtf8("（已加载，可离线查询）"));
             return true;
+        }
+        failPath = paths[i];
+    }
+    if (!g_geoWarned) {
+        g_geoWarned = true;
+        if (!failPath.isEmpty()) {
+            appendLogWithPrefix(qFromUtf8("[国家]"),
+                qFromUtf8("geoip.dat 解析失败：") + failPath);
+        } else {
+            appendLogWithPrefix(qFromUtf8("[国家]"),
+                qFromUtf8("未找到 geoip.dat（已尝试：") + tried.join(", ")
+                + qFromUtf8("）；当前按节点名称关键词识别"));
         }
     }
     return false;
@@ -2070,7 +2094,8 @@ void V2RayLogic::startGeoLookup(bool all) {
         }
         if (nodeStatus) { nodeStatus->setText(qFromUtf8("状态：国家查询完成")); }
         appendLogWithPrefix(qFromUtf8("[国家]"),
-            qFromUtf8("geoip.dat 离线解析 ") + QString::number(resolved) + qFromUtf8(" 个节点"));
+            qFromUtf8("geoip.dat 离线解析 ") + QString::number(resolved) + qFromUtf8(" 个节点（")
+            + g_geoPath + qFromUtf8("）"));
         return;
     }
     if (!geoToolOk) {
