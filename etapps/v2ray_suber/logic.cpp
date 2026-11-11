@@ -989,15 +989,21 @@ void V2RayLogic::refreshNodeList() {
         }
         v2TableSetCell(nodeList, r, 0, name);
         v2TableSetCell(nodeList, r, 1, n.proto);
-        if (!flag.isNull()) {
 #ifdef QT3_BUILD
-            nodeList->setPixmap(r, 2, flag);
+        if (!flag.isNull()) { nodeList->setPixmap(r, 2, flag); }
 #else
+        {
+            /* 国旗列恒建 item 并带 tooltip：即使没有 geoiplookup / 没有国家信息也要能悬停看到提示 */
             QTableWidgetItem* fi = new QTableWidgetItem();
-            fi->setIcon(QIcon(flag));
+            if (!flag.isNull()) { fi->setIcon(QIcon(flag)); }
+            QString tip = n.country.isEmpty()
+                ? qFromUtf8("国家：未知")
+                : (n.countryName.isEmpty() ? n.country
+                                           : n.country + " " + n.countryName);
+            fi->setToolTip(tip);
             nodeList->setItem(r, 2, fi);
-#endif
         }
+#endif
         v2TableSetCell(nodeList, r, 3, n.addr);
         v2TableSetCell(nodeList, r, 4, n.port);
         /* 列顺序：5=可用 6=状态 7=真连 8=TCP 9=传输 10=安全（国家列隐藏） */
@@ -1116,15 +1122,21 @@ void V2RayLogic::refreshFavList() {
         }
         v2TableSetCell(favList, r, 0, name);
         v2TableSetCell(favList, r, 1, n.proto);
-        if (!flag.isNull()) {
 #ifdef QT3_BUILD
-            favList->setPixmap(r, 2, flag);
+        if (!flag.isNull()) { favList->setPixmap(r, 2, flag); }
 #else
+        {
+            /* 国旗列恒建 item 并带 tooltip（收藏表与节点表一致） */
             QTableWidgetItem* fi = new QTableWidgetItem();
-            fi->setIcon(QIcon(flag));
+            if (!flag.isNull()) { fi->setIcon(QIcon(flag)); }
+            QString tip = n.country.isEmpty()
+                ? qFromUtf8("国家：未知")
+                : (n.countryName.isEmpty() ? n.country
+                                           : n.country + " " + n.countryName);
+            fi->setToolTip(tip);
             favList->setItem(r, 2, fi);
-#endif
         }
+#endif
         v2TableSetCell(favList, r, 3, n.addr);
         v2TableSetCell(favList, r, 4, n.port);
         v2TableSetCell(favList, r, 5, real);
