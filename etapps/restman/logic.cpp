@@ -1,4 +1,5 @@
 #include "compat34.h"
+#include "qprocess34.h"
 #include "logic.h"
 #include "cJSON.h"
 
@@ -135,24 +136,42 @@ static void splitResponse(const QString& raw, QString& status, QString& hdrs, QS
     int len = (int)raw.length();
     /* 查找首个空行位置（\r\n\r\n 或 \n\n） */
     for (int i = 0; i < len - 1; ++i) {
+#ifdef QT3_BUILD
         char c1 = raw[i].latin1();
         char c2 = raw[i + 1].latin1();
+#else
+        char c1 = raw[i].toLatin1();
+        char c2 = raw[i + 1].toLatin1();
+#endif
         if (c1 == '\n' && c2 == '\n') { sep = i; break; }
+#ifdef QT3_BUILD
         if (c1 == '\r' && c2 == '\n' && i + 3 < len
             && raw[i + 2].latin1() == '\r' && raw[i + 3].latin1() == '\n') { sep = i; break; }
+#else
+        if (c1 == '\r' && c2 == '\n' && i + 3 < len
+            && raw[i + 2].toLatin1() == '\r' && raw[i + 3].toLatin1() == '\n') { sep = i; break; }
+#endif
     }
     if (sep < 0) {
         hdrs = raw;
         return;
     }
     int skip = 2;
+#ifdef QT3_BUILD
     if (sep + 3 < len && raw[sep].latin1() == '\r') { skip = 4; }
+#else
+    if (sep + 3 < len && raw[sep].toLatin1() == '\r') { skip = 4; }
+#endif
     hdrs = raw.left(sep);
     int nlPos = sep + skip;
     if (nlPos < len) { body = raw.mid(nlPos); }
     int firstNl = -1;
     for (int i = 0; i < (int)hdrs.length(); ++i) {
+#ifdef QT3_BUILD
         if (hdrs[i].latin1() == '\n') { firstNl = i; break; }
+#else
+        if (hdrs[i].toLatin1() == '\n') { firstNl = i; break; }
+#endif
     }
     if (firstNl >= 0) {
         status = hdrs.left(firstNl);
@@ -564,10 +583,10 @@ void RestmanLogic::onSend() {
     if (reqProc) { delete reqProc; reqProc = 0; }
     reqStdout.resize(0);
     reqStderr.resize(0);
-    reqProc = new QProcess(this);
-    connect(reqProc, SIGNAL(readyReadStdout()), this, SLOT(onReqOutput()));
-    connect(reqProc, SIGNAL(readyReadStderr()), this, SLOT(onReqErrOutput()));
-    connect(reqProc, SIGNAL(processExited()), this, SLOT(onReqDone()));
+    reqProc = new QProcess34(this);
+    QProcess34::connectStdout(reqProc, this, SLOT(onReqOutput()));
+    QProcess34::connectStderr(reqProc, this, SLOT(onReqErrOutput()));
+    QProcess34::connectExited(reqProc, this, SLOT(onReqDone()));
 #ifdef QT3_BUILD
     reqProc->clearArguments();
 #endif

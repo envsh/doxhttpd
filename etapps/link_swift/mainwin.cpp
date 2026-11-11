@@ -9,6 +9,15 @@
 #include <qgroupbox.h>
 #include <qlayout.h>
 
+/* Qt3 insertItem / Qt4 addItem 差异封装 */
+static void comboAdd(QComboBox* c, const QString& s) {
+#ifdef QT3_BUILD
+    c->insertItem(s);
+#else
+    c->addItem(s);
+#endif
+}
+
 extern "C"
 QWidget* createLinkSwiftMainWindow(void* parent) {
     QWidget* w = new QWidget((QWidget*)parent);
@@ -27,14 +36,14 @@ QWidget* createLinkSwiftMainWindow(void* parent) {
     QHBoxLayout* platLayout = (QHBoxLayout*)qNewBoxLayout(platBox, QBoxLayout::LeftToRight, 6, 4);
     QLabel* platLabel = new QLabel(qFromUtf8("平台："), platBox);
     QComboBox* platCombo = new QComboBox(platBox);
-    platCombo->insertItem(qFromUtf8("百度网盘"));
-    platCombo->insertItem(qFromUtf8("阿里云盘"));
-    platCombo->insertItem(qFromUtf8("夸克网盘"));
-    platCombo->insertItem(qFromUtf8("UC网盘"));
-    platCombo->insertItem(qFromUtf8("迅雷云盘"));
-    platCombo->insertItem(qFromUtf8("123云盘"));
-    platCombo->insertItem(qFromUtf8("天翼云盘"));
-    platCombo->insertItem(qFromUtf8("移动云盘"));
+    comboAdd(platCombo, qFromUtf8("百度网盘"));
+    comboAdd(platCombo, qFromUtf8("阿里云盘"));
+    comboAdd(platCombo, qFromUtf8("夸克网盘"));
+    comboAdd(platCombo, qFromUtf8("UC网盘"));
+    comboAdd(platCombo, qFromUtf8("迅雷云盘"));
+    comboAdd(platCombo, qFromUtf8("123云盘"));
+    comboAdd(platCombo, qFromUtf8("天翼云盘"));
+    comboAdd(platCombo, qFromUtf8("移动云盘"));
     platLayout->addWidget(platLabel);
     platLayout->addWidget(platCombo);
     platLayout->addStretch(1);
@@ -42,7 +51,13 @@ QWidget* createLinkSwiftMainWindow(void* parent) {
 
     // ── 分享链接 ──
     QGroupBox* linkBox = new QGroupBox(qFromUtf8("分享链接"), w);
+#ifdef QT3_BUILD
     QGridLayout* linkLayout = new QGridLayout(linkBox, 2, 2, 6, 4);
+#else
+    QGridLayout* linkLayout = new QGridLayout(linkBox);
+    linkLayout->setContentsMargins(6, 6, 6, 6);
+    linkLayout->setSpacing(4);
+#endif
     QLabel* urlLabel = new QLabel(qFromUtf8("链接："), linkBox);
     QLineEdit* urlEdit = new QLineEdit(linkBox);
     urlEdit->setText(qFromUtf8("请输入网盘分享链接"));
@@ -71,12 +86,12 @@ QWidget* createLinkSwiftMainWindow(void* parent) {
     QHBoxLayout* dlLayout = (QHBoxLayout*)qNewBoxLayout(dlBox, QBoxLayout::LeftToRight, 6, 4);
     QLabel* dlLabel = new QLabel(qFromUtf8("类型："), dlBox);
     QComboBox* dlCombo = new QComboBox(dlBox);
-    dlCombo->insertItem(qFromUtf8("Aria2 (RPC)"));
-    dlCombo->insertItem(qFromUtf8("Motrix"));
-    dlCombo->insertItem(qFromUtf8("IDM"));
-    dlCombo->insertItem(qFromUtf8("AB Download Manager"));
-    dlCombo->insertItem(qFromUtf8("BitComet"));
-    dlCombo->insertItem(qFromUtf8("cURL"));
+    comboAdd(dlCombo, qFromUtf8("Aria2 (RPC)"));
+    comboAdd(dlCombo, qFromUtf8("Motrix"));
+    comboAdd(dlCombo, qFromUtf8("IDM"));
+    comboAdd(dlCombo, qFromUtf8("AB Download Manager"));
+    comboAdd(dlCombo, qFromUtf8("BitComet"));
+    comboAdd(dlCombo, qFromUtf8("cURL"));
     QLabel* rpcLabel = new QLabel(qFromUtf8("RPC 地址："), dlBox);
     QLineEdit* rpcEdit = new QLineEdit(dlBox);
     rpcEdit->setText("http://127.0.0.1:6800/jsonrpc");

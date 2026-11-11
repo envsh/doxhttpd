@@ -23,7 +23,7 @@ class QTextEdit;
 class QLabel;
 class QLineEdit;
 class QPushButton;
-class QProcess;
+class QProcess34;
 class QCheckBox;
 class QComboBox;
 class QTimer;
@@ -287,13 +287,13 @@ private:
     QStringList subs;          /* 订阅 URL 列表 */
     V2NodeList nodes;
 
-    QProcess* subProc;
-    QProcess* dlProc;
-    QProcess* unzipProc;
-    QProcess* coreProc;
-    QProcess* latProc;
-    QProcess* testCoreProc;    /* 真连接测试临时核心 */
-    QProcess* testCurlProc;    /* 真连接测试 curl */
+    QProcess34* subProc;
+    QProcess34* dlProc;
+    QProcess34* unzipProc;
+    QProcess34* coreProc;
+    QProcess34* latProc;
+    QProcess34* testCoreProc;    /* 真连接测试临时核心 */
+    QProcess34* testCurlProc;    /* 真连接测试 curl */
     QByteArray subData;
     QByteArray dlErrData;      /* 核心下载 stderr（进度/错误） */
     QByteArray latErrData;     /* 延迟测试 stderr（curl -v trace） */
@@ -347,7 +347,7 @@ private:
     QPushButton* coreDlBtn;
     QComboBox* coreSelBox;
     QPushButton* redetectBtn;
-    QProcess* detectProc;
+    QProcess34* detectProc;
     QByteArray detectData;
 
     /* 内核选择（持久化） */
@@ -358,7 +358,7 @@ private:
     int      dlCoreKind;         /* 下载目标：0=v2ray 1=xray */
 
     /* 国家查询（离线 geoiplookup 队列） */
-    QProcess* geoProc;
+    QProcess34* geoProc;
     QByteArray geoData;
     V2IntList geoQueue;
     bool geoBusy;
@@ -368,7 +368,7 @@ private:
     QMap<QString, QString> geoCache;   /* ip -> "CC|中文名" */
 
     /* 端口/连通性测试（curl） */
-    QProcess* probeProc;
+    QProcess34* probeProc;
     int       probeMode;       /* 0=端口 1=gstatic */
     int       probeStage;      /* 0=SOCKS 1=HTTP */
     QString   probeSocksRes;
@@ -387,7 +387,7 @@ private:
     /* 实时流量（stats api 轮询 + access.log 请求数） */
     QLabel* trafficLabel;
     QTimer* trafficTimer;
-    QProcess* statsProc;
+    QProcess34* statsProc;
     int apiPort;
     long long trafficUpBase, trafficDownBase;
     long long trafficUpLast, trafficDownLast;

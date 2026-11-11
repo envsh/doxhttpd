@@ -47,9 +47,11 @@ static V2FlagState& v2FlagState() {
 
 /* BGRA → QPixmap（qlcomp emojiutil 同款处理） */
 static QPixmap v2BgraToPixmap(const unsigned char* bgra, int w, int h) {
-    QImage img(w, h, 32);
 #ifdef QT3_BUILD
+    QImage img(w, h, 32);
     img.setAlphaBuffer(true);
+#else
+    QImage img(w, h, QImage::Format_ARGB32);
 #endif
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
@@ -136,9 +138,16 @@ QPixmap v2FlagPixmap(const QString& cc, int height) {
     if (pm.isNull()) {
         pm = v2FlagBadge(cc, height);
     } else if (pm.height() != height) {
+#ifdef QT3_BUILD
         QImage img = pm.convertToImage().smoothScale(
             height * pm.width() / pm.height(), height);
         pm.convertFromImage(img);
+#else
+        QImage img = pm.toImage().scaled(
+            height * pm.width() / pm.height(), height,
+            Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        pm = QPixmap::fromImage(img);
+#endif
     }
     s.cache.insert(key, pm);
     return pm;

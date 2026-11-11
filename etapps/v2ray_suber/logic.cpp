@@ -1,4 +1,5 @@
 #include "compat34.h"
+#include "qprocess34.h"
 #include "compatcore34.h"
 #include "logic.h"
 #include "cJSON.h"
@@ -42,6 +43,11 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#ifdef QT3_BUILD
+#include <qtextstream.h>
+#else
+#include <QTextStream>
+#endif
 
 /* ── 固定版本号（锁定，不可升级） ── */
 #define V2CORE_VERSION      "v5.35.0"
@@ -131,7 +137,11 @@ static void v2ComboSetCurrent(QComboBox* c, int i) {
 /* 统计文本文件行数（access.log 请求数用） */
 static long long v2CountLines(const QString& path) {
     QFile f(path);
+#ifdef QT3_BUILD
     if (!f.open(IO_ReadOnly)) { return 0; }
+#else
+    if (!f.open(QIODevice::ReadOnly)) { return 0; }
+#endif
     long long n = 0;
     QTextStream ts(&f);
     while (!ts.atEnd()) {
@@ -351,7 +361,11 @@ static int extractLastPercent(const QString& s) {
         char buf[16];
         int n = 0;
         while (j >= 0 && n < 7) {
+#ifdef QT3_BUILD
             char c = s[j].latin1();
+#else
+            char c = s[j].toLatin1();
+#endif
             if ((c >= '0' && c <= '9') || c == '.') {
                 buf[n++] = c;
                 --j;
@@ -562,10 +576,17 @@ void V2RayLogic::ensureDirs() {
 #else
     home = QDir::homePath();
 #endif
+#ifdef QT3_BUILD
     mkdir(QString(home + "/.config").utf8().data(), 0755);
     mkdir(baseDir().utf8().data(), 0755);
     mkdir(coreDir().utf8().data(), 0755);
     mkdir(xrayDir().utf8().data(), 0755);
+#else
+    mkdir(qToUtf8(QString(home + "/.config")).data(), 0755);
+    mkdir(qToUtf8(baseDir()).data(), 0755);
+    mkdir(qToUtf8(coreDir()).data(), 0755);
+    mkdir(qToUtf8(xrayDir()).data(), 0755);
+#endif
 }
 
 bool V2RayLogic::coreInstalled() const {
@@ -715,9 +736,11 @@ static void v2DrawLine(QImage& img, int x0, int y0, int x1, int y1,
 
 /* 可用性图标：0=绿勾 1=红叉 2=灰线 */
 static QPixmap v2StatusIcon(int kind) {
-    QImage img(14, 14, 32);
 #ifdef QT3_BUILD
+    QImage img(14, 14, 32);
     img.setAlphaBuffer(true);
+#else
+    QImage img(14, 14, QImage::Format_ARGB32);
 #endif
     img.fill(0);
     QColor col(140, 140, 140);
@@ -797,11 +820,19 @@ void V2RayLogic::refreshNodeList() {
             for (int i = 0; i < (int)nodes.count(); ++i) {
                 const V2Node& n = nodes[i];
                 bool hit = false;
+#ifdef QT3_BUILD
                 hit = hit || n.name.find(f, false) >= 0;
                 hit = hit || n.country.find(f, false) >= 0;
                 hit = hit || n.countryName.find(f, false) >= 0;
                 hit = hit || n.addr.find(f, false) >= 0;
                 hit = hit || n.proto.find(f, false) >= 0;
+#else
+                hit = hit || n.name.indexOf(f, 0, Qt::CaseInsensitive) >= 0;
+                hit = hit || n.country.indexOf(f, 0, Qt::CaseInsensitive) >= 0;
+                hit = hit || n.countryName.indexOf(f, 0, Qt::CaseInsensitive) >= 0;
+                hit = hit || n.addr.indexOf(f, 0, Qt::CaseInsensitive) >= 0;
+                hit = hit || n.proto.indexOf(f, 0, Qt::CaseInsensitive) >= 0;
+#endif
                 if (hit) { fv.append(i); }
             }
             view = fv;
@@ -1467,7 +1498,7 @@ void V2RayLogic::onSaveAllOnQuit() {
 /* 退出时统一终止所有子进程（保留 core/runningLast 以便下次自动恢复） */
 void V2RayLogic::shutdownProcesses() {
     appQuitting = true;
-    QProcess* ps[] = { probeProc, coreProc, latProc, testCurlProc, testCoreProc,
+    QProcess34* ps[] = { probeProc, coreProc, latProc, testCurlProc, testCoreProc,
                        subProc, dlProc, unzipProc, detectProc, geoProc };
     int n = (int)(sizeof(ps) / sizeof(ps[0]));
     for (int i = 0; i < n; ++i) {
@@ -1554,9 +1585,9 @@ void V2RayLogic::detectSystemXray() {
         saveCoreSettings();
     }
     detectData.resize(0);
-    detectProc = new QProcess(this);
-    connect(detectProc, SIGNAL(readyReadStdout()), this, SLOT(onDetectOutput()));
-    connect(detectProc, SIGNAL(processExited()), this, SLOT(onDetectExited()));
+    detectProc = new QProcess34(this);
+    QProcess34::connectStdout(detectProc, this, SLOT(onDetectOutput()));
+    QProcess34::connectExited(detectProc, this, SLOT(onDetectExited()));
     detectProc->addArgument(found);
     detectProc->addArgument("version");
     detectProc->start();
@@ -1794,7 +1825,11 @@ void V2RayLogic::startNextGeo() {
         return;
     }
     geoCurIdx = geoQueue[0];
+#ifdef QT3_BUILD
     geoQueue.remove(geoQueue.at(0));
+#else
+    geoQueue.removeAt(0);
+#endif
     if (geoCurIdx < 0 || geoCurIdx >= (int)nodes.count()) {
         QTimer::singleShot(0, this, SLOT(startNextGeo()));
         return;
@@ -1811,9 +1846,9 @@ void V2RayLogic::startNextGeo() {
     }
     if (geoProc) { delete geoProc; geoProc = 0; }
     geoData.resize(0);
-    geoProc = new QProcess(this);
-    connect(geoProc, SIGNAL(readyReadStdout()), this, SLOT(onGeoOutput()));
-    connect(geoProc, SIGNAL(processExited()), this, SLOT(onGeoExited()));
+    geoProc = new QProcess34(this);
+    QProcess34::connectStdout(geoProc, this, SLOT(onGeoOutput()));
+    QProcess34::connectExited(geoProc, this, SLOT(onGeoExited()));
     geoProc->addArgument(geoToolPath);
     geoProc->addArgument(ip);
     geoProc->start();
@@ -1844,7 +1879,7 @@ void V2RayLogic::onGeoExited() {
             cc = cc.trimmed();
 #endif
             if (cc.length() == 2) {
-                cc = cc.upper();
+                cc = qToUpper(cc);
                 nodes[geoCurIdx].country = cc;
                 nodes[geoCurIdx].countryName = countryNameOf(cc);
                 nodes[geoCurIdx].geoSource = "geoip";
@@ -1937,8 +1972,8 @@ void V2RayLogic::probeStartPort(int which) {
         delete probeProc;
         probeProc = 0;
     }
-    probeProc = new QProcess(this);
-    connect(probeProc, SIGNAL(processExited()), this, SLOT(onProbeExited()));
+    probeProc = new QProcess34(this);
+    QProcess34::connectExited(probeProc, this, SLOT(onProbeExited()));
     probeProc->addArgument("curl");
     probeProc->addArgument("-s");
     probeProc->addArgument("-o");
@@ -1961,8 +1996,8 @@ void V2RayLogic::probeStartGstatic(int which) {
         delete probeProc;
         probeProc = 0;
     }
-    probeProc = new QProcess(this);
-    connect(probeProc, SIGNAL(processExited()), this, SLOT(onProbeExited()));
+    probeProc = new QProcess34(this);
+    QProcess34::connectExited(probeProc, this, SLOT(onProbeExited()));
     probeProc->addArgument("curl");
     probeProc->addArgument("-s");
     probeProc->addArgument("-S");
@@ -2501,17 +2536,21 @@ void V2RayLogic::onDelSubscription() {
     refreshNodeList();
     subMeta.remove(subs[idx]);
     saveSubMeta();
+#ifdef QT3_BUILD
     subs.remove(subs.at(idx));
+#else
+    subs.removeAt(idx);
+#endif
     saveSubscriptions();
     refreshSubList();
 }
 void V2RayLogic::startSubFetch(const QString& url) {
     if (subProc) { delete subProc; subProc = 0; }
     subData.resize(0);
-    subProc = new QProcess(this);
-    connect(subProc, SIGNAL(readyReadStdout()), this, SLOT(onSubOutput()));
-    connect(subProc, SIGNAL(readyReadStderr()), this, SLOT(onSubErrOutput()));
-    connect(subProc, SIGNAL(processExited()), this, SLOT(onSubFetched()));
+    subProc = new QProcess34(this);
+    QProcess34::connectStdout(subProc, this, SLOT(onSubOutput()));
+    QProcess34::connectStderr(subProc, this, SLOT(onSubErrOutput()));
+    QProcess34::connectExited(subProc, this, SLOT(onSubFetched()));
     subProc->addArgument("curl");
     subProc->addArgument("-SsL");
     subProc->addArgument("-f");                 /* HTTP >= 400 视为失败 */
@@ -3110,10 +3149,10 @@ void V2RayLogic::startCoreDownload() {
     dlProgressPct = -1;
     dlErrData.resize(0);
     if (dlProc) { delete dlProc; dlProc = 0; }
-    dlProc = new QProcess(this);
-    connect(dlProc, SIGNAL(readyReadStdout()), this, SLOT(onCoreDlOutput()));
-    connect(dlProc, SIGNAL(readyReadStderr()), this, SLOT(onCoreDlErrOutput()));
-    connect(dlProc, SIGNAL(processExited()), this, SLOT(onCoreDlDone()));
+    dlProc = new QProcess34(this);
+    QProcess34::connectStdout(dlProc, this, SLOT(onCoreDlOutput()));
+    QProcess34::connectStderr(dlProc, this, SLOT(onCoreDlErrOutput()));
+    QProcess34::connectExited(dlProc, this, SLOT(onCoreDlDone()));
     dlProc->addArgument("curl");
     dlProc->addArgument("-S");
     dlProc->addArgument("-#");
@@ -3203,8 +3242,8 @@ void V2RayLogic::onCoreDlDone() {
     appendLogWithPrefix(qFromUtf8("[核心下载]"), qFromUtf8("下载完成（进度 100%），正在解压..."));
     setCoreMessage(qFromUtf8("状态：正在解压安装…"));
     if (unzipProc) { delete unzipProc; unzipProc = 0; }
-    unzipProc = new QProcess(this);
-    connect(unzipProc, SIGNAL(processExited()), this, SLOT(onCoreUnzipDone()));
+    unzipProc = new QProcess34(this);
+    QProcess34::connectExited(unzipProc, this, SLOT(onCoreUnzipDone()));
     unzipProc->addArgument("unzip");
     unzipProc->addArgument("-o");
     unzipProc->addArgument(zipPath());
@@ -3300,8 +3339,8 @@ void V2RayLogic::onTrafficPoll() {
     if (apiPort <= 0) { return; }
     if (statsProc && statsProc->isRunning()) { return; }
     if (statsProc) { delete statsProc; }
-    statsProc = new QProcess(this);
-    connect(statsProc, SIGNAL(processExited()), this, SLOT(onStatsExited()));
+    statsProc = new QProcess34(this);
+    QProcess34::connectExited(statsProc, this, SLOT(onStatsExited()));
     QDir wd(coreWorkDir());
     statsProc->setWorkingDirectory(wd);
     statsProc->addArgument(coreBinaryPath());
@@ -3316,22 +3355,22 @@ static long long v2StatsSum(const QString& js, const char* suffix) {
     long long sum = 0;
     int pos = 0;
     while (true) {
-        int np = js.find("\"name\"", pos);
+        int np = sFindStr(js, "\"name\"", pos);
         if (np < 0) { break; }
         int nstart = np + 6;
         while (nstart < (int)js.length()
                && (js.at(nstart) == ':' || js.at(nstart).isSpace())) { ++nstart; }
         if (nstart >= (int)js.length() || js.at(nstart) != '"') { pos = nstart > np ? nstart : np + 6; continue; }
         ++nstart;
-        int nend = js.find('"', nstart);
+        int nend = sFind(js, '"', nstart);
         if (nend < 0) { break; }
         pos = nend + 1;
         QString name = js.mid(nstart, nend - nstart);
         if (!name.endsWith(suffix) || !name.startsWith("inbound>>>")
             || name.contains(">>>api>>>")) { continue; }
         /* name 后找最近的 "value": N 或 "value":"N"（Xray 数字 / v2ray 字符串） */
-        int vp = js.find("\"value\"", pos);
-        int nextName = js.find("\"name\"", pos);
+        int vp = sFindStr(js, "\"value\"", pos);
+        int nextName = sFindStr(js, "\"name\"", pos);
         if (vp < 0 || (nextName >= 0 && vp > nextName)) { continue; }
         int vstart = vp + 7;                 /* 跳过 "value" */
         while (vstart < (int)js.length()
@@ -3340,7 +3379,7 @@ static long long v2StatsSum(const QString& js, const char* suffix) {
         int vend;
         long long v;
         if (js.at(vstart) == '"') {
-            vend = js.find('"', vstart + 1);
+            vend = sFind(js, '"', vstart + 1);
             if (vend < 0) { break; }
             v = js.mid(vstart + 1, vend - vstart - 1).toLongLong();
         } else {
@@ -3465,10 +3504,10 @@ void V2RayLogic::startCoreAtIndex(int idxIn) {
     }
     coreStopRequested = false;
     if (coreProc) { delete coreProc; coreProc = 0; }
-    coreProc = new QProcess(this);
-    connect(coreProc, SIGNAL(readyReadStdout()), this, SLOT(onCoreOutput()));
-    connect(coreProc, SIGNAL(readyReadStderr()), this, SLOT(onCoreErrOutput()));
-    connect(coreProc, SIGNAL(processExited()), this, SLOT(onCoreExit()));
+    coreProc = new QProcess34(this);
+    QProcess34::connectStdout(coreProc, this, SLOT(onCoreOutput()));
+    QProcess34::connectStderr(coreProc, this, SLOT(onCoreErrOutput()));
+    QProcess34::connectExited(coreProc, this, SLOT(onCoreExit()));
     QDir wd(coreWorkDir());
     coreProc->setWorkingDirectory(wd);
     /* geo 资产目录环境变量（系统内核也生效，修复“绕过中国大陆”找不到 geo 文件） */
@@ -3645,7 +3684,11 @@ void V2RayLogic::startNextTest() {
     if (testCancel) { finishTest(); return; }
     if ((int)testQueue.count() <= 0) { finishTest(); return; }
     int idx = testQueue[0];
+#ifdef QT3_BUILD
     testQueue.remove(testQueue.at(0));
+#else
+    testQueue.removeAt(0);
+#endif
     if (idx < 0 || idx >= (int)nodes.count()) {
         QTimer::singleShot(0, this, SLOT(onContinueTest()));
         return;
@@ -3671,10 +3714,10 @@ void V2RayLogic::startNextTest() {
     latGotConnected = false;
     latErrData.resize(0);
     if (latProc) { delete latProc; latProc = 0; }
-    latProc = new QProcess(this);
-    connect(latProc, SIGNAL(readyReadStdout()), this, SLOT(onLatOutput()));
-    connect(latProc, SIGNAL(readyReadStderr()), this, SLOT(onLatErrOutput()));
-    connect(latProc, SIGNAL(processExited()), this, SLOT(onLatExited()));
+    latProc = new QProcess34(this);
+    QProcess34::connectStdout(latProc, this, SLOT(onLatOutput()));
+    QProcess34::connectStderr(latProc, this, SLOT(onLatErrOutput()));
+    QProcess34::connectExited(latProc, this, SLOT(onLatExited()));
     latProc->addArgument("curl");
     latProc->addArgument("-sSv");
     latProc->addArgument("--connect-timeout");
@@ -3794,7 +3837,7 @@ void V2RayLogic::startRealTest(int idx) {
     }
     writeUtf8File(coreWorkDir() + "/config_test.json", cfg);
     if (testCoreProc) { delete testCoreProc; testCoreProc = 0; }
-    testCoreProc = new QProcess(this);
+    testCoreProc = new QProcess34(this);
     QDir wd(coreWorkDir());
     testCoreProc->setWorkingDirectory(wd);
     testCoreProc->addArgument(coreBinaryPath());
@@ -3812,8 +3855,8 @@ void V2RayLogic::onRealCoreReady() {
     int idx = curLatIndex;
     if (idx < 0 || idx >= (int)nodes.count()) { startNextTest(); return; }
     if (testCurlProc) { delete testCurlProc; testCurlProc = 0; }
-    testCurlProc = new QProcess(this);
-    connect(testCurlProc, SIGNAL(processExited()), this, SLOT(onRealCurlExited()));
+    testCurlProc = new QProcess34(this);
+    QProcess34::connectExited(testCurlProc, this, SLOT(onRealCurlExited()));
     testCurlProc->addArgument("curl");
     testCurlProc->addArgument("-s");
     testCurlProc->addArgument("-o");

@@ -9,6 +9,15 @@
 #include <qgroupbox.h>
 #include <qlayout.h>
 
+/* Qt3 insertItem / Qt4 addItem 差异封装 */
+static void comboAdd(QComboBox* c, const QString& s) {
+#ifdef QT3_BUILD
+    c->insertItem(s);
+#else
+    c->addItem(s);
+#endif
+}
+
 extern "C"
 QWidget* createHashCalcMainWindow(void* parent) {
     QWidget* w = new QWidget((QWidget*)parent);
@@ -36,11 +45,11 @@ QWidget* createHashCalcMainWindow(void* parent) {
     QHBoxLayout* optLayout = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     QLabel* algoLabel = new QLabel(qFromUtf8("算法："), w);
     QComboBox* algoCombo = new QComboBox(w);
-    algoCombo->insertItem(qFromUtf8("MD5"));
-    algoCombo->insertItem(qFromUtf8("SHA1"));
-    algoCombo->insertItem(qFromUtf8("SHA256"));
-    algoCombo->insertItem(qFromUtf8("SHA512"));
-    algoCombo->insertItem(qFromUtf8("Base64"));
+    comboAdd(algoCombo, qFromUtf8("MD5"));
+    comboAdd(algoCombo, qFromUtf8("SHA1"));
+    comboAdd(algoCombo, qFromUtf8("SHA256"));
+    comboAdd(algoCombo, qFromUtf8("SHA512"));
+    comboAdd(algoCombo, qFromUtf8("Base64"));
     optLayout->addWidget(algoLabel);
     optLayout->addWidget(algoCombo);
     optLayout->addStretch(1);

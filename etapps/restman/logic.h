@@ -18,7 +18,7 @@ class QLabel;
 class QComboBox;
 class QLineEdit;
 class QPushButton;
-class QProcess;
+class QProcess34;
 
 /* 请求快照：收藏/历史共用的完整参数 */
 struct RestManSnap {
@@ -95,7 +95,7 @@ private:
     RestManSnap bmArr[RM_BOOKMARK_CAP];
     int bmCount;
 
-    QProcess* reqProc;
+    QProcess34* reqProc;
     QByteArray reqStdout;
     QByteArray reqStderr;
     QTime reqTime;

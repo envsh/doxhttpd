@@ -8,6 +8,15 @@
 #include <qgroupbox.h>
 #include <qlayout.h>
 
+/* Qt3 insertItem / Qt4 addItem 差异封装 */
+static void comboAdd(QComboBox* c, const QString& s) {
+#ifdef QT3_BUILD
+    c->insertItem(s);
+#else
+    c->addItem(s);
+#endif
+}
+
 extern "C"
 QWidget* createFmtCodecMainWindow(void* parent) {
     QWidget* w = new QWidget((QWidget*)parent);
@@ -24,10 +33,10 @@ QWidget* createFmtCodecMainWindow(void* parent) {
     QHBoxLayout* topLayout = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     QLabel* typeLabel = new QLabel(qFromUtf8("类型："), w);
     QComboBox* typeCombo = new QComboBox(w);
-    typeCombo->insertItem(qFromUtf8("JSON"));
-    typeCombo->insertItem(qFromUtf8("XML"));
-    typeCombo->insertItem(qFromUtf8("YAML"));
-    typeCombo->insertItem(qFromUtf8("TOML"));
+    comboAdd(typeCombo, qFromUtf8("JSON"));
+    comboAdd(typeCombo, qFromUtf8("XML"));
+    comboAdd(typeCombo, qFromUtf8("YAML"));
+    comboAdd(typeCombo, qFromUtf8("TOML"));
     topLayout->addWidget(typeLabel);
     topLayout->addWidget(typeCombo);
     topLayout->addStretch(1);

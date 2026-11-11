@@ -11,6 +11,15 @@
 #include <qlayout.h>
 #include <qcombobox.h>
 
+/* Qt3 insertItem / Qt4 addItem 差异封装 */
+static void rmComboAdd(QComboBox* c, const QString& s) {
+#ifdef QT3_BUILD
+    c->insertItem(s);
+#else
+    c->addItem(s);
+#endif
+}
+
 extern "C"
 QWidget* createRestmanMainWindow(void* parent) {
     QWidget* w = new QWidget((QWidget*)parent);
@@ -27,13 +36,13 @@ QWidget* createRestmanMainWindow(void* parent) {
     /* ── 顶部请求栏 ── */
     QHBoxLayout* reqRow = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
     QComboBox* methodBox = new QComboBox(w);
-    methodBox->insertItem("GET");
-    methodBox->insertItem("POST");
-    methodBox->insertItem("PUT");
-    methodBox->insertItem("PATCH");
-    methodBox->insertItem("DELETE");
-    methodBox->insertItem("HEAD");
-    methodBox->insertItem("OPTIONS");
+    rmComboAdd(methodBox, "GET");
+    rmComboAdd(methodBox, "POST");
+    rmComboAdd(methodBox, "PUT");
+    rmComboAdd(methodBox, "PATCH");
+    rmComboAdd(methodBox, "DELETE");
+    rmComboAdd(methodBox, "HEAD");
+    rmComboAdd(methodBox, "OPTIONS");
     reqRow->addWidget(methodBox);
     QLineEdit* urlEdit = new QLineEdit(w);
     urlEdit->setMinimumWidth(320);
@@ -115,9 +124,9 @@ QWidget* createRestmanMainWindow(void* parent) {
     QVBoxLayout* bodyLayout = (QVBoxLayout*)qNewBoxLayout(bodyPage, QBoxLayout::TopToBottom, 4, 2);
     QHBoxLayout* bodyTypeRow = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 2, 2);
     QComboBox* bodyTypeBox = new QComboBox(bodyPage);
-    bodyTypeBox->insertItem(qFromUtf8("无"));
-    bodyTypeBox->insertItem(qFromUtf8("原始(raw)"));
-    bodyTypeBox->insertItem(qFromUtf8("表单(urlencoded)"));
+    rmComboAdd(bodyTypeBox, qFromUtf8("无"));
+    rmComboAdd(bodyTypeBox, qFromUtf8("原始(raw)"));
+    rmComboAdd(bodyTypeBox, qFromUtf8("表单(urlencoded)"));
     bodyTypeRow->addWidget(bodyTypeBox);
     bodyTypeRow->addStretch(1);
     bodyLayout->addLayout(bodyTypeRow);
@@ -134,8 +143,8 @@ QWidget* createRestmanMainWindow(void* parent) {
     QVBoxLayout* authLayout = (QVBoxLayout*)qNewBoxLayout(authPage, QBoxLayout::TopToBottom, 4, 2);
     QHBoxLayout* authTypeRow = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 2, 2);
     QComboBox* authTypeBox = new QComboBox(authPage);
-    authTypeBox->insertItem(qFromUtf8("无"));
-    authTypeBox->insertItem(qFromUtf8("Basic"));
+    rmComboAdd(authTypeBox, qFromUtf8("无"));
+    rmComboAdd(authTypeBox, qFromUtf8("Basic"));
     authTypeRow->addWidget(authTypeBox);
     authTypeRow->addStretch(1);
     authLayout->addLayout(authTypeRow);

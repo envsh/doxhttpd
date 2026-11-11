@@ -6,7 +6,19 @@
 #include <qradiobutton.h>
 #include <qgroupbox.h>
 #include <qbuttongroup.h>
+#ifdef QT3_BUILD
+#include <qbutton.h>
+#endif
 #include <qlayout.h>
+
+/* Qt3 QButtonGroup::insert / Qt4 addButton 差异封装 */
+static void groupAdd(QButtonGroup* g, QWidget* b) {
+#ifdef QT3_BUILD
+    g->insert((QButton*)b);
+#else
+    g->addButton((QAbstractButton*)b);
+#endif
+}
 
 extern "C"
 QWidget* createMirrorMgrMainWindow(void* parent) {
@@ -27,9 +39,9 @@ QWidget* createMirrorMgrMainWindow(void* parent) {
     QRadioButton* pipBtn = new QRadioButton(qFromUtf8("pip"), toolBox);
     QRadioButton* npmBtn = new QRadioButton(qFromUtf8("npm"), toolBox);
     QRadioButton* goBtn = new QRadioButton(qFromUtf8("go"), toolBox);
-    toolGroup->insert(pipBtn);
-    toolGroup->insert(npmBtn);
-    toolGroup->insert(goBtn);
+    groupAdd(toolGroup, pipBtn);
+    groupAdd(toolGroup, npmBtn);
+    groupAdd(toolGroup, goBtn);
     pipBtn->setChecked(true);
     toolLayout->addWidget(pipBtn);
     toolLayout->addWidget(npmBtn);
@@ -44,10 +56,10 @@ QWidget* createMirrorMgrMainWindow(void* parent) {
     QRadioButton* aliyunBtn = new QRadioButton(qFromUtf8("阿里云镜像"), mirrorBox);
     QRadioButton* tsinghuaBtn = new QRadioButton(qFromUtf8("清华大学镜像"), mirrorBox);
     QRadioButton* ustcBtn = new QRadioButton(qFromUtf8("中科大镜像"), mirrorBox);
-    mirrorGroup->insert(officialBtn);
-    mirrorGroup->insert(aliyunBtn);
-    mirrorGroup->insert(tsinghuaBtn);
-    mirrorGroup->insert(ustcBtn);
+    groupAdd(mirrorGroup, officialBtn);
+    groupAdd(mirrorGroup, aliyunBtn);
+    groupAdd(mirrorGroup, tsinghuaBtn);
+    groupAdd(mirrorGroup, ustcBtn);
     officialBtn->setChecked(true);
     mirrorLayout->addWidget(officialBtn);
     mirrorLayout->addWidget(aliyunBtn);
