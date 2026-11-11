@@ -49,13 +49,63 @@
 #include <QTextStream>
 #endif
 
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
+
+/* Xray 内核版本按运行系统选择：macOS 官方包的 minos 不同（11/12/13），
+ * 用 sysctl 取系统主版本，避免 macOS 11 上跑 v26（要求 minos 13.0）起不来 */
+#if defined(__APPLE__)
+static int v2MacOsMajor() {
+    char buf[64];
+    size_t n = sizeof(buf);
+    if (sysctlbyname("kern.osproductversion", buf, &n, 0, 0) == 0 && n > 0) {
+        return atoi(buf);
+    }
+    return 0;
+}
+#endif
+static QString v2XcoreVersion() {
+#if defined(__APPLE__)
+    int m = v2MacOsMajor();
+    if (m >= 13) { return QString("v26.11.9"); }
+    if (m >= 12) { return QString("v26.5.9"); }
+    return QString("v25.6.8");              /* minos 11.0，兼容 Big Sur */
+#else
+    return QString("v26.11.9");
+#endif
+}
+static QString v2XcoreUrl(bool proxy) {
+    return QString(proxy ? "https://gh-proxy.com/" : "")
+        + "https://github.com/XTLS/Xray-core/releases/download/"
+        + v2XcoreVersion() + "/";
+}
+/* 内置 Xray 是否与当前系统需要的版本不符（mac 上旧包 minos 过高会起不来）
+ * 返回 true 时 why 里是给用户的提示；仅对“内置 Xray”生效 */
+static bool v2XcoreStale(QString& why) {
+    QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+    QString rec = st.valueStr("core/xrayCoreVer", "");
+    QString want = v2XcoreVersion();
+    if (rec == want) { return false; }
+#if defined(__APPLE__)
+    /* mac：旧安装没有记录版本，二进制可能是不匹配的（如 Linux/v26 包），一律提示重下 */
+    why = rec.isEmpty()
+        ? (qFromUtf8("内置内核版本未知（当前系统需要 ") + want + qFromUtf8("），请重新下载核心"))
+        : (qFromUtf8("内置内核版本 ") + rec + qFromUtf8(" 与当前系统需要的 ") + want
+           + qFromUtf8(" 不一致，请重新下载核心"));
+    return true;
+#else
+    if (rec.isEmpty()) { return false; }   /* 非 mac：旧安装不阻塞 */
+    why = qFromUtf8("内置内核版本 ") + rec + qFromUtf8(" 与期望的 ") + want
+        + qFromUtf8(" 不一致，请重新下载核心");
+    return true;
+#endif
+}
+
 /* ── 固定版本号（锁定，不可升级） ── */
 #define V2CORE_VERSION      "v5.35.0"
 #define V2CORE_GH_PREFIX    "https://gh-proxy.com/https://github.com/v2fly/v2ray-core/releases/download/v5.35.0/"
 #define V2CORE_GH_DIRECT    "https://github.com/v2fly/v2ray-core/releases/download/v5.35.0/"
-#define XCORE_VERSION       "v26.11.9"
-#define XCORE_GH_PREFIX     "https://gh-proxy.com/https://github.com/XTLS/Xray-core/releases/download/v26.11.9/"
-#define XCORE_GH_DIRECT     "https://github.com/XTLS/Xray-core/releases/download/v26.11.9/"
 
 /* ── Qt3/Qt4 小工具 ── */
 static int sFind(const QString& s, char c, int from) {
@@ -1667,7 +1717,7 @@ QString V2RayLogic::coreDisplayName() const {
         return qFromUtf8("Xray ") + (systemXrayVersion.isEmpty()
             ? qFromUtf8("(系统)") : systemXrayVersion) + qFromUtf8("（系统）");
     }
-    return qFromUtf8("Xray ") + qFromUtf8(XCORE_VERSION) + qFromUtf8("（内置）");
+    return qFromUtf8("Xray ") + v2XcoreVersion() + qFromUtf8("（内置）");
 }
 
 void V2RayLogic::refreshCoreCombo() {
@@ -1682,13 +1732,13 @@ void V2RayLogic::refreshCoreCombo() {
     coreSelBox->clear();
     coreSelBox->insertItem(qFromUtf8("v2ray-core（内置 ") + qFromUtf8(V2CORE_VERSION) + qFromUtf8("）"));
     coreSelBox->insertItem(sysText);
-    coreSelBox->insertItem(qFromUtf8("Xray（内置 ") + qFromUtf8(XCORE_VERSION) + qFromUtf8("）"));
+    coreSelBox->insertItem(qFromUtf8("Xray（内置 ") + v2XcoreVersion() + qFromUtf8("）"));
     coreSelBox->setCurrentItem(idx);
 #else
     coreSelBox->clear();
     coreSelBox->addItem(qFromUtf8("v2ray-core（内置 ") + qFromUtf8(V2CORE_VERSION) + qFromUtf8("）"));
     coreSelBox->addItem(sysText);
-    coreSelBox->addItem(qFromUtf8("Xray（内置 ") + qFromUtf8(XCORE_VERSION) + qFromUtf8("）"));
+    coreSelBox->addItem(qFromUtf8("Xray（内置 ") + v2XcoreVersion() + qFromUtf8("）"));
     coreSelBox->setCurrentIndex(idx);
 #endif
 }
@@ -3163,9 +3213,10 @@ void V2RayLogic::onDownloadCore() {
 }
 
 void V2RayLogic::startCoreDownload() {
-    const char* proxy = (dlCoreKind == 1) ? XCORE_GH_PREFIX : V2CORE_GH_PREFIX;
-    const char* direct = (dlCoreKind == 1) ? XCORE_GH_DIRECT : V2CORE_GH_DIRECT;
-    QString url = QString(dlTry == 0 ? proxy : direct) + dlZipName;
+    QString base = (dlCoreKind == 1) ? v2XcoreUrl(dlTry == 0)
+                                           : qFromUtf8(dlTry == 0 ? V2CORE_GH_PREFIX
+                                                                         : V2CORE_GH_DIRECT);
+    QString url = base + dlZipName;
     ensureDirs();
     coreDlBusy = true;
     setCoreDownloadBusy(true);
@@ -3287,6 +3338,11 @@ void V2RayLogic::onCoreUnzipDone() {
     delete unzipProc;
     unzipProc = 0;
     chmod(QFile::encodeName(coreBinaryPath()).data(), 0755);
+    if (dlCoreKind == 1) {
+        QSettings34 stv(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+        stv.setValue("core/xrayCoreVer", v2XcoreVersion());
+        stv.sync();
+    }
     QFile::remove(zipPath());
     refreshCoreState();
     if (!unzipOk && !coreInstalled()) {
@@ -3459,6 +3515,15 @@ void V2RayLogic::startCoreAtIndex(int idxIn) {
         setCoreMessage(qFromUtf8("状态：当前内核不可用，请下载安装或切换"));
         return;
     }
+    /* 内置内核版本与当前系统期望不一致（例如系统升级/切换到旧 mac）：提示重下 */
+    if (coreKind == CoreXray && !coreSourceSystem) {
+        QString staleWhy;
+        if (v2XcoreStale(staleWhy)) {
+            appendLogWithPrefix(qFromUtf8("[核心]"), staleWhy);
+            setCoreMessage(qFromUtf8("状态：") + staleWhy);
+            return;
+        }
+    }
     if (coreProc && coreProc->isRunning()) { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心已在运行")); return; }
     /* 启动核心前终止可能仍在运行的端口探针（监听端口将变化） */
     if (probeProc && probeProc->isRunning()) { probeProc->tryTerminate(); }
@@ -3564,7 +3629,23 @@ void V2RayLogic::startCoreAtIndex(int idxIn) {
     coreProc->addArgument("run");
     coreProc->addArgument("-c");
     coreProc->addArgument(coreConfigPath());
-    coreProc->start();
+    if (!coreProc->start()) {
+        appendLogWithPrefix(qFromUtf8("[核心]"),
+            qFromUtf8("核心启动失败：") + coreBinaryPath()
+            + qFromUtf8("（无法执行：可能是其它平台的包或文件损坏）"));
+        setCoreMessage(qFromUtf8("状态：启动失败（核心无法执行，请重新下载核心）"));
+        coreProc->deleteLater();
+        coreProc = 0;
+        {
+            QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+            st.setValue("core/runningLast", 0);
+            st.setValue("core/lastPid", 0);
+            st.sync();
+        }
+        refreshCoreState();
+        refreshActiveNodeLabel();
+        return;
+    }
     QTimer::singleShot(600, this, SLOT(checkCoreStarted()));
     resetTrafficCounters();
     startTrafficPoll();
@@ -3932,6 +4013,15 @@ void V2RayLogic::startRealTest(int idx) {
         }
     }
     writeUtf8File(coreWorkDir() + "/config_test.json", cfg);
+    if (coreKind == CoreXray && !coreSourceSystem) {
+        QString staleWhy;
+        if (v2XcoreStale(staleWhy)) {
+            /* 内置 Xray 版本与系统不匹配：不再逐个节点起临时核心，直接提示一次并结束 */
+            appendLogWithPrefix(qFromUtf8("[测速]"), staleWhy);
+            finishTest();
+            return;
+        }
+    }
     if (testCoreProc) { delete testCoreProc; testCoreProc = 0; }
     testCoreProc = new QProcess34(this);
     QProcess34::connectStdout(testCoreProc, this, SLOT(onTestCoreOutput()));
@@ -3944,7 +4034,8 @@ void V2RayLogic::startRealTest(int idx) {
     testCoreProc->addArgument(coreWorkDir() + "/config_test.json");
     if (!testCoreProc->start()) {
         appendLogWithPrefix(qFromUtf8("[测速]"),
-            qFromUtf8("临时核心启动失败：") + coreBinaryPath());
+            qFromUtf8("临时核心启动失败：") + coreBinaryPath()
+            + qFromUtf8("（无法执行：可能是其它平台的包或文件损坏）"));
         nodes[idx].realMs = -1;
         nodes[idx].testedAt = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
         ++testDone;
