@@ -197,6 +197,9 @@ private slots:
     void onContinueTest();
     void onRealCoreReady();
     void onRealCurlExited();
+    void onTestCoreOutput();
+    void onTestCoreErrOutput();
+    void waitTestCoreReady();
     void onDetectOutput();
     void onDetectExited();
     void onGeoOutput();
@@ -306,6 +309,7 @@ private:
     bool testCancel;
     int  testDone;
     int  testTotal;
+    int  testCoreWaitTries;   /* 临时核心就绪轮询计数（100ms/次） */
     int  testPort;             /* 真连接测试临时 SOCKS 端口 */
     QString testUrl;           /* 默认 https://www.gstatic.com/generate_204 */
     QTime latTime;

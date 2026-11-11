@@ -407,6 +407,7 @@ V2RayLogic::V2RayLogic(QObject* parent)
     testCancel = false;
     testDone = 0;
     testTotal = 0;
+    testCoreWaitTries = 0;
     testPort = 0;
     testUrl = "https://www.gstatic.com/generate_204";
     subEdit = 0;
@@ -3691,6 +3692,10 @@ void V2RayLogic::startTestBatch(bool real, bool all) {
     appendLogWithPrefix(qFromUtf8("[测速]"),
         (real ? qFromUtf8("开始真连接批量测试，共 ") : qFromUtf8("开始 TCP 批量测试，共 "))
         + QString::number(testTotal) + qFromUtf8(" 个节点"));
+    if (real) {
+        appendLogWithPrefix(qFromUtf8("[测速]"),
+            qFromUtf8("核心：") + coreBinaryPath());
+    }
     startNextTest();
 }
 
@@ -3836,6 +3841,21 @@ int V2RayLogic::pickFreePort() {
     return port;
 }
 
+/* 临时核心就绪探测：127.0.0.1:port 是否已可连（loopback 拒绝立即返回） */
+static bool v2PortReady(int port) {
+    if (port <= 0) { return false; }
+    int s = socket(AF_INET, SOCK_STREAM, 0);
+    if (s < 0) { return false; }
+    struct sockaddr_in a;
+    memset(&a, 0, sizeof(a));
+    a.sin_family = AF_INET;
+    a.sin_port = htons((unsigned short)port);
+    a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    bool ok = (::connect(s, (struct sockaddr*)&a, sizeof(a)) == 0);
+    close(s);
+    return ok;
+}
+
 void V2RayLogic::startRealTest(int idx) {
     curLatIndex = idx;
     testPort = pickFreePort();
@@ -3852,16 +3872,76 @@ void V2RayLogic::startRealTest(int idx) {
     writeUtf8File(coreWorkDir() + "/config_test.json", cfg);
     if (testCoreProc) { delete testCoreProc; testCoreProc = 0; }
     testCoreProc = new QProcess34(this);
+    QProcess34::connectStdout(testCoreProc, this, SLOT(onTestCoreOutput()));
+    QProcess34::connectStderr(testCoreProc, this, SLOT(onTestCoreErrOutput()));
     QDir wd(coreWorkDir());
     testCoreProc->setWorkingDirectory(wd);
     testCoreProc->addArgument(coreBinaryPath());
     testCoreProc->addArgument("run");
     testCoreProc->addArgument("-c");
     testCoreProc->addArgument(coreWorkDir() + "/config_test.json");
-    testCoreProc->start();
+    if (!testCoreProc->start()) {
+        appendLogWithPrefix(qFromUtf8("[测速]"),
+            qFromUtf8("临时核心启动失败：") + coreBinaryPath());
+        nodes[idx].realMs = -1;
+        nodes[idx].testedAt = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+        ++testDone;
+        refreshNodeList();
+        saveNodes();
+        QTimer::singleShot(0, this, SLOT(onContinueTest()));
+        return;
+    }
     appendLogWithPrefix(qFromUtf8("[测速]"),
         qFromUtf8("真连接测试中：") + nodes[idx].name);
-    QTimer::singleShot(900, this, SLOT(onRealCoreReady()));
+    testCoreWaitTries = 0;
+    QTimer::singleShot(100, this, SLOT(waitTestCoreReady()));
+}
+
+void V2RayLogic::onTestCoreOutput() {
+    if (!testCoreProc) { return; }
+#ifdef QT3_BUILD
+    QByteArray d = testCoreProc->readStdout();
+#else
+    QByteArray d = testCoreProc->readAllStandardOutput();
+#endif
+    if ((int)d.size() > 0) {
+        appendLogWithPrefix(qFromUtf8("[测速] 核心"), qFromUtf8(d.data(), (int)d.size()));
+    }
+}
+
+void V2RayLogic::onTestCoreErrOutput() {
+    if (!testCoreProc) { return; }
+#ifdef QT3_BUILD
+    QByteArray d = testCoreProc->readStderr();
+#else
+    QByteArray d = testCoreProc->readAllStandardError();
+#endif
+    if ((int)d.size() > 0) {
+        appendLogWithPrefix(qFromUtf8("[测速] 核心"), qFromUtf8(d.data(), (int)d.size()));
+    }
+}
+
+/* 等临时核心真正监听 testPort（最多 3s），就绪后再跑 curl */
+void V2RayLogic::waitTestCoreReady() {
+    if (testCancel) { finishTest(); return; }
+    if (v2PortReady(testPort)) { onRealCoreReady(); return; }
+    if (++testCoreWaitTries > 30) {
+        appendLogWithPrefix(qFromUtf8("[测速]"),
+            qFromUtf8("临时核心 3 秒内未监听 127.0.0.1:")
+            + QString::number(testPort) + qFromUtf8("，跳过该节点"));
+        if (testCoreProc) { testCoreProc->tryTerminate(); testCoreProc->deleteLater(); testCoreProc = 0; }
+        int idx = curLatIndex;
+        if (idx >= 0 && idx < (int)nodes.count()) {
+            nodes[idx].realMs = -1;
+            nodes[idx].testedAt = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss");
+        }
+        ++testDone;
+        refreshNodeList();
+        saveNodes();
+        QTimer::singleShot(0, this, SLOT(onContinueTest()));
+        return;
+    }
+    QTimer::singleShot(100, this, SLOT(waitTestCoreReady()));
 }
 
 void V2RayLogic::onRealCoreReady() {
@@ -3872,7 +3952,7 @@ void V2RayLogic::onRealCoreReady() {
     testCurlProc = new QProcess34(this);
     QProcess34::connectExited(testCurlProc, this, SLOT(onRealCurlExited()));
     testCurlProc->addArgument("curl");
-    testCurlProc->addArgument("-s");
+    testCurlProc->addArgument("-sS");
     testCurlProc->addArgument("-o");
     testCurlProc->addArgument("/dev/null");
     testCurlProc->addArgument("-m");
@@ -3889,9 +3969,14 @@ void V2RayLogic::onRealCurlExited() {
     if (!testCurlProc) { return; }
 #ifdef QT3_BUILD
     QByteArray out = testCurlProc->readStdout();
+    QByteArray errOut = testCurlProc->readStderr();
+    int exitCode = testCurlProc->normalExit() ? testCurlProc->exitStatus() : -1;
     bool ok = testCurlProc->normalExit();
 #else
     QByteArray out = testCurlProc->readAllStandardOutput();
+    QByteArray errOut = testCurlProc->readAllStandardError();
+    int exitCode = (testCurlProc->exitStatus() == QProcess::NormalExit)
+        ? testCurlProc->exitCode() : -1;
     bool ok = (testCurlProc->exitStatus() == QProcess::NormalExit)
         && (testCurlProc->exitCode() == 0);
 #endif
@@ -3899,6 +3984,7 @@ void V2RayLogic::onRealCurlExited() {
     testCurlProc = 0;
     int idx = curLatIndex;
     int ms = -1;
+    QString httpCode;
     if (ok) {
         QString s = qFromUtf8(out.data(), (int)out.size());
 #ifdef QT3_BUILD
@@ -3909,6 +3995,7 @@ void V2RayLogic::onRealCurlExited() {
         /* 格式："204 0.345678"（ucode time_total）；Qt3 取不到 curl exit code，用状态码判定 */
         int sp = sFind(s, ' ', 0);
         QString code = (sp > 0) ? s.left(sp) : s;
+        httpCode = code;
         QString secStr = (sp > 0) ? s.mid(sp + 1) : QString();
         bool numOk = false;
         double sec = secStr.toDouble(&numOk);
@@ -3923,6 +4010,23 @@ void V2RayLogic::onRealCurlExited() {
         appendLogWithPrefix(qFromUtf8("[测速]"),
             nodes[idx].name + qFromUtf8("：真连接 ")
             + (ms < 0 ? qFromUtf8("—") : QString::number(ms) + "ms"));
+    }
+    if (ms < 0 && idx >= 0 && idx < (int)nodes.count()) {
+        QString why;
+        if (httpCode.isEmpty()) { why = qFromUtf8("无输出"); }
+        else if (httpCode == "000") { why = qFromUtf8("未拿到 HTTP 码（连接失败）"); }
+        else { why = qFromUtf8("HTTP ") + httpCode; }
+        QString es = qFromUtf8(errOut.data(), (int)errOut.size());
+#ifdef QT3_BUILD
+        es = es.stripWhiteSpace();
+#else
+        es = es.trimmed();
+#endif
+        if (es.length() > 120) { es = es.left(120); }
+        appendLogWithPrefix(qFromUtf8("[测速]"),
+            nodes[idx].name + qFromUtf8("：真连接失败（curl 退出码 ")
+            + QString::number(exitCode) + qFromUtf8("，") + why
+            + (es.isEmpty() ? QString() : qFromUtf8("；") + es) + qFromUtf8("）"));
     }
     if (testCoreProc) { testCoreProc->tryTerminate(); testCoreProc->deleteLater(); testCoreProc = 0; }
     ++testDone;
@@ -3942,6 +4046,7 @@ void V2RayLogic::finishTest() {
     int total = testTotal;
     testDone = 0;
     testTotal = 0;
+    testCoreWaitTries = 0;
     curLatIndex = -1;
     latBusy = false;
     refreshNodeList();
