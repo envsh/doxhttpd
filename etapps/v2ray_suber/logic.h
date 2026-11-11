@@ -261,7 +261,8 @@ private:
     void applyCountryFromName(V2Node& n) const;
     QString countryNameOf(const QString& cc) const;
     void startGeoLookup(bool all);
-    bool geoipDatReady();                       /* 懒加载内核自带 geoip.dat */
+    void geoipDatProbe();                       /* 启动只探测 geoip.dat 是否存在（不解析） */
+    bool geoipDatReady();                       /* 首次查询时才加载（优先读缓存） */
     bool geoipDatLookup(const QString& ip, QString& cc) const;
     void loadGeoCache();
     void saveGeoCache();

@@ -19,6 +19,10 @@ static const char* v2BytesPtr(const QByteArray& b) {
 
 #include <vector>
 #include <algorithm>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <string.h>
 #ifdef QT3_BUILD
 #include <qpainter.h>
 #include <qpen.h>
@@ -613,8 +617,8 @@ void V2RayLogic::setWidgets(QLineEdit* subEdit_, V2Table* subList_, V2Table* nod
     }
     refreshCoreState();
     appendLog(qFromUtf8("V2Ray 订阅管理器已就绪（核心版本固定 ") + qFromUtf8(V2CORE_VERSION) + qFromUtf8("）"));
-    /* 启动即报告 geoip.dat 可用性：成功/未找到/解析失败都会有一条日志 */
-    geoipDatReady();
+    /* 启动只探测 geoip.dat 是否存在（不解析，避免拖慢启动） */
+    geoipDatProbe();
 }
 
 QString V2RayLogic::baseDir() const {
@@ -1823,14 +1827,19 @@ void V2RayLogic::onCoreKindChanged(int index) {
     appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("已切换内核：") + coreDisplayName());
 }
 
-/* ── geoip.dat 离线查询（nanopb 流式解码 + 区间二分，不依赖系统 geoiplookup） ── */
-struct V2Geo4Rec { unsigned int lo; unsigned int hi; QString cc; };
-struct V2Geo6Rec { quint64 l1; quint64 l2; quint64 h1; quint64 h2; QString cc; };
+/* ── geoip.dat 离线查询（nanopb 流式解码 + 区间二分，不依赖系统 geoiplookup） ──
+ * 启动只探测文件（geoipDatProbe），解析推迟到首次查询；解析结果写二进制缓存，
+ * 下次直接读缓存（毫秒级）。区间表为 POD，处理 60 万条 CIDR 时避免 QString 开销。 */
+struct V2Geo4Rec { unsigned int lo; unsigned int hi; unsigned int cc; };
+struct V2Geo6Rec { quint64 l1; quint64 l2; quint64 h1; quint64 h2; unsigned int cc; };
 static std::vector<V2Geo4Rec> g_geo4;
 static std::vector<V2Geo6Rec> g_geo6;
+static std::vector<QString> g_geoCC;      /* cc 索引表（~200 项） */
 static bool g_geoLoaded = false;
 static bool g_geoWarned = false;
-static QString g_geoPath;          /* 实际加载的 geoip.dat 路径 */
+static QString g_geoPath;                 /* geoip.dat 路径 */
+static QString g_geoCachePath;            /* geoip.idx 缓存路径 */
+static bool g_geo6Sorted = false;         /* v6 区间是否已排序（懒排序） */
 
 static bool v2Geo4Less(const V2Geo4Rec& a, const V2Geo4Rec& b) { return a.lo < b.lo; }
 static bool v2Geo6Less(const V2Geo6Rec& a, const V2Geo6Rec& b) {
@@ -1838,25 +1847,38 @@ static bool v2Geo6Less(const V2Geo6Rec& a, const V2Geo6Rec& b) {
     return a.l2 < b.l2;
 }
 
-/* CIDR 子消息回调：ip/prefix 为静态字段，直接生成区间 */
+/* 国家码去重（线性查找即可，国家数仅两百级） */
+static unsigned int v2GeoCcIndex(const char* cc) {
+    for (unsigned int i = 0; i < (unsigned int)g_geoCC.size(); ++i) {
+        if (g_geoCC[i] == QString::fromLatin1(cc)) { return i; }
+    }
+    g_geoCC.push_back(QString::fromLatin1(cc));
+    return (unsigned int)g_geoCC.size() - 1;
+}
+
+struct V2GeoEntryCtx { geoip_GeoIP* g; unsigned int cc; bool haveCc; };
+
+/* CIDR 子消息回调：直接生成 POD 区间，不做字符串操作 */
 static bool v2GeoCidrCb(pb_istream_t* stream, const pb_field_iter_t*, void** arg) {
-    geoip_GeoIP* g = (geoip_GeoIP*)(*arg);
+    V2GeoEntryCtx* ctx = (V2GeoEntryCtx*)(*arg);
+    if (!ctx->haveCc) {
+        ctx->cc = v2GeoCcIndex(ctx->g->country_code);
+        ctx->haveCc = true;
+    }
     geoip_CIDR c = geoip_CIDR_init_zero;
     if (!pb_decode(stream, geoip_CIDR_fields, &c)) { return false; }
-    QString cc = QString::fromLatin1(g->country_code).left(2);
-    if (cc.length() != 2) { return true; }
     int n = (int)c.ip.size;
     int pfx = (int)c.prefix;
     const unsigned char* ip = c.ip.bytes;
     if (n == 4) {
         unsigned int v = ((unsigned int)ip[0] << 24) | ((unsigned int)ip[1] << 16)
-                  | ((unsigned int)ip[2] << 8) | (unsigned int)ip[3];
+                       | ((unsigned int)ip[2] << 8) | (unsigned int)ip[3];
         unsigned int mask = (pfx <= 0) ? 0u
-                     : (pfx >= 32 ? 0xffffffffu : (0xffffffffu << (32 - pfx)));
+                          : (pfx >= 32 ? 0xffffffffu : (0xffffffffu << (32 - pfx)));
         V2Geo4Rec r;
         r.lo = v & mask;
         r.hi = r.lo | (~mask);
-        r.cc = cc;
+        r.cc = ctx->cc;
         g_geo4.push_back(r);
     } else if (n == 16) {
         quint64 a = 0, b = 0;
@@ -1868,49 +1890,166 @@ static bool v2GeoCidrCb(pb_istream_t* stream, const pb_field_iter_t*, void** arg
         V2Geo6Rec r;
         r.l1 = a & m1; r.l2 = b & m2;
         r.h1 = r.l1 | (~m1); r.h2 = r.l2 | (~m2);
-        r.cc = cc;
+        r.cc = ctx->cc;
         g_geo6.push_back(r);
     }
     return true;
 }
 
-/* GeoIP 条目回调：country_code 是静态字段（wire 顺序在 cidr 之前） */
+/* GeoIP 条目回调：country_code（wire 顺序在 cidr 之前）→ cc 索引 */
 static bool v2GeoEntryCb(pb_istream_t* stream, const pb_field_iter_t*, void**) {
     geoip_GeoIP g = geoip_GeoIP_init_zero;
+    V2GeoEntryCtx ctx;
+    ctx.g = &g;
+    ctx.cc = 0;
+    ctx.haveCc = false;
     g.cidr.funcs.decode = v2GeoCidrCb;
-    g.cidr.arg = &g;
+    g.cidr.arg = &ctx;
     return pb_decode(stream, geoip_GeoIP_fields, &g);
 }
 
+/* 16 位两趟基数排序（60 万条，比 std::sort 快数倍） */
+static void v2Geo4RadixSort() {
+    const size_t n = g_geo4.size();
+    if (n < 2) { return; }
+    std::vector<V2Geo4Rec> tmp(n);
+    const unsigned int BITS = 16;
+    const unsigned int BUCKETS = 1u << BITS;
+    std::vector<unsigned int> cnt(BUCKETS);
+    for (int pass = 0; pass < 2; ++pass) {
+        unsigned int shift = (unsigned int)pass * BITS;
+        std::fill(cnt.begin(), cnt.end(), 0u);
+        for (size_t i = 0; i < n; ++i) { ++cnt[(g_geo4[i].lo >> shift) & (BUCKETS - 1)]; }
+        unsigned int sum = 0;
+        for (unsigned int b = 0; b < BUCKETS; ++b) { unsigned int c = cnt[b]; cnt[b] = sum; sum += c; }
+        for (size_t i = 0; i < n; ++i) {
+            unsigned int key = (g_geo4[i].lo >> shift) & (BUCKETS - 1);
+            tmp[cnt[key]++] = g_geo4[i];
+        }
+        g_geo4.swap(tmp);
+    }
+}
+
+/* mmap 读入并解码（省掉 23MB 读入拷贝） */
 static bool v2GeoipLoadFile(const QString& path) {
-    QFile f(path);
+    QByteArray nb = QFile::encodeName(path);
+    int fd = open(nb.data(), O_RDONLY);
+    if (fd < 0) { return false; }
+    struct stat sb;
+    if (fstat(fd, &sb) != 0 || sb.st_size <= 0) { close(fd); return false; }
+    void* m = mmap(0, (size_t)sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (m == MAP_FAILED) { return false; }
+    g_geo4.clear();
+    g_geo6.clear();
+    g_geoCC.clear();
+    g_geo4.reserve(700000);
+    g_geo6.reserve(120000);
+    geoip_GeoIPList list = geoip_GeoIPList_init_zero;
+    list.entry.funcs.decode = v2GeoEntryCb;
+    pb_istream_t stream = pb_istream_from_buffer((const pb_byte_t*)m, (size_t)sb.st_size);
+    bool ok = pb_decode(&stream, geoip_GeoIPList_fields, &list);
+    munmap(m, (size_t)sb.st_size);
+    if (!ok || (g_geo4.empty() && g_geo6.empty())) { return false; }
+    v2Geo4RadixSort();
+    g_geo6Sorted = false;          /* IPv6 排序推迟到首次 IPv6 查询（省一次 60 万条排序） */
+    return true;
+}
+
+/* ── 解析结果二进制缓存（键：geoip.dat 的 size+mtime） ── */
+struct V2GeoCacheHdr {
+    char magic[8];              /* "V2GEOIDX" */
+    unsigned int ver;
+    quint64 datSize;
+    qint64 datMtime;
+    unsigned int n4;
+    unsigned int n6;
+    unsigned int ncc;
+    unsigned int v6sorted;      /* 缓存里 v6 是否已排序（懒排序可能未排） */
+};
+
+static bool v2GeoipCacheLoad(const QString& cache, quint64 datSize, qint64 datMtime) {
+    QFile f(cache);
 #ifdef QT3_BUILD
     if (!f.open(IO_ReadOnly)) { return false; }
 #else
     if (!f.open(QIODevice::ReadOnly)) { return false; }
 #endif
-    QByteArray data = f.readAll();
+    QByteArray d = f.readAll();
     f.close();
-    if ((int)data.size() <= 0) { return false; }
-    g_geo4.clear();
-    g_geo6.clear();
-    geoip_GeoIPList list = geoip_GeoIPList_init_zero;
-    list.entry.funcs.decode = v2GeoEntryCb;
-    pb_istream_t stream = pb_istream_from_buffer((const pb_byte_t*)v2BytesPtr(data),
-                                                 (size_t)data.size());
-    if (!pb_decode(&stream, geoip_GeoIPList_fields, &list)) { return false; }
-    if (g_geo4.empty() && g_geo6.empty()) { return false; }
-    std::sort(g_geo4.begin(), g_geo4.end(), v2Geo4Less);
-    std::sort(g_geo6.begin(), g_geo6.end(), v2Geo6Less);
+    if ((int)d.size() < (int)sizeof(V2GeoCacheHdr)) { return false; }
+    V2GeoCacheHdr h;
+    memcpy(&h, d.data(), sizeof(h));
+    if (memcmp(h.magic, "V2GEOIDX", 8) != 0 || h.ver != 1) { return false; }
+    if (h.datSize != datSize || h.datMtime != datMtime) { return false; }
+    int need = (int)sizeof(h) + (int)(h.ncc * 8)
+             + (int)(h.n4 * sizeof(V2Geo4Rec)) + (int)(h.n6 * sizeof(V2Geo6Rec));
+    if ((int)d.size() < need) { return false; }
+    const char* p = d.data() + sizeof(h);
+    g_geoCC.clear();
+    g_geoCC.reserve(h.ncc);
+    for (unsigned int i = 0; i < h.ncc; ++i) {
+        g_geoCC.push_back(QString::fromLatin1(p, 2));
+        p += 8;
+    }
+    g_geo4.resize(h.n4);
+    if (h.n4 > 0) { memcpy(&g_geo4[0], p, h.n4 * sizeof(V2Geo4Rec)); p += h.n4 * sizeof(V2Geo4Rec); }
+    g_geo6.resize(h.n6);
+    if (h.n6 > 0) { memcpy(&g_geo6[0], p, h.n6 * sizeof(V2Geo6Rec)); }
+    g_geo6Sorted = (h.v6sorted != 0);
+    return true;
+}
+
+/* Qt3 QFile 只有 writeBlock，Qt4 用 write */
+static void v2FileWrite(QFile& f, const void* d, int n) {
+#ifdef QT3_BUILD
+    f.writeBlock((const char*)d, (unsigned long)n);
+#else
+    f.write((const char*)d, (qint64)n);
+#endif
+}
+
+static bool v2GeoipCacheSave(const QString& cache, quint64 datSize, qint64 datMtime) {
+    V2GeoCacheHdr h;
+    memset(&h, 0, sizeof(h));
+    memcpy(h.magic, "V2GEOIDX", 8);
+    h.ver = 1;
+    h.datSize = datSize;
+    h.datMtime = datMtime;
+    h.n4 = (unsigned int)g_geo4.size();
+    h.n6 = (unsigned int)g_geo6.size();
+    h.ncc = (unsigned int)g_geoCC.size();
+    h.v6sorted = g_geo6Sorted ? 1 : 0;
+    QFile f(cache);
+#ifdef QT3_BUILD
+    if (!f.open(IO_WriteOnly | IO_Truncate)) { return false; }
+#else
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) { return false; }
+#endif
+    v2FileWrite(f, &h, (int)sizeof(h));
+    for (unsigned int i = 0; i < h.ncc; ++i) {
+        char buf[8];
+        memset(buf, 0, sizeof(buf));
+        QByteArray c = qToUtf8(g_geoCC[i]);
+        memcpy(buf, c.data(), c.size() > 8 ? 8 : c.size());
+        v2FileWrite(f, buf, 8);
+    }
+    if (h.n4 > 0) { v2FileWrite(f, &g_geo4[0], (int)(h.n4 * sizeof(V2Geo4Rec))); }
+    if (h.n6 > 0) { v2FileWrite(f, &g_geo6[0], (int)(h.n6 * sizeof(V2Geo6Rec))); }
+    f.close();
     return true;
 }
 
 static bool v2GeoipLookupIp(const QString& ip, QString& cc) {
     struct in_addr a4;
     QByteArray ipBa = qToUtf8(ip);
-    if (inet_pton(AF_INET, v2BytesPtr(ipBa), &a4) == 1) {
+#ifdef QT3_BUILD
+    const char* ipPtr = ipBa.data();
+#else
+    const char* ipPtr = ipBa.constData();
+#endif
+    if (inet_pton(AF_INET, ipPtr, &a4) == 1) {
         unsigned int v = ntohl(a4.s_addr);
-        /* 二分：最后一个 lo <= v 的区间 */
         size_t lo = 0, hi = g_geo4.size();
         while (lo < hi) {
             size_t mid = (lo + hi) / 2;
@@ -1918,12 +2057,13 @@ static bool v2GeoipLookupIp(const QString& ip, QString& cc) {
         }
         if (lo > 0) {
             const V2Geo4Rec& r = g_geo4[lo - 1];
-            if (v <= r.hi) { cc = r.cc; return true; }
+            if (v <= r.hi && r.cc < g_geoCC.size()) { cc = g_geoCC[r.cc]; return true; }
         }
         return false;
     }
     struct in6_addr a6;
-    if (inet_pton(AF_INET6, v2BytesPtr(ipBa), &a6) == 1) {
+    if (inet_pton(AF_INET6, ipPtr, &a6) == 1) {
+        if (!g_geo6Sorted) { std::sort(g_geo6.begin(), g_geo6.end(), v2Geo6Less); g_geo6Sorted = true; }
         quint64 x1 = 0, x2 = 0;
         for (int i = 0; i < 8; ++i) { x1 = (x1 << 8) | a6.s6_addr[i]; x2 = (x2 << 8) | a6.s6_addr[8 + i]; }
         size_t lo = 0, hi = g_geo6.size();
@@ -1937,7 +2077,7 @@ static bool v2GeoipLookupIp(const QString& ip, QString& cc) {
             const V2Geo6Rec& r = g_geo6[lo - 1];
             bool in = (x1 > r.l1 || (x1 == r.l1 && x2 >= r.l2))
                    && (x1 < r.h1 || (x1 == r.h1 && x2 <= r.h2));
-            if (in) { cc = r.cc; return true; }
+            if (in && r.cc < g_geoCC.size()) { cc = g_geoCC[r.cc]; return true; }
         }
         return false;
     }
@@ -2007,8 +2147,9 @@ static bool v2IsIpLiteral(const QString& a) {
 
 /* 懒加载 geoip.dat：内置内核目录优先，其次系统 Xray 数据目录。
  * 失败不缓存（更新/下载核心后可再次尝试），每次都会真正去查文件。 */
-bool V2RayLogic::geoipDatReady() {
-    if (g_geoLoaded) { return true; }
+/* 启动探测：仅检查文件是否存在（毫秒级），解析推迟到首次查询 */
+void V2RayLogic::geoipDatProbe() {
+    if (g_geoLoaded) { return; }
     const QString paths[] = {
         xrayDir() + "/geoip.dat",
         coreDir() + "/geoip.dat",
@@ -2022,31 +2163,55 @@ bool V2RayLogic::geoipDatReady() {
         QString("/usr/local/etc/xray/geoip.dat")
     };
     QStringList tried;
-    QString failPath;
     for (int i = 0; i < (int)(sizeof(paths) / sizeof(paths[0])); ++i) {
         tried.append(paths[i]);
         if (!fileExists(paths[i])) { continue; }
-        if (v2GeoipLoadFile(paths[i])) {
-            g_geoLoaded = true;
-            g_geoPath = paths[i];
-            appendLogWithPrefix(qFromUtf8("[国家]"),
-                qFromUtf8("geoip.dat：") + paths[i] + qFromUtf8("（已加载，可离线查询）"));
-            return true;
-        }
-        failPath = paths[i];
+        g_geoPath = paths[i];
+        appendLogWithPrefix(qFromUtf8("[国家]"),
+            qFromUtf8("geoip.dat：") + g_geoPath + qFromUtf8("（找到，首次查询时加载）"));
+        return;
     }
     if (!g_geoWarned) {
         g_geoWarned = true;
-        if (!failPath.isEmpty()) {
-            appendLogWithPrefix(qFromUtf8("[国家]"),
-                qFromUtf8("geoip.dat 解析失败：") + failPath);
-        } else {
-            appendLogWithPrefix(qFromUtf8("[国家]"),
-                qFromUtf8("未找到 geoip.dat（已尝试：") + tried.join(", ")
-                + qFromUtf8("）；当前按节点名称关键词识别"));
-        }
+        appendLogWithPrefix(qFromUtf8("[国家]"),
+            qFromUtf8("未找到 geoip.dat（已尝试：") + tried.join(", ")
+            + qFromUtf8("）；当前按节点名称关键词识别"));
     }
-    return false;
+}
+
+/* 首次查询时加载：优先命中二进制缓存，否则解析 geoip.dat 并写缓存 */
+bool V2RayLogic::geoipDatReady() {
+    if (g_geoLoaded) { return true; }
+    if (g_geoPath.isEmpty()) {
+        geoipDatProbe();
+        if (g_geoPath.isEmpty()) { return false; }
+    }
+    QFileInfo fi(g_geoPath);
+    if (!fi.exists()) { g_geoPath = QString(); return false; }
+    quint64 datSize = (quint64)fi.size();
+    qint64 datMtime = (qint64)fi.lastModified().toTime_t();
+    if (g_geoCachePath.isEmpty()) { g_geoCachePath = baseDir() + "/geoip.idx"; }
+    QTime tm; tm.start();
+    if (v2GeoipCacheLoad(g_geoCachePath, datSize, datMtime)) {
+        g_geoLoaded = true;
+        appendLogWithPrefix(qFromUtf8("[国家]"),
+            qFromUtf8("geoip.dat 缓存命中（IPv4 ") + QString::number((int)g_geo4.size())
+            + qFromUtf8(" / IPv6 ") + QString::number((int)g_geo6.size())
+            + qFromUtf8("，耗时 ") + QString::number(tm.elapsed()) + qFromUtf8(" ms）"));
+        return true;
+    }
+    if (!v2GeoipLoadFile(g_geoPath)) {
+        appendLogWithPrefix(qFromUtf8("[国家]"),
+            qFromUtf8("geoip.dat 解析失败：") + g_geoPath);
+        return false;
+    }
+    v2GeoipCacheSave(g_geoCachePath, datSize, datMtime);
+    g_geoLoaded = true;
+    appendLogWithPrefix(qFromUtf8("[国家]"),
+        qFromUtf8("geoip.dat 已加载（IPv4 ") + QString::number((int)g_geo4.size())
+        + qFromUtf8(" / IPv6 ") + QString::number((int)g_geo6.size())
+        + qFromUtf8("，耗时 ") + QString::number(tm.elapsed()) + qFromUtf8(" ms，缓存已写入）"));
+    return true;
 }
 
 bool V2RayLogic::geoipDatLookup(const QString& ip, QString& cc) const {
