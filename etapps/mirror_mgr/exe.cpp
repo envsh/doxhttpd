@@ -1,5 +1,6 @@
 
 #include <qapplication.h>
+#include "LimeStyle.h"
 #include "ThemeManager.h"
 #include <qwidget.h>
 
@@ -9,7 +10,8 @@ extern "C"
 int main(int argc, char** argv) {
 	QApplication app(argc, argv);
 
-    /* 默认深色主题：只用深色调色板（LimeStyle 会导致 QTabWidget 点击失效，不安装） */
+    /* 默认深色主题（与 qltox 一致：LimeStyle + qtFusion dark） */
+    app.setStyle(new LimeStyle);
     ThemeManager::setStyle("qtFusion", true);
 
     extern QWidget* createMirrorMgrMainWindow(void*);
