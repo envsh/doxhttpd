@@ -159,6 +159,74 @@ jobs:
           path: bin/
           retention-days: 30
 
+  # Qt4 走 MacPorts 二进制安装（/opt/local/libexec/qt4），只用 binary archives（-b），
+  # 不源码编译 Qt4。archive 可用性见 packages.macports.org/qt4-mac/。
+  build-qltox-mac-qt4:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+
+      - name: Install MacPorts (binary distribution)
+        run: |
+          set -euo pipefail
+          osver=$(sw_vers -productVersion | cut -d. -f1)
+          case "$osver" in
+            14) codename=Sonoma ;;
+            15) codename=Sequoia ;;
+            26) codename=Tahoe ;;
+            *) echo "Unsupported macOS ${osver}"; exit 1 ;;
+          esac
+          pkg="MacPorts-2.12.7-${osver}-${codename}.pkg"
+          curl -fsSL "https://github.com/macports/macports-base/releases/download/v2.12.7/${pkg}" -o "/tmp/${pkg}"
+          sudo installer -pkg "/tmp/${pkg}" -target /
+          /opt/local/bin/port version
+          sudo /opt/local/bin/port -q sync
+
+      - name: Install Qt4 + build deps (MacPorts binary archives only)
+        run: |
+          set -euo pipefail
+          sudo /opt/local/bin/port -q -b install \
+            qt4-mac pkgconfig freetype openal-soft sqlite3
+          /opt/local/libexec/qt4/bin/qmake -v
+          /opt/local/bin/pkg-config --modversion freetype2 openal sqlite3
+
+      - name: Install vcpkg and hjson-cpp
+        run: |
+          sudo mkdir -p /opt/vcpkg
+          sudo chown "$(whoami)" /opt/vcpkg
+          git clone --depth 1 https://github.com/Microsoft/vcpkg.git /opt/vcpkg
+          /opt/vcpkg/bootstrap-vcpkg.sh
+          /opt/vcpkg/vcpkg install hjson-cpp --triplet x64-osx-dynamic
+
+      - name: Build qltox with Qt4 (MacPorts)
+        run: |
+          set -euo pipefail
+          cd qltox
+          export PATH="/opt/local/libexec/qt4/bin:/opt/local/bin:/opt/local/sbin:$PATH"
+          export PKG_CONFIG_PATH="/opt/local/lib/pkgconfig"
+          qmake qltox.pro
+          make -j"$(sysctl -n hw.logicalcpu)"
+
+      - name: Package app bundle
+        run: |
+          set -euo pipefail
+          cd qltox
+          mkdir -p qltox.app/Contents/Resources
+          QT_TRANS=$(/opt/local/libexec/qt4/bin/qmake -query QT_INSTALL_TRANSLATIONS)
+          cp -f "$QT_TRANS/qt_zh_CN.qm" "$QT_TRANS/qt_zh_TW.qm" \
+                qltox.app/Contents/Resources/ 2>/dev/null || true
+          tar zcf ../qltox-qt4-macos-x64.tar.gz qltox.app/
+          ls -lh ../qltox-qt4-macos-x64.tar.gz
+
+      - name: Upload qltox Qt4 artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: qltox-qt4-macos-x64
+          path: qltox-qt4-macos-x64.tar.gz
+          retention-days: 30
+
   package-release-linux:
     runs-on: ubuntu-22.04
     needs: [build-backend, build-qltox-qt3]
@@ -195,7 +263,7 @@ jobs:
 
   package-release-macos:
     runs-on: ubuntu-22.04
-    needs: [build-backend-mac, build-qltox-qt5-mac]
+    needs: [build-backend-mac, build-qltox-qt5-mac, build-qltox-mac-qt4]
     steps:
       - uses: actions/checkout@v4
       - name: Download backend artifact
@@ -208,6 +276,11 @@ jobs:
         with:
           name: qltox-qt5-macos-frontend
           path: release/
+      - name: Download Qt4 frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: qltox-qt4-macos-x64
+          path: release-qt4/
       - name: Organize files for packaging
         run: |
           mkdir -p release/bin release/web
@@ -220,11 +293,32 @@ jobs:
           cd release
           tar czvf ../toxhttpd-macos-x86_64-${{ github.ref_name }}.tar.gz bin/ web/
           cd ..
+      - name: Unpack Qt4 frontend (qltox.app)
+        run: |
+          cd release-qt4
+          tar zxf qltox-qt4-macos-x64.tar.gz
+          rm -f qltox-qt4-macos-x64.tar.gz
+          ls -lhR .
+      - name: Create Qt4 tarball
+        run: |
+          mkdir -p release-qt4/bin release-qt4/web
+          cp release/bin/toxhttpd release-qt4/bin/
+          cp -r web/* release-qt4/web/
+          cd release-qt4
+          tar czvf ../toxhttpd-macos-qt4-x86_64-${{ github.ref_name }}.tar.gz \
+            bin/ web/ qltox.app/
+          cd ..
       - name: Upload package artifact
         uses: actions/upload-artifact@v4
         with:
           name: toxhttpd-macos-release
           path: toxhttpd-macos-x86_64-*.tar.gz
+          retention-days: 90
+      - name: Upload Qt4 package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: toxhttpd-macos-qt4-release
+          path: toxhttpd-macos-qt4-x86_64-*.tar.gz
           retention-days: 90
 
   upload-release:
@@ -245,6 +339,11 @@ jobs:
         with:
           name: toxhttpd-macos-release
           path: release/native/
+      - name: Download macOS Qt4 release
+        uses: actions/download-artifact@v4
+        with:
+          name: toxhttpd-macos-qt4-release
+          path: release/native-qt4/
       - name: Prepare files for upload
         run: |
           find release/ -name '*.tar.gz' -exec mv {} . \;
