@@ -414,7 +414,8 @@ private:
     long long trafficUpBase, trafficDownBase;
     long long trafficUpLast, trafficDownLast;
     long long trafficUpRate, trafficDownRate;
-    long long reqCountBase, reqCountLast;
+    long long reqCountLast;
+    long long reqCountOffset;      /* access.log 已扫描到的字节位置（增量计数） */
     /* 跨会话累计流量（settings 持久化：core/totalUp / core/totalDown） */
     long long totalUpBase, totalDownBase;   /* 本次会话起点的累计基线 */
     long long totalUp, totalDown;           /* 基线 + 本次会话实时值 */

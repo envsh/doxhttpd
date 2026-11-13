@@ -212,7 +212,9 @@ static void v2ComboSetCurrent(QComboBox* c, int i) {
     c->setCurrentIndex(i);
 #endif
 }
-/* 统计文本文件行数（access.log 请求数用） */
+/* 统计文本文件行数（access.log 请求数用）：分块计数。
+ * 注意不要用 QTextStream::readLine()：Qt3 下 4.5MB/5 万行要 ~3.9s，
+ * 用它每 2s 轮询一次会把事件循环拖到 100% CPU。 */
 static long long v2CountLines(const QString& path) {
     QFile f(path);
 #ifdef QT3_BUILD
@@ -221,12 +223,63 @@ static long long v2CountLines(const QString& path) {
     if (!f.open(QIODevice::ReadOnly)) { return 0; }
 #endif
     long long n = 0;
-    QTextStream ts(&f);
-    while (!ts.atEnd()) {
-        ts.readLine();
-        ++n;
+    char buf[65536];
+    int r;
+    while ((r =
+#ifdef QT3_BUILD
+            f.readBlock(buf, (uint)sizeof(buf))
+#else
+            f.read(buf, (qint64)sizeof(buf))
+#endif
+           ) > 0) {
+        for (int i = 0; i < r; ++i) {
+            if (buf[i] == '\n') { ++n; }
+        }
     }
     f.close();
+    return n;
+}
+
+/* 只统计 *offset 之后新增的完整行（access.log 每 2s 轮询一次，不能全量重读）。
+ * 文件变短（轮转/截断）返回 -1，调用方重建基线。 */
+static long long v2CountNewLines(const QString& path, long long* offset) {
+    QFile f(path);
+#ifdef QT3_BUILD
+    if (!f.open(IO_ReadOnly)) { return 0; }
+#else
+    if (!f.open(QIODevice::ReadOnly)) { return 0; }
+#endif
+    const long long size = (long long)f.size();
+    if (size < *offset) { f.close(); return -1; }
+    if (size == *offset) { f.close(); return 0; }
+#ifdef QT3_BUILD
+    if (!f.at((uint)*offset)) { f.close(); return 0; }
+#else
+    if (!f.seek(*offset)) { f.close(); return 0; }
+#endif
+    long long n = 0;
+    long long pos = *offset;
+    long long lastNl = -1;
+    char buf[65536];
+    int r;
+    while ((r =
+#ifdef QT3_BUILD
+            f.readBlock(buf, (uint)sizeof(buf))
+#else
+            f.read(buf, (qint64)sizeof(buf))
+#endif
+           ) > 0) {
+        for (int i = 0; i < r; ++i) {
+            if (buf[i] == '\n') {
+                ++n;
+                lastNl = pos + i;
+            }
+        }
+        pos += r;
+    }
+    f.close();
+    /* 末尾未写完的半行留到下次（避免重复/漏计） */
+    if (lastNl >= 0) { *offset = lastNl + 1; }
     return n;
 }
 
@@ -515,7 +568,8 @@ V2RayLogic::V2RayLogic(QObject* parent)
     trafficUpBase = trafficDownBase = 0;
     trafficUpLast = trafficDownLast = 0;
     trafficUpRate = trafficDownRate = 0;
-    reqCountBase = reqCountLast = 0;
+    reqCountLast = 0;
+    reqCountOffset = 0;
     totalUpBase = totalDownBase = 0;
     totalUp = totalDown = 0;
     totalFlushTick = 0;
@@ -4033,8 +4087,8 @@ void V2RayLogic::resetTrafficCounters() {
     totalUp = totalUpBase;
     totalDown = totalDownBase;
     totalFlushTick = 0;
-    /* access.log 跨运行追加：以当前行数为基线 */
-    reqCountBase = v2CountLines(baseDir() + "/access.log");
+    /* access.log 跨运行追加：记录当前字节位置，之后只做增量计数 */
+    reqCountOffset = QFileInfo(baseDir() + "/access.log").size();
     reqCountLast = 0;
     refreshTrafficLabel();
 }
@@ -4139,8 +4193,17 @@ void V2RayLogic::onStatsExited() {
     /* 每 2 秒采样一次 → 速率 = 增量 / 2 */
     trafficUpRate = trafficUpLast / 2;
     trafficDownRate = trafficDownLast / 2;
-    reqCountLast = v2CountLines(baseDir() + "/access.log") - reqCountBase;
-    if (reqCountLast < 0) { reqCountLast = 0; }
+    {
+        const QString logPath = baseDir() + "/access.log";
+        const long long added = v2CountNewLines(logPath, &reqCountOffset);
+        if (added < 0) {
+            /* 日志轮转/被截断：重建基线，重新开始计数 */
+            reqCountOffset = QFileInfo(logPath).size();
+            reqCountLast = 0;
+        } else {
+            reqCountLast += added;
+        }
+    }
     totalUp = totalUpBase + trafficUpLast;
     totalDown = totalDownBase + trafficDownLast;
     if (++totalFlushTick >= 15) { totalFlushTick = 0; flushTrafficTotals(); }
