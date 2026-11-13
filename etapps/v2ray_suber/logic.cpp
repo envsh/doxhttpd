@@ -4395,6 +4395,14 @@ void V2RayLogic::onCoreExit() {
         st.setValue("core/lastPid", 0);
         st.sync();
     }
+    /* 进程已退出：释放 QProcess 对象。否则 coreProc 永远非空，
+     * startCoreAtIndex() 会停在“上一次核心尚未退出，请稍候再启动”，
+     * 变成“停止核心后无法再次启动”（退出信号不会再来了）。
+     * 仍遵守既有约束：只在退出槽删除，进程未退出时绝不 delete。 */
+    if (coreProc) {
+        coreProc->deleteLater();
+        coreProc = 0;
+    }
     refreshCoreState();
     refreshActiveNodeLabel();
     setCoreMessage(stopped ? qFromUtf8("状态：核心已停止")
