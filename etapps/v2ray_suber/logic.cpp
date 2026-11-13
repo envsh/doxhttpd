@@ -2883,7 +2883,14 @@ void V2RayLogic::onSortByLatency() {
 void V2RayLogic::onCleanFailedNodes() {
     V2NodeList keep;
     int removed = 0;
+    int favKept = 0;
     for (int i = 0; i < (int)nodes.count(); ++i) {
+        /* 收藏节点不参与“清理超时”：避免误删收藏 */
+        if (nodes[i].favorite) {
+            keep.append(nodes[i]);
+            ++favKept;
+            continue;
+        }
         bool measured = (nodes[i].tcpMs != -2 || nodes[i].realMs != -2);
         bool failed = (nodes[i].realMs == -1) || (nodes[i].tcpMs == -1);
         if (measured && failed) { ++removed; continue; }
@@ -2893,7 +2900,10 @@ void V2RayLogic::onCleanFailedNodes() {
     refreshNodeList();
     saveNodes();
     appendLogWithPrefix(qFromUtf8("[节点]"),
-        qFromUtf8("已清理超时节点：") + QString::number(removed));
+        qFromUtf8("已清理超时节点：") + QString::number(removed)
+        + (favKept > 0
+           ? (qFromUtf8("（收藏保留 ") + QString::number(favKept) + qFromUtf8(" 个）"))
+           : QString()));
 }
 
 QString V2RayLogic::nodeId(const V2Node& n) const {
@@ -2923,7 +2933,7 @@ void V2RayLogic::removeNodesBySource(const QString& src) {
     nodes = keep;
 }
 
-/* 订阅更新时：保留 正在使用 或 真连成功 的节点，清理未测/失败 */
+/* 订阅更新时：保留 正在使用 / 收藏 / 真连成功 的节点，清理未测/失败 */
 void V2RayLogic::pruneSubNodesForUpdate(const QString& src) {
     QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
     QString activeId = st.valueStr("activeNode", "");
@@ -2935,13 +2945,16 @@ void V2RayLogic::pruneSubNodesForUpdate(const QString& src) {
         if (n.sourceSub != src) { keep.append(n); continue; }
         bool inUse = !activeId.isEmpty() && n.id == activeId;  /* 正在 core 使用 */
         bool usable = (n.realMs > 0);                          /* 真连成功（绿勾） */
-        if (inUse || usable) { keep.append(n); ++kept; }
+        /* 收藏必须保留：否则订阅更新后旧节点被清理，重新解析出来的是新对象，
+         * favorite 默认 false → 收藏静默丢失 */
+        bool fav = n.favorite;
+        if (inUse || usable || fav) { keep.append(n); ++kept; }
         else { ++removed; }
     }
     nodes = keep;
     if (removed > 0) {
         appendLogWithPrefix(qFromUtf8("[订阅]"),
-            qFromUtf8("订阅更新：保留在用/真连可用 ") + QString::number(kept)
+            qFromUtf8("订阅更新：保留在用/收藏/真连可用 ") + QString::number(kept)
             + qFromUtf8(" 个，清理未测/失败 ") + QString::number(removed) + qFromUtf8(" 个"));
     }
 }
