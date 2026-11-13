@@ -361,7 +361,7 @@ static QString v2UrlDecode(const QString& in, bool plusAsSpace) {
     return qFromUtf8(out.data(), n);
 }
 
-static void writeUtf8File(const QString& path, const QString& content) {
+static bool writeUtf8File(const QString& path, const QString& content) {
 #ifdef QT3_BUILD
     QByteArray u = content.utf8();
     /* Qt3 QByteArray::size() 含尾 NUL：按 strlen 精确写入，避免文件尾多出 \0 */
@@ -371,9 +371,10 @@ static void writeUtf8File(const QString& path, const QString& content) {
     const size_t n = (size_t)u.size();
 #endif
     FILE* fp = fopen(QFile::encodeName(path).data(), "wb");
-    if (!fp) { return; }
-    fwrite(u.data(), 1, n, fp);
-    fclose(fp);
+    if (!fp) { return false; }
+    const size_t wrote = fwrite(u.data(), 1, n, fp);
+    const int rc = fclose(fp);
+    return wrote == n && rc == 0;
 }
 static QString readUtf8File(const QString& path) {
     QString s;
@@ -729,12 +730,12 @@ void V2RayLogic::refreshSubList() {
 #ifdef QT3_BUILD
         subList->setColumnWidth(0, 520);
         subList->setColumnStretchable(0, true);   /* URL 列动态占满剩余宽度 */
-        subList->setColumnWidth(1, 84);
+        subList->setColumnWidth(1, 150);
         subList->setColumnWidth(2, 60);
 #else
         subList->horizontalHeader()->setStretchLastSection(false);
         subList->horizontalHeader()->setResizeMode(0, QHeaderView::Stretch);
-        subList->setColumnWidth(1, 84);
+        subList->setColumnWidth(1, 150);
         subList->setColumnWidth(2, 60);
 #endif
     }
@@ -763,10 +764,23 @@ void V2RayLogic::refreshSubList() {
                 }
             }
             if (cnt > 0) {
-                if (last.length() >= 19) { last = last.mid(11); }
                 t = last;
                 n = QString::number(cnt);
                 subMeta.insert(subs[i], t + "|" + n);   /* 自愈：写回 meta */
+            }
+        }
+        /* 旧版 sub_meta 只存了 hh:mm:ss：用节点的完整 updatedAt 补齐（自愈） */
+        if (t.length() <= 8) {
+            QString full;
+            for (int k = 0; k < (int)nodes.count(); ++k) {
+                if (nodes[k].sourceSub != subs[i]) { continue; }
+                if (full.isEmpty() || nodes[k].updatedAt > full) {
+                    full = nodes[k].updatedAt;
+                }
+            }
+            if (full.length() >= 19) {
+                t = full;
+                subMeta.insert(subs[i], t + "|" + n);
             }
         }
         v2TableSetCell(subList, i, 0, subs[i]);
@@ -1220,18 +1234,54 @@ void V2RayLogic::onToggleFavorite() {
     for (int i = 0; i < (int)sel.count(); ++i) {
         if (!nodes[sel[i]].favorite) { allFav = false; break; }
     }
-    int n = 0;
+    V2IndexList changed;
+    int skipped = 0;
     for (int i = 0; i < (int)sel.count(); ++i) {
         int idx = sel[i];
         bool want = !allFav;
-        if (nodes[idx].favorite != want) { nodes[idx].favorite = want; ++n; }
+        if (nodes[idx].favorite == want) { ++skipped; continue; }
+        nodes[idx].favorite = want;
+        changed.append(idx);
     }
-    saveNodes();
-    refreshNodeList();
 
-    appendLogWithPrefix(qFromUtf8("[收藏]"),
-        (allFav ? qFromUtf8("已取消收藏 ") : qFromUtf8("已加入收藏 "))
-        + QString::number(n) + qFromUtf8(" 个节点"));
+    const int n = (int)changed.count();
+    /* 没有实际变更：明确告知“已存在/均未收藏”，不写盘 */
+    if (n == 0) {
+        QString msg = allFav
+            ? (qFromUtf8("所选节点均未收藏（已跳过 ")
+               + QString::number(skipped) + qFromUtf8(" 个）"))
+            : (qFromUtf8("所选节点已全部在收藏中（已存在 ")
+               + QString::number(skipped) + qFromUtf8(" 个），无需重复添加"));
+        appendLogWithPrefix(qFromUtf8("[收藏]"), msg);
+        if (nodeStatus) { nodeStatus->setText(qFromUtf8("状态：") + msg); }
+        refreshNodeList();
+        return;
+    }
+
+    if (!saveNodes()) {
+        /* 写盘失败：回滚内存，避免界面与磁盘状态不一致 */
+        for (int i = 0; i < n; ++i) {
+            nodes[changed[i]].favorite = !nodes[changed[i]].favorite;
+        }
+        QString msg = (allFav ? qFromUtf8("取消收藏失败：")
+                              : qFromUtf8("加入收藏失败："))
+                    + qFromUtf8("无法写入 nodes.json（改动已回滚）");
+        appendLogWithPrefix(qFromUtf8("[收藏]"), msg);
+        if (nodeStatus) { nodeStatus->setText(qFromUtf8("状态：") + msg); }
+        refreshNodeList();
+        return;
+    }
+
+    refreshNodeList();
+    QString msg = (allFav ? qFromUtf8("已取消收藏 ") : qFromUtf8("已加入收藏 "))
+                + QString::number(n) + qFromUtf8(" 个节点");
+    if (skipped > 0) {
+        msg += qFromUtf8("（") + QString::number(skipped)
+             + (allFav ? qFromUtf8(" 个原本未收藏，已跳过）")
+                       : qFromUtf8(" 个已存在，已跳过）"));
+    }
+    appendLogWithPrefix(qFromUtf8("[收藏]"), msg);
+    if (nodeStatus) { nodeStatus->setText(qFromUtf8("状态：") + msg); }
 }
 
 void V2RayLogic::onUnfavFav() {
@@ -1240,15 +1290,35 @@ void V2RayLogic::onUnfavFav() {
         appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("请先选中收藏节点"));
         return;
     }
-    int n = 0;
+    V2IndexList changed;
     for (int i = 0; i < (int)sel.count(); ++i) {
         int idx = sel[i];
-        if (nodes[idx].favorite) { nodes[idx].favorite = false; ++n; }
+        if (nodes[idx].favorite) {
+            nodes[idx].favorite = false;
+            changed.append(idx);
+        }
     }
-    saveNodes();
+    const int n = (int)changed.count();
+    if (n == 0) {
+        appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("所选节点均未收藏"));
+        if (nodeStatus) { nodeStatus->setText(qFromUtf8("状态：所选节点均未收藏")); }
+        refreshNodeList();
+        return;
+    }
+    if (!saveNodes()) {
+        for (int i = 0; i < n; ++i) {
+            nodes[changed[i]].favorite = true;
+        }
+        appendLogWithPrefix(qFromUtf8("[收藏]"),
+            qFromUtf8("取消收藏失败：无法写入 nodes.json（改动已回滚）"));
+        if (nodeStatus) { nodeStatus->setText(qFromUtf8("状态：取消收藏失败（已回滚）")); }
+        refreshNodeList();
+        return;
+    }
     refreshNodeList();
-    appendLogWithPrefix(qFromUtf8("[收藏]"),
-        qFromUtf8("已取消收藏 ") + QString::number(n) + qFromUtf8(" 个节点"));
+    QString msg = qFromUtf8("已取消收藏 ") + QString::number(n) + qFromUtf8(" 个节点");
+    appendLogWithPrefix(qFromUtf8("[收藏]"), msg);
+    if (nodeStatus) { nodeStatus->setText(qFromUtf8("状态：") + msg); }
 }
 
 void V2RayLogic::onCopyFavLink() {
@@ -2929,7 +2999,7 @@ void V2RayLogic::loadNodes() {
     emit nodesChanged();
 }
 
-void V2RayLogic::saveNodes() {
+bool V2RayLogic::saveNodes() {
     cJSON* root = cJSON_CreateObject();
     cJSON_AddNumberToObject(root, "version", 1);
     cJSON_AddStringToObject(root, "savedAt",
@@ -2975,15 +3045,19 @@ void V2RayLogic::saveNodes() {
         cJSON_AddNumberToObject(o, "favorite", n.favorite ? 1 : 0);
         cJSON_AddItemToArray(arr, o);
     }
+    bool ok = false;
     char* txt = cJSON_PrintUnformatted(root);
     if (txt) {
         QString tmp = baseDir() + "/nodes.json.tmp";
-        writeUtf8File(tmp, qFromUtf8(txt));
+        ok = writeUtf8File(tmp, qFromUtf8(txt));
         cJSON_free(txt);
-        rename(QFile::encodeName(tmp).data(),
-               QFile::encodeName(baseDir() + "/nodes.json").data());
+        if (ok) {
+            ok = (rename(QFile::encodeName(tmp).data(),
+                         QFile::encodeName(baseDir() + "/nodes.json").data()) == 0);
+        }
     }
     cJSON_Delete(root);
+    return ok;
 }
 
 void V2RayLogic::saveSettings() {
@@ -3330,7 +3404,8 @@ void V2RayLogic::onSubFetched() {
         if (nodes[k].sourceSub == src) { ++subNodes; }
     }
     subMeta.insert(src,
-        QTime::currentTime().toString("hh:mm:ss") + "|" + QString::number(subNodes));
+        QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss")
+        + "|" + QString::number(subNodes));
     saveSubMeta();
     refreshSubList();
     appendLogWithPrefix(qFromUtf8("[订阅]"),

@@ -241,7 +241,7 @@ private:
     void loadSubMeta();
     void saveSubMeta();
     void loadNodes();
-    void saveNodes();
+    bool saveNodes();
     QString nodeId(const V2Node& n) const;
     int  indexByNodeId(const QString& id) const;
     void removeNodesBySource(const QString& src);
