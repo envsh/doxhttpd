@@ -40,6 +40,7 @@
 #endif
 #include <qtextstream.h>
 #include <qradiobutton.h>
+#include <qcursor.h>
 #include <qinputdialog.h>
 #include "placeholderlineedit.h"
 #include "stickermanager.h"
@@ -742,6 +743,10 @@ MainWindow::MainWindow(QWidget* parent)
     EmbeddedMenuBar::addItem(tool, qFromUtf8("日志(&L)..."), this, SLOT(onMenu1Stub()));
     EmbeddedMenuBar::addItem(tool, qFromUtf8("贴纸管理器(&S)..."), this, SLOT(openStickerManager()));
     EmbeddedMenuBar::addItem(tool, qFromUtf8("Markdown编辑器(&M)...\tCtrl+M"), this, SLOT(openMdEditor()));
+    /* for deskflow keyboard control：Deskflow 靠光标撞屏幕边缘切换主机，
+     * 这两个菜单项用于在当前应用内把光标一次推 2000px，等效于按住鼠标划过屏幕边界 */
+    EmbeddedMenuBar::addItem(tool, qFromUtf8("鼠标右移 2000px"), this, SLOT(onMoveMouseRight()));
+    EmbeddedMenuBar::addItem(tool, qFromUtf8("鼠标左移 2000px"), this, SLOT(onMoveMouseLeft()));
 
     MenuWidget34* settingsMenu = mb->addMenu(qFromUtf8("设置(&S)"));
     EmbeddedMenuBar::addItem(settingsMenu, qFromUtf8("设置(&S)...\tCtrl+,"), this, SLOT(openSettings()));
@@ -5083,6 +5088,22 @@ void MainWindow::openCombineSearch() {
     CombineSearch* dlg = new CombineSearch(this);
     dlg->show();
 }
+
+/* for deskflow keyboard control：相对移动光标。
+ * Deskflow 在光标越过屏幕边缘时切换主机，因此把光标一次性推 2000px 即可触发；
+ * Wayland 禁止全局 warp，位置不变时仅记录日志。 */
+static void moveMouseBy(int dx) {
+    const QPoint p = QCursor::pos();
+    QCursor::setPos(QPoint(p.x() + dx, p.y()));
+    const QPoint q = QCursor::pos();
+    if (q == p) {
+        qWarning("mouse move unsupported or clamped: dx=%d pos=(%d,%d)",
+                 dx, p.x(), p.y());
+    }
+}
+
+void MainWindow::onMoveMouseRight() { moveMouseBy(2000); }
+void MainWindow::onMoveMouseLeft()  { moveMouseBy(-2000); }
 
 void MainWindow::onScreenshotRequested() {
     // Default to region capture (most common).

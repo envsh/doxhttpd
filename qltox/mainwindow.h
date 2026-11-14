@@ -102,6 +102,8 @@ protected slots:
     void onMenu2Stub();
     void onAboutApp();
     void onScreenshotRequested();
+    void onMoveMouseRight();      /* Deskflow 键盘/鼠标共享：光标推到右侧主机 */
+    void onMoveMouseLeft();       /* Deskflow 键盘/鼠标共享：光标推到左侧主机 */
     void onScreenshotReady(const QString& filePath);
     void onScreenshotCancelled();
     void openHomePage();
