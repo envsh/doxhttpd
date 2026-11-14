@@ -54,6 +54,7 @@ include(../qlappcom/qlappcom.pri)
 
 # 使 qltox/ 中的 #include "compat34.h" 能找到 qlcomp/
 INCLUDEPATH += ../qlcomp ../qlappcom/
+INCLUDEPATH += ../vendor
 INCLUDEPATH += ../etapps
 INCLUDEPATH += ../3rdparty/bloom ../3rdparty/barrust_bloom
 macx {
@@ -148,10 +149,25 @@ DEFINES += HAVE_SQLITE
 
 # 链接预览：gumbo (HTML5 解析，vendor 源码，全平台统一，不使用系统 libgumbo)
 include(../vendor/gumbo.pri)
+# cpp-httplib（vendor/httplib.h）：libcurl 无 WS 时的回退实现
+DEFINES += CPPHTTPLIB_NO_EXCEPTIONS
+OPENSSL_CFLAGS = $$system(pkg-config --cflags openssl 2>/dev/null)
+OPENSSL_LIBS = $$system(pkg-config --libs openssl 2>/dev/null)
+!isEmpty(OPENSSL_LIBS) {
+    DEFINES += CPPHTTPLIB_OPENSSL_SUPPORT
+    # 头文件路径：keg-only 环境（Homebrew/MacPorts）cflags 非空；系统 OpenSSL 为空（默认路径）
+    !isEmpty(OPENSSL_CFLAGS) {
+        QMAKE_CXXFLAGS += $$OPENSSL_CFLAGS
+        INCLUDEPATH += $$system(pkg-config --cflags-only-I openssl 2>/dev/null | sed 's/-I//g')
+    }
+    LIBS += $$OPENSSL_LIBS
+}
+
 macx: LIBS += -liconv \
     -framework CoreFoundation \
     -framework IOKit \
-    -framework ApplicationServices
+    -framework ApplicationServices \
+    -framework Security
 
 # 库路径和链接
 # QMAKE_LIBDIR_FLAGS += -L/opt/qt338sh/lib

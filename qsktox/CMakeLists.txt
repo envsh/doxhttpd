@@ -205,6 +205,10 @@ set(QSKTOX_INCLUDE_DIRS
 )
 target_include_directories(qsktox PRIVATE ${QSKTOX_INCLUDE_DIRS})
 
+target_compile_definitions(qsktox PRIVATE
+    CPPHTTPLIB_NO_EXCEPTIONS
+    CPPHTTPLIB_OPENSSL_SUPPORT)
+
 target_link_libraries(qsktox PRIVATE Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::Multimedia)
 
 # ── crashreport：arm64 NDK release 默认 -fomit-frame-pointer，会剥掉 fp 合法
@@ -306,6 +310,13 @@ else()
     target_link_libraries(qsktox PRIVATE CURL::libcurl OpenSSL::SSL OpenSSL::Crypto ${CMAKE_DL_LIBS})
 endif()
 
+# macOS 的 iconv 不在默认链接里（qlappcom/linkpreview.cpp 使用 iconv_open/iconv_close）
+if(APPLE)
+    find_library(ICONV_LIBRARY iconv REQUIRED)
+    find_library(SECURITY_FRAMEWORK Security REQUIRED)   # httplib: macOS 系统证书读取
+    target_link_libraries(qsktox PRIVATE ${ICONV_LIBRARY} ${SECURITY_FRAMEWORK})
+endif()
+
 # ── vendor: SQLite 预编译库 ──
 if(ANDROID)
     add_library(sqlite3 SHARED IMPORTED GLOBAL)
@@ -338,7 +349,13 @@ if(NOT ANDROID)
     target_link_libraries(qsktox_test PRIVATE
         Qsk::QSkinny Qt6::Quick Qt6::Network Qt6::Core Qt6::QuickPrivate Qt6::Multimedia
         SQLite::SQLite3 CURL::libcurl OpenSSL::SSL OpenSSL::Crypto
+        ${CMAKE_DL_LIBS}
         gumbo)
+    if(APPLE)
+        find_library(ICONV_LIBRARY iconv REQUIRED)
+        find_library(SECURITY_FRAMEWORK Security REQUIRED)
+        target_link_libraries(qsktox_test PRIVATE ${ICONV_LIBRARY} ${SECURITY_FRAMEWORK})
+    endif()
     add_custom_target(test
         DEPENDS qsktox_test
         COMMAND ${CMAKE_CURRENT_BINARY_DIR}/qsktox_test

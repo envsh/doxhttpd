@@ -598,7 +598,7 @@ jobs:
           retention-days: 30
 
   build-qsktox-osx:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
       - name: Pull dependency repos
@@ -644,7 +644,7 @@ jobs:
         id: cache-qskinny
         with:
           path: ~/qt/qskinny
-          key: qskinny-macos-${{ hashFiles('qsktox/plan.md') }}
+          key: qskinny-macos15-${{ hashFiles('qsktox/plan.md') }}
       - name: Build and install QSkinny
         if: steps.cache-qskinny.outputs.cache-hit != 'true'
         run: |
