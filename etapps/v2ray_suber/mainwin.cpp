@@ -313,6 +313,36 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     /* ── Tab: 日志 ── */
     QWidget* logPage = new QWidget(tabs);
     QVBoxLayout* logLayout = (QVBoxLayout*)qNewBoxLayout(logPage, QBoxLayout::TopToBottom, 6, 4);
+    /* 顶部工具栏：行数、大小、级别过滤、关键字过滤、操作按钮 */
+    QHBoxLayout* logBar = (QHBoxLayout*)qNewBoxLayout(0, QBoxLayout::LeftToRight, 4, 4);
+    QLabel* logCntLabel = new QLabel(qFromUtf8("行数：0"), logPage);
+    QLabel* logSizeLabel = new QLabel(qFromUtf8("大小：0 B"), logPage);
+    logCntLabel->setMinimumWidth(70);
+    logSizeLabel->setMinimumWidth(90);
+    logBar->addWidget(logCntLabel);
+    logBar->addWidget(logSizeLabel);
+    logBar->addWidget(new QLabel(qFromUtf8("级别："), logPage));
+    QComboBox* logLevelBox = new QComboBox(logPage);
+    V2ComboAdd(logLevelBox, qFromUtf8("全部"));
+    V2ComboAdd(logLevelBox, qFromUtf8("警告"));
+    V2ComboAdd(logLevelBox, qFromUtf8("错误"));
+    logBar->addWidget(logLevelBox);
+    logBar->addWidget(new QLabel(qFromUtf8("过滤："), logPage));
+    QLineEdit* logFilterEdit = new QLineEdit(logPage);
+    logFilterEdit->setMinimumWidth(150);
+    logBar->addWidget(logFilterEdit);
+    QPushButton* logCopyBtn = new QPushButton(qFromUtf8("拷贝"), logPage);
+    QPushButton* logSelAllBtn = new QPushButton(qFromUtf8("全选"), logPage);
+    QPushButton* logClearBtn = new QPushButton(qFromUtf8("清空"), logPage);
+    QPushButton* logTopBtn = new QPushButton(qFromUtf8("滚动顶部"), logPage);
+    QPushButton* logBottomBtn = new QPushButton(qFromUtf8("滚动底部"), logPage);
+    logBar->addWidget(logCopyBtn);
+    logBar->addWidget(logSelAllBtn);
+    logBar->addWidget(logClearBtn);
+    logBar->addWidget(logTopBtn);
+    logBar->addWidget(logBottomBtn);
+    logBar->addStretch(1);
+    logLayout->addLayout(logBar);
     QTextEdit* logEdit = new QTextEdit(logPage);
 #ifdef QT3_BUILD
     logEdit->setTextFormat(Qt::PlainText);
@@ -340,6 +370,16 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     logic->setTrafficWidget(trafficLabel);
     logic->setNodeViewWidgets(nodeFilterEdit, nodeSortBox);
     logic->setFavWidgets(favList);
+    logic->setLogWidgets(logCntLabel, logSizeLabel, logLevelBox, logFilterEdit);
+    QObject::connect(logLevelBox, SIGNAL(activated(int)),
+                     logic, SLOT(onLogLevelChanged()));
+    QObject::connect(logFilterEdit, SIGNAL(textChanged(const QString&)),
+                     logic, SLOT(onLogFilterChanged()));
+    QObject::connect(logCopyBtn, SIGNAL(clicked()), logic, SLOT(onLogCopy()));
+    QObject::connect(logSelAllBtn, SIGNAL(clicked()), logic, SLOT(onLogSelectAll()));
+    QObject::connect(logClearBtn, SIGNAL(clicked()), logic, SLOT(onLogClear()));
+    QObject::connect(logTopBtn, SIGNAL(clicked()), logic, SLOT(onLogScrollTop()));
+    QObject::connect(logBottomBtn, SIGNAL(clicked()), logic, SLOT(onLogScrollBottom()));
     QObject::connect(nodeFilterEdit, SIGNAL(textChanged(const QString&)),
                      logic, SLOT(onNodeFilterChanged()));
     QObject::connect(nodeSortBox, SIGNAL(activated(int)),
@@ -381,12 +421,14 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     subMenu->insertItem(qFromUtf8("更新选中订阅"), logic, SLOT(onUpdateSubscription()));
     subMenu->insertItem(qFromUtf8("更新全部订阅"), logic, SLOT(onUpdateAllSubscriptions()));
     subMenu->insertItem(qFromUtf8("复制订阅链接"), logic, SLOT(onCopySubLink()));
+    subMenu->insertItem(qFromUtf8("显示订阅二维码"), logic, SLOT(onShowSubQr()));
     subMenu->insertItem(qFromUtf8("删除订阅"), logic, SLOT(onDelSubscription()));
 #else
     QMenu* subMenu = new QMenu(w);
     subMenu->addAction(qFromUtf8("更新选中订阅"), logic, SLOT(onUpdateSubscription()));
     subMenu->addAction(qFromUtf8("更新全部订阅"), logic, SLOT(onUpdateAllSubscriptions()));
     subMenu->addAction(qFromUtf8("复制订阅链接"), logic, SLOT(onCopySubLink()));
+    subMenu->addAction(qFromUtf8("显示订阅二维码"), logic, SLOT(onShowSubQr()));
     subMenu->addAction(qFromUtf8("删除订阅"), logic, SLOT(onDelSubscription()));
 #endif
     LambdaSlot* subCtx = new LambdaSlot(0, [=] {
@@ -407,6 +449,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     QPopupMenu* nodeMenu = new QPopupMenu(w);
     nodeMenu->insertItem(qFromUtf8("用此节点启动核心"), logic, SLOT(onStartCore()));
     nodeMenu->insertItem(qFromUtf8("复制节点链接"), logic, SLOT(onCopyNodeLink()));
+    nodeMenu->insertItem(qFromUtf8("显示二维码"), logic, SLOT(onShowNodeQr()));
     nodeMenu->insertItem(qFromUtf8("加入/取消收藏"), logic, SLOT(onToggleFavorite()));
     nodeMenu->insertSeparator();
     nodeMenu->insertItem(qFromUtf8("查询国家（选中）"), logic, SLOT(onLookupCountrySelected()));
@@ -425,6 +468,7 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     QMenu* nodeMenu = new QMenu(w);
     nodeMenu->addAction(qFromUtf8("用此节点启动核心"), logic, SLOT(onStartCore()));
     nodeMenu->addAction(qFromUtf8("复制节点链接"), logic, SLOT(onCopyNodeLink()));
+    nodeMenu->addAction(qFromUtf8("显示二维码"), logic, SLOT(onShowNodeQr()));
     nodeMenu->addAction(qFromUtf8("加入/取消收藏"), logic, SLOT(onToggleFavorite()));
     nodeMenu->addSeparator();
     nodeMenu->addAction(qFromUtf8("查询国家（选中）"), logic, SLOT(onLookupCountrySelected()));
@@ -464,11 +508,13 @@ QWidget* createV2raySuberMainWindow(void* parent) {
     QPopupMenu* favMenu = new QPopupMenu(w);
     favMenu->insertItem(qFromUtf8("用此节点启动核心"), logic, SLOT(onStartFavCore()));
     favMenu->insertItem(qFromUtf8("复制节点链接"), logic, SLOT(onCopyFavLink()));
+    favMenu->insertItem(qFromUtf8("显示二维码"), logic, SLOT(onShowFavQr()));
     favMenu->insertItem(qFromUtf8("取消收藏"), logic, SLOT(onUnfavFav()));
 #else
     QMenu* favMenu = new QMenu(w);
     favMenu->addAction(qFromUtf8("用此节点启动核心"), logic, SLOT(onStartFavCore()));
     favMenu->addAction(qFromUtf8("复制节点链接"), logic, SLOT(onCopyFavLink()));
+    favMenu->addAction(qFromUtf8("显示二维码"), logic, SLOT(onShowFavQr()));
     favMenu->addAction(qFromUtf8("取消收藏"), logic, SLOT(onUnfavFav()));
 #endif
     LambdaSlot* favCtx = new LambdaSlot(0, [=] {

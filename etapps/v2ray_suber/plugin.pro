@@ -43,6 +43,18 @@ HARFBUZZ_CFLAGS = $$system(pkg-config --cflags harfbuzz 2>/dev/null)
     message("HarfBuzz: pkg-config not found, using fallback paths")
 }
 
+# libqrencode 自动检测（二维码显示用；缺失则功能降级）
+QRENCODE_LIBS = $$system(pkg-config --libs libqrencode 2>/dev/null)
+QRENCODE_CFLAGS = $$system(pkg-config --cflags libqrencode 2>/dev/null)
+!isEmpty(QRENCODE_LIBS) {
+    DEFINES += HAVE_QRENCODE
+    QMAKE_CXXFLAGS += $$QRENCODE_CFLAGS
+    LIBS += $$QRENCODE_LIBS
+    message("libqrencode: detected via pkg-config")
+} else {
+    message("libqrencode: not found, QR support disabled")
+}
+
 SOURCES = main.cpp mainwin.cpp logic.cpp v2flag.cpp ../../qlcomp/compat34.cpp ../../qlcomp/qthooks.cpp ../../qlcomp/cJSON.c ../../qlcomp/qsettings34.cpp
 HEADERS = logic.h v2flag.h ../../qlcomp/qsettings34.h ../../qlcomp/lambdaslot.h
 DESTDIR = ../../../qltox/plugins/uiapps

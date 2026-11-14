@@ -53,6 +53,15 @@ static const char* v2BytesPtr(const QByteArray& b) {
 #include <qtimer.h>
 #include <qcheckbox.h>
 #include <qcombobox.h>
+#ifdef QT3_BUILD
+#include <qscrollbar.h>
+#else
+#include <QScrollBar>
+#endif
+#ifdef HAVE_QRENCODE
+#include <qdialog.h>
+#include <qrencode.h>
+#endif
 
 #include <stdio.h>
 #include <string.h>
@@ -451,6 +460,25 @@ static bool fileExists(const QString& path) {
     return QFile::exists(path);
 }
 
+/* 系统 Xray 资产目录候选（geo 文件查找用；app 内置目录之外） */
+static QStringList v2GeoSystemDirs() {
+    QStringList d;
+    d << QString("/usr/share/xray")
+      << QString("/usr/local/share/xray")
+      << QString("/opt/local/share/xray")
+      << QString("/opt/homebrew/share/xray")
+      << QString("/etc/xray")
+      << QString("/opt/local/etc/xray")
+      << QString("/opt/homebrew/etc/xray")
+      << QString("/usr/local/etc/xray");
+    return d;
+}
+
+/* 目录内 geoip.dat + geosite.dat 成对存在才算可用（路由规则需要两者） */
+static bool v2GeoDirHasPair(const QString& dir) {
+    return fileExists(dir + "/geoip.dat") && fileExists(dir + "/geosite.dat");
+}
+
 static void baAppend(QByteArray& dst, const QByteArray& src) {
     if (src.size() <= 0) { return; }
     int old = (int)dst.size();
@@ -557,6 +585,12 @@ V2RayLogic::V2RayLogic(QObject* parent)
     lastTestSocksKind = 2;
     lastTestHttpKind = 2;
     trafficLabel = 0;
+    logCntLabel = 0;
+    logSizeLabel = 0;
+    logLevelBox = 0;
+    logFilterEdit = 0;
+    logFilterLevel = 0;
+    logTotalBytes = 0;
     trafficTimer = 0;
     coreStateTimer = 0;
     coreRunningKnown = false;
@@ -678,6 +712,15 @@ void V2RayLogic::setWidgets(QLineEdit* subEdit_, V2Table* subList_, V2Table* nod
     geoipDatProbe();
 }
 
+void V2RayLogic::setLogWidgets(QLabel* cntLabel, QLabel* sizeLabel,
+                               QComboBox* levelBox, QLineEdit* filterEdit) {
+    logCntLabel = cntLabel;
+    logSizeLabel = sizeLabel;
+    logLevelBox = levelBox;
+    logFilterEdit = filterEdit;
+    updateLogStats();
+}
+
 QString V2RayLogic::baseDir() const {
 #ifdef QT3_BUILD
     QString home = QDir::homeDirPath();
@@ -700,12 +743,22 @@ QString V2RayLogic::coreConfigPath() const {
     return coreWorkDir() + "/config_run.json";
 }
 
-/* geo 文件实际所在目录：xrayDir → coreDir 依次探测 */
+/* geo 文件实际所在目录：xrayDir → coreDir →（系统核心时）系统资产目录 */
 QString V2RayLogic::geoAssetDir() const {
-    if (fileExists(xrayDir() + "/geoip.dat")
-        && fileExists(xrayDir() + "/geosite.dat")) { return xrayDir(); }
-    if (fileExists(coreDir() + "/geoip.dat")
-        && fileExists(coreDir() + "/geosite.dat")) { return coreDir(); }
+    fprintf(stderr, "[DBG-GEO] xrayDir=%s coreDir=%s sys=%d pairX=%d pairC=%d\n",
+            qToUtf8(xrayDir()).data(), qToUtf8(coreDir()).data(),
+            (int)coreSourceSystem, (int)v2GeoDirHasPair(xrayDir()),
+            (int)v2GeoDirHasPair(coreDir()));
+    if (v2GeoDirHasPair(xrayDir())) { return xrayDir(); }
+    if (v2GeoDirHasPair(coreDir())) { return coreDir(); }
+    /* source=system：系统 xray 运行时会自动在自身资产目录解析
+     * geosite:cn / geoip:cn 规则，成对存在即可用 */
+    if (coreSourceSystem) {
+        const QStringList dirs = v2GeoSystemDirs();
+        for (int i = 0; i < (int)dirs.count(); ++i) {
+            if (v2GeoDirHasPair(dirs[i])) { return dirs[i]; }
+        }
+    }
     return QString();
 }
 QString V2RayLogic::coreBinaryPath() const {
@@ -1040,6 +1093,9 @@ void V2RayLogic::refreshNodeList() {
     }
     nodeViewIdx = view;
     QStringList keepIds = selectedNodeIds();   /* 刷新前记录选中 id，刷新后恢复 */
+    /* 记录刷新前滚动位置：clear+重建会把视口重置回顶部（测速/收藏/清理都会走到这里） */
+    int savedTop = 0;
+    savedTop = nodeList->verticalScrollBar()->value();
     v2TableClear(nodeList);
     v2TableSetRows(nodeList, (int)view.count());
     for (int r = 0; r < (int)view.count(); ++r) {
@@ -1115,6 +1171,8 @@ void V2RayLogic::refreshNodeList() {
         v2TableSetCell(nodeList, r, 10, n.security.isEmpty() ? QString("none") : n.security);
     }
     restoreNodeSelection(keepIds);
+    /* 恢复滚动：必须放在 restoreNodeSelection 之后（setCurrentCell 会滚动视口） */
+    if (savedTop > 0) { nodeList->verticalScrollBar()->setValue(savedTop); }
     emit nodesChanged();
     refreshFavList();
 }
@@ -1198,6 +1256,8 @@ void V2RayLogic::refreshFavList() {
     for (int i = 0; i < (int)nodes.count(); ++i) {
         if (nodes[i].favorite) { ++cnt; }
     }
+    int savedTop = 0;
+    savedTop = favList->verticalScrollBar()->value();
     v2TableClear(favList);
     v2TableSetRows(favList, cnt);
     int r = 0;
@@ -1274,6 +1334,7 @@ void V2RayLogic::refreshFavList() {
         }
 #endif
     }
+    if (savedTop > 0) { favList->verticalScrollBar()->setValue(savedTop); }
 }
 
 /* ── 收藏操作 ── */
@@ -1407,8 +1468,16 @@ void V2RayLogic::setRouteWidgets(QCheckBox* bypassCnCheck_, QCheckBox* bypassLan
     if (bypassCnCheck) { bypassCnCheck->setChecked(st.valueBool("bypassCn", true)); }
     if (bypassLanCheck) { bypassLanCheck->setChecked(st.valueBool("bypassLan", true)); }
     if (bypassCnCheck && !hasGeoFiles()) {
+        /* 系统核心 + 系统资产目录有 geo 文件的情况已并入 geoAssetDir()，
+         * 走到这里 = 自有目录与系统目录都没有成对 geo 文件 */
         appendLogWithPrefix(qFromUtf8("[核心]"),
-            qFromUtf8("提示：未找到 geoip.dat / geosite.dat（xray/ 与 core/ 目录），勾选“绕过中国大陆”将不生效（重新下载安装核心即可）"));
+            qFromUtf8("提示：未找到成对 geoip.dat / geosite.dat（xray/、core/ 与系统资产目录），勾选“绕过中国大陆”将不生效（重新下载安装核心即可）"));
+    } else if (bypassCnCheck && coreSourceSystem
+               && !geoAssetDir().isEmpty()
+               && geoAssetDir() != xrayDir() && geoAssetDir() != coreDir()) {
+        appendLogWithPrefix(qFromUtf8("[核心]"),
+            qFromUtf8("geo 文件：使用系统 xray 资产目录 ") + geoAssetDir()
+            + qFromUtf8("（绕过中国大陆路由可用）"));
     }
 }
 
@@ -2335,23 +2404,17 @@ static bool v2IsIpLiteral(const QString& a) {
 /* 启动探测：仅检查文件是否存在（毫秒级），解析推迟到首次查询 */
 void V2RayLogic::geoipDatProbe() {
     if (g_geoLoaded) { return; }
-    const QString paths[] = {
-        xrayDir() + "/geoip.dat",
-        coreDir() + "/geoip.dat",
-        QString("/usr/share/xray/geoip.dat"),
-        QString("/usr/local/share/xray/geoip.dat"),
-        QString("/opt/local/share/xray/geoip.dat"),
-        QString("/opt/homebrew/share/xray/geoip.dat"),
-        QString("/etc/xray/geoip.dat"),
-        QString("/opt/local/etc/xray/geoip.dat"),
-        QString("/opt/homebrew/etc/xray/geoip.dat"),
-        QString("/usr/local/etc/xray/geoip.dat")
-    };
+    QStringList plist;
+    plist << (xrayDir() + "/geoip.dat") << (coreDir() + "/geoip.dat");
+    const QStringList sysDirs = v2GeoSystemDirs();
+    for (int i = 0; i < (int)sysDirs.count(); ++i) {
+        plist.append(sysDirs[i] + "/geoip.dat");
+    }
     QStringList tried;
-    for (int i = 0; i < (int)(sizeof(paths) / sizeof(paths[0])); ++i) {
-        tried.append(paths[i]);
-        if (!fileExists(paths[i])) { continue; }
-        g_geoPath = paths[i];
+    for (int i = 0; i < (int)plist.count(); ++i) {
+        tried.append(plist[i]);
+        if (!fileExists(plist[i])) { continue; }
+        g_geoPath = plist[i];
         appendLogWithPrefix(qFromUtf8("[国家]"),
             qFromUtf8("geoip.dat：") + g_geoPath + qFromUtf8("（找到，首次查询时加载）"));
         return;
@@ -3149,6 +3212,42 @@ void V2RayLogic::appendLog(const QString& msg) {
     appendLogWithPrefix(QString(), msg);
 }
 
+static bool v2StrContains(const QString& s, const QString& t) {
+#ifdef QT3_BUILD
+    return s.find(t, 0, false) >= 0;
+#else
+    return s.contains(t, Qt::CaseInsensitive);
+#endif
+}
+
+/* 日志级别判定（启发式）：2=错误 1=警告 0=普通 */
+static int v2LogLevelOf(const QString& msg) {
+    if (v2StrContains(msg, qFromUtf8("错误")) || v2StrContains(msg, qFromUtf8("异常"))
+        || v2StrContains(msg, qFromUtf8("无法写入"))) {
+        return 2;
+    }
+    if (v2StrContains(msg, qFromUtf8("失败")) || v2StrContains(msg, qFromUtf8("超时"))
+        || v2StrContains(msg, qFromUtf8("无法")) || v2StrContains(msg, qFromUtf8("未找到"))) {
+        return 1;
+    }
+    return 0;
+}
+
+/* 级别 + 关键字过滤（关键字不区分大小写） */
+static bool v2LogPassesFilter(const QString& line, int level,
+                              int filterLevel, const QString& kw) {
+    if (filterLevel == 1 && level == 0) { return false; }
+    if (filterLevel == 2 && level < 2) { return false; }
+    if (!kw.isEmpty()) {
+#ifdef QT3_BUILD
+        if (line.find(kw, 0, false) < 0) { return false; }
+#else
+        if (line.indexOf(kw, 0, Qt::CaseInsensitive) < 0) { return false; }
+#endif
+    }
+    return true;
+}
+
 void V2RayLogic::appendLogWithPrefix(const QString& prefix, const QString& msg) {
     if (!log) { return; }
     QString ts = QDateTime::currentDateTime().toString("hh:mm:ss");
@@ -3158,8 +3257,144 @@ void V2RayLogic::appendLogWithPrefix(const QString& prefix, const QString& msg) 
     } else {
         line = "[" + ts + "] " + prefix + " " + msg;
     }
-    log->append(line);
-    log->append("");
+    /* 核心 raw 输出可能是多行：按物理行拆开，行数/大小统计才准确 */
+    QStringList parts;
+    {
+        int start = 0;
+        const int n = (int)line.length();
+        for (int i = 0; i <= n; ++i) {
+            if (i == n || line[i] == '\n') {
+                if (i > start) { parts.append(line.mid(start, i - start)); }
+                start = i + 1;
+            }
+        }
+    }
+    if (parts.isEmpty()) { parts.append(line); }
+    const int lvl = v2LogLevelOf(msg);
+    const QString kw = logFilterEdit ? logFilterEdit->text() : QString();
+    QString shown;
+    for (int k = 0; k < (int)parts.count(); ++k) {
+        /* 内存数据层：供行数/大小统计与级别/关键字过滤（上限 5000 行） */
+        if ((int)logLines.count() >= 5000) {
+            logTotalBytes -= (long long)qToUtf8(logLines[0]).size() + 1;
+#ifdef QT3_BUILD
+            logLines.pop_front();
+            logLevels.pop_front();
+#else
+            logLines.removeFirst();
+            logLevels.removeFirst();
+#endif
+        }
+        logLines.append(parts[k]);
+        logLevels.append(lvl);
+        logTotalBytes += (long long)qToUtf8(parts[k]).size() + 1;
+        if (v2LogPassesFilter(parts[k], lvl, logFilterLevel, kw)) {
+            if (!shown.isEmpty()) { shown += "\n"; }
+            shown += parts[k];
+        }
+    }
+    if (!shown.isEmpty()) {
+        log->append(shown);
+        log->append("");
+    }
+    updateLogStats();
+}
+
+void V2RayLogic::updateLogStats() {
+    if (logCntLabel) {
+        logCntLabel->setText(qFromUtf8("行数：")
+            + QString::number((int)logLines.count()));
+    }
+    if (logSizeLabel) {
+        const long long b = logTotalBytes;
+        QString size;
+        if (b < 1024) {
+            size = QString::number((long)b) + " B";
+        } else if (b < 1024 * 1024) {
+            size = QString::number(b / 1024.0, 'f', 1) + " KB";
+        } else {
+            size = QString::number(b / 1048576.0, 'f', 1) + " MB";
+        }
+        logSizeLabel->setText(qFromUtf8("大小：") + size);
+    }
+}
+
+void V2RayLogic::rebuildLogView() {
+    if (!log) { return; }
+    QString kw = logFilterEdit ? logFilterEdit->text() : QString();
+    QString all;
+    for (int i = 0; i < (int)logLines.count(); ++i) {
+        if (!v2LogPassesFilter(logLines[i], logLevels[i],
+                               logFilterLevel, kw)) { continue; }
+        if (!all.isEmpty()) { all += "\n"; }
+        all += logLines[i];
+    }
+#ifdef QT3_BUILD
+    log->setText(all);
+    log->setTextFormat(Qt::PlainText);
+#else
+    log->setPlainText(all);
+#endif
+    QScrollBar* sb = log->verticalScrollBar();
+    if (sb) {
+#ifdef QT3_BUILD
+        sb->setValue(sb->maxValue());
+#else
+        sb->setValue(sb->maximum());
+#endif
+    }
+}
+
+void V2RayLogic::onLogLevelChanged() {
+    logFilterLevel = logLevelBox
+#ifdef QT3_BUILD
+        ? logLevelBox->currentItem() : 0;
+#else
+        ? logLevelBox->currentIndex() : 0;
+#endif
+    rebuildLogView();
+}
+
+void V2RayLogic::onLogFilterChanged() { rebuildLogView(); }
+
+void V2RayLogic::onLogCopy() {
+    if (!log) { return; }
+#ifdef QT3_BUILD
+    QApplication::clipboard()->setText(log->text());
+#else
+    QApplication::clipboard()->setText(log->toPlainText());
+#endif
+    appendLogWithPrefix(qFromUtf8("[日志]"), qFromUtf8("已复制当前日志视图"));
+}
+
+void V2RayLogic::onLogSelectAll() {
+    if (log) { log->selectAll(); }
+}
+
+void V2RayLogic::onLogClear() {
+    logLines.clear();
+    logLevels.clear();
+    logTotalBytes = 0;
+    if (log) { log->clear(); }
+    updateLogStats();
+}
+
+void V2RayLogic::onLogScrollTop() {
+    if (!log) { return; }
+    QScrollBar* sb = log->verticalScrollBar();
+    if (sb) { sb->setValue(0); }
+}
+
+void V2RayLogic::onLogScrollBottom() {
+    if (!log) { return; }
+    QScrollBar* sb = log->verticalScrollBar();
+    if (sb) {
+#ifdef QT3_BUILD
+        sb->setValue(sb->maxValue());
+#else
+        sb->setValue(sb->maximum());
+#endif
+    }
 }
 
 int V2RayLogic::selectedSubIndex() {
@@ -4588,6 +4823,135 @@ void V2RayLogic::onCopyNodeLink() {
         qFromUtf8("已复制 ") + QString::number((int)sel.count()) + qFromUtf8(" 个节点链接"));
 }
 
+#ifdef HAVE_QRENCODE
+/* 生成二维码 QPixmap：模块整数倍放大（nearest，QR 可靠性优先），四周留 4 模块静区 */
+static QPixmap v2QrPixmap(const QString& text, int sizePx) {
+    QByteArray utf8 = qToUtf8(text);
+    QRcode* qr = QRcode_encodeString(utf8.data(), 0, QR_ECLEVEL_M,
+                                     QR_MODE_8, 1);
+    if (!qr) { return QPixmap(); }
+    const int n = qr->width;
+    int scale = sizePx / (n + 8);
+    if (scale < 1) { scale = 1; }
+    const int margin = 4 * scale;
+    const int w = n * scale + margin * 2;
+#ifdef QT3_BUILD
+    QImage img(w, w, 32);
+#else
+    QImage img(w, w, QImage::Format_RGB32);
+#endif
+    img.fill(0xFFFFFFFF);
+    for (int y = 0; y < n; ++y) {
+        for (int x = 0; x < n; ++x) {
+            if ((qr->data[y * n + x] & 1) == 0) { continue; }
+            const int px = margin + x * scale;
+            const int py = margin + y * scale;
+            for (int dy = 0; dy < scale; ++dy) {
+                for (int dx = 0; dx < scale; ++dx) {
+                    img.setPixel(px + dx, py + dy, 0xFF000000);
+                }
+            }
+        }
+    }
+    QRcode_free(qr);
+#ifdef QT3_BUILD
+    return QPixmap(img);
+#else
+    return QPixmap::fromImage(img);
+#endif
+}
+
+/* 二维码展示对话框（无自定义信号，不需要 Q_OBJECT） */
+static bool v2ShowQrDialog(const QString& title, const QString& content) {
+    QPixmap pm = v2QrPixmap(content, 300);
+    if (pm.isNull()) { return false; }
+#ifdef QT3_BUILD
+    QDialog dlg(0, 0, true);
+    dlg.setCaption(title);
+#else
+    QDialog dlg(0);
+    dlg.setModal(true);
+    dlg.setWindowTitle(title);
+#endif
+    const int pw = pm.width();
+    QLabel lbl(&dlg);
+    lbl.setPixmap(pm);
+    lbl.setAlignment(Qt::AlignCenter);
+    lbl.setGeometry(10, 10, pw, pw);
+    QLabel tip(&dlg);
+    tip.setText(qFromUtf8("用手机客户端扫码导入"));
+    tip.setAlignment(Qt::AlignCenter);
+    tip.setGeometry(10, 14 + pw, pw, 20);
+    QPushButton btn(qFromUtf8("关闭"), &dlg);
+    btn.setGeometry((pw + 20 - 90) / 2, 40 + pw, 90, 30);
+    QObject::connect(&btn, SIGNAL(clicked()), &dlg, SLOT(accept()));
+    dlg.setFixedSize(pw + 20, 80 + pw);
+    dlg.exec();
+    return true;
+}
+#endif
+
+void V2RayLogic::showQrForNodeIndex(int idx) {
+#ifdef HAVE_QRENCODE
+    if (idx < 0 || idx >= (int)nodes.count()) {
+        appendLogWithPrefix(qFromUtf8("[节点]"), qFromUtf8("请先选中节点"));
+        return;
+    }
+    const V2Node& n = nodes[idx];
+    if (n.raw.isEmpty()) {
+        appendLogWithPrefix(qFromUtf8("[节点]"),
+            qFromUtf8("该节点没有分享链接，无法生成二维码"));
+        return;
+    }
+    QString title = n.name.isEmpty()
+        ? qFromUtf8("节点二维码") : (qFromUtf8("节点二维码：") + n.name);
+    if (!v2ShowQrDialog(title, n.raw)) {
+        appendLogWithPrefix(qFromUtf8("[节点]"),
+            qFromUtf8("生成二维码失败（内容为空或超出二维码容量）"));
+    }
+#else
+    appendLogWithPrefix(qFromUtf8("[节点]"),
+        qFromUtf8("本版本未编译二维码支持（缺少 libqrencode）"));
+#endif
+}
+
+void V2RayLogic::onShowNodeQr() {
+    V2IndexList sel = selectedNodeIndexes();
+    if ((int)sel.count() > 1) {
+        appendLogWithPrefix(qFromUtf8("[节点]"), qFromUtf8("只显示第一个选中节点的二维码"));
+    }
+    showQrForNodeIndex((int)sel.count() > 0 ? sel[0] : -1);
+}
+
+void V2RayLogic::onShowFavQr() {
+    V2IndexList sel = selectedFavIndexes();
+    if ((int)sel.count() > 1) {
+        appendLogWithPrefix(qFromUtf8("[收藏]"), qFromUtf8("只显示第一个选中节点的二维码"));
+    }
+    showQrForNodeIndex((int)sel.count() > 0 ? sel[0] : -1);
+}
+
+void V2RayLogic::onShowSubQr() {
+#ifdef HAVE_QRENCODE
+    int idx = selectedSubIndex();
+    if (idx < 0) {
+        appendLogWithPrefix(qFromUtf8("[订阅]"), qFromUtf8("请先选中订阅"));
+        return;
+    }
+    if (subs[idx].isEmpty()) {
+        appendLogWithPrefix(qFromUtf8("[订阅]"), qFromUtf8("订阅地址为空"));
+        return;
+    }
+    if (!v2ShowQrDialog(qFromUtf8("订阅二维码"), subs[idx])) {
+        appendLogWithPrefix(qFromUtf8("[订阅]"),
+            qFromUtf8("生成二维码失败（订阅地址过长？）"));
+    }
+#else
+    appendLogWithPrefix(qFromUtf8("[订阅]"),
+        qFromUtf8("本版本未编译二维码支持（缺少 libqrencode）"));
+#endif
+}
+
 /* ── 延迟测试（curl 实现，队列串行，不阻塞 UI） ── */
 /* ── 测速：TCP（传输层）/ 真连接（经临时核心访问 204） ── */
 void V2RayLogic::onTestLatency() { onTestTcpSelected(); }
@@ -5262,6 +5626,13 @@ bool V2RayLogic::generateConfig(const V2Node& node, QString& err) {
             rules.append("{\"type\":\"field\",\"outboundTag\":\"direct\",\"domain\":[\"geosite:cn\"]}");
             rules.append("{\"type\":\"field\",\"outboundTag\":\"direct\",\"ip\":[\"geoip:cn\"]}");
             appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("已启用绕过中国大陆路由（geosite:cn / geoip:cn 直连，其余走代理）"));
+            {
+                const QString gad = geoAssetDir();
+                if (gad != xrayDir() && gad != coreDir()) {
+                    appendLogWithPrefix(qFromUtf8("[核心]"),
+                        qFromUtf8("geo 文件：引用系统资产目录 ") + gad);
+                }
+            }
         } else {
             appendLogWithPrefix(qFromUtf8("[核心]"),
                 qFromUtf8("警告：未找到 core/geoip.dat 或 core/geosite.dat，绕过中国大陆路由未启用。请重新“下载安装”以获取完整 v2ray-core ") + qFromUtf8(V2CORE_VERSION) + qFromUtf8(" 包"));

@@ -116,6 +116,8 @@ public:
     QString nodeCountryTip(int row) const;
     QString favCountryTip(int row) const;
     void setNodeViewWidgets(QLineEdit* filterEdit, QComboBox* sortBox);
+    void setLogWidgets(QLabel* cntLabel, QLabel* sizeLabel,
+                       QComboBox* levelBox, QLineEdit* filterEdit);
     void setAutoUpdateWidgets(QCheckBox* chk, QComboBox* freq);
     void setCoreWidgets(QPushButton* dlBtn);
     void setCoreTestWidgets(QLabel* socksIcon, QLabel* socksText,
@@ -151,6 +153,9 @@ public slots:
     void advanceAfterTestCore();
     void onCoreStateTick();    /* 1s 状态同步（进程状态变化才刷新） */
     void onCopyNodeLink();
+    void onShowNodeQr();
+    void onShowFavQr();
+    void onShowSubQr();
     void onTestLatency();
     void onTestTcpSelected();
     void onTestTcpAll();
@@ -181,6 +186,13 @@ public slots:
     void onCopyFavLink();
     void onUnfavFav();
     void onNodeFilterChanged();
+    void onLogLevelChanged();
+    void onLogFilterChanged();
+    void onLogCopy();
+    void onLogSelectAll();
+    void onLogClear();
+    void onLogScrollTop();
+    void onLogScrollBottom();
     void onNodeSortChanged();
     void onTrafficPoll();
     void onStatsExited();
@@ -221,6 +233,9 @@ private slots:
     void probeStartGstatic(int which);
 
 private:
+    void showQrForNodeIndex(int idx);
+    void rebuildLogView();
+    void updateLogStats();
     QString baseDir() const;
     QString coreDir() const;
     QString coreBinaryPath() const;
@@ -353,6 +368,14 @@ private:
     int     probeSocksKind;      /* gstatic 阶段0的 SOCKS 图标 kind */
     QLabel* activeNodeLabel;     /* 当前使用的节点 */
     QTextEdit* log;
+    QLabel* logCntLabel;
+    QLabel* logSizeLabel;
+    QComboBox* logLevelBox;
+    QLineEdit* logFilterEdit;
+    QStringList logLines;        /* 全量日志行（含时间戳前缀） */
+    V2IndexList logLevels;       /* 与 logLines 平行：0=普通 1=警告 2=错误 */
+    int logFilterLevel;          /* 0=全部 1=警告 2=错误 */
+    long long logTotalBytes;
     QPushButton* startBtn;
     QPushButton* stopBtn;
     QCheckBox* bypassCnCheck;
