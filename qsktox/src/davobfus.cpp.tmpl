@@ -18,6 +18,8 @@
 //   - _DEBUG       MSVC 传统调试宏
 //   - !NDEBUG      C/C++ 标准：未定义 NDEBUG 即断言/调试模式
 //   - QT_DEBUG     Qt：qtconfigmacros.h 在未定义 QT_NO_DEBUG 时自动定义
+//   - __cplusplus < 202002L  ADVobfuscator 是 C++20 专有；Release + C++17 时
+//                            必须回退 libobfuscate，否则 operator""_obf 未定义
 // ADVobfuscator 须用 `_obf` UDL 而非显式构造：
 //   ObfuscatedString("...") 会把字面量当运行时参数留在 .rodata 泄露明文；
 //   "..."_obf 把 ObfuscatedString 整体作为 NTTP 模板实参，仅存编码字节。
@@ -36,7 +38,9 @@ using namespace andrivet::advobfuscator;
 
 QString davObfusKey()
 {
-#if defined(__ANDROID__) || defined(_DEBUG) || !defined(NDEBUG) || defined(QT_DEBUG)
+#if !defined(__cplusplus) || __cplusplus < 202002L \
+    || defined(__ANDROID__) || defined(_DEBUG) \
+    || !defined(NDEBUG) || defined(QT_DEBUG)
     // libobfuscate：编译期 XOR 加密，明文不出现在二进制（全构建生效）
     const char* key = AY_OBFUSCATE(DAVOBFUS_KEY);
     return QString::fromUtf8(key);
@@ -52,7 +56,9 @@ QString davObfusKey()
 
 QString zaiApiKey()
 {
-#if defined(__ANDROID__) || defined(_DEBUG) || !defined(NDEBUG) || defined(QT_DEBUG)
+#if !defined(__cplusplus) || __cplusplus < 202002L \
+    || defined(__ANDROID__) || defined(_DEBUG) \
+    || !defined(NDEBUG) || defined(QT_DEBUG)
     const char* key = AY_OBFUSCATE(ZAI_OBFUS_KEY);
     return QString::fromUtf8(key);
 #else

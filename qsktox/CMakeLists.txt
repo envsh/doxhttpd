@@ -302,7 +302,8 @@ if(ANDROID)
 else()
     find_package(CURL REQUIRED)
     find_package(OpenSSL REQUIRED)
-    target_link_libraries(qsktox PRIVATE CURL::libcurl OpenSSL::SSL OpenSSL::Crypto)
+    # ttsbot 通过 dlsym 解析 curl WebSocket 符号（兼容老 libcurl），Linux 需 -ldl
+    target_link_libraries(qsktox PRIVATE CURL::libcurl OpenSSL::SSL OpenSSL::Crypto ${CMAKE_DL_LIBS})
 endif()
 
 # ── vendor: SQLite 预编译库 ──

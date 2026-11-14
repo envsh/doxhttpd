@@ -148,7 +148,10 @@ DEFINES += HAVE_SQLITE
 
 # 链接预览：gumbo (HTML5 解析，vendor 源码，全平台统一，不使用系统 libgumbo)
 include(../vendor/gumbo.pri)
-macx: LIBS += -liconv
+macx: LIBS += -liconv \
+    -framework CoreFoundation \
+    -framework IOKit \
+    -framework ApplicationServices
 
 # 库路径和链接
 # QMAKE_LIBDIR_FLAGS += -L/opt/qt338sh/lib
