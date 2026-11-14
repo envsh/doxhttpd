@@ -7,6 +7,10 @@
 #include "metavars_cache.h"
 #include "version.h"
 #include "avatar_manager.h"
+#include "identicon.h"
+#ifdef EMOJI_RENDER_QT34
+#include "emojiutil.h"
+#endif
 #include "translator.h"
 #include "ThemeManager.h"
 #include "logindialog.h"
@@ -3942,6 +3946,23 @@ void MainWindow::clearLyricsHint() {
 
 void MainWindow::showClockOnLyrics()
 {
+    /* 缓存诊断：每 5 分钟输出一次三个 QPixmap 缓存的条目数与估算字节数 */
+    static int s_cacheStatTicks = 0;
+    if (++s_cacheStatTicks >= 300) {
+        s_cacheStatTicks = 0;
+        long long emojiCnt = 0, emojiBytes = 0;
+#ifdef EMOJI_RENDER_QT34
+        emojiCnt = EmojiRenderer::instance().cacheCount();
+        emojiBytes = EmojiRenderer::instance().cacheBytes();
+#endif
+        qWarning("[cache] avatar count=%d bytes=%lld | emoji count=%lld bytes=%lld"
+                 " | identicon count=%d bytes=%lld",
+                 AvatarManager::inst().cacheCount(),
+                 AvatarManager::inst().cacheBytes(),
+                 emojiCnt, emojiBytes,
+                 identiconCacheCount(), identiconCacheBytes());
+    }
+
     if (m_hintActive) return;
 
     static const char* weekDays[] = {

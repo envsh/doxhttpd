@@ -24,6 +24,7 @@ private slots:
     void copyStats();
     void onTabClicked();
     void updateNetStats();
+    void updateCacheStats();
 
 protected:
     void customEvent(CustomEventBase* event);
@@ -33,6 +34,7 @@ private:
     void buildOverviewPage(QWidget* inner);
     void buildResultGrid(QWidget* host);
     void buildNetworkPage(QWidget* inner);
+    void buildCachePage(QWidget* inner);
     QString dataDirText() const;
     void rebuildResultText();
 

@@ -5,6 +5,11 @@
 #include "pending_db.h"
 #include "sticker_db.h"
 #include "cache_db.h"
+#include "avatar_manager.h"
+#include "identicon.h"
+#ifdef EMOJI_RENDER_QT34
+#include "emojiutil.h"
+#endif
 
 #include <qapplication.h>
 #include <qclipboard.h>
@@ -88,7 +93,8 @@ QString itemLine(const QString& name, const QString& value) {
 }
 
 QString statValue(int i, const std::vector<int64_t>& vals) {
-    if (i == 0 || i == 1) { return fmtBytes(vals[i]); }
+    /* 字节型：message.db / cache.db / avatar / emoji / identicon 大小 */
+    if (i == 0 || i == 1 || i == 15 || i == 17 || i == 19) { return fmtBytes(vals[i]); }
     if (vals[i] < 0) { return QString("-"); }
     return qFromUtf8(groupNum(vals[i]).c_str());
 }
@@ -191,7 +197,7 @@ void StatsWorker::run() {
 StatisticsDialog::StatisticsDialog(QWidget* parent) : QDialog(parent) {
     qSetWindowTitle(this, qFromUtf8("统计"));
     resize(560, 480);
-    m_vals.assign(14, -1);
+    m_vals.assign(20, -1);
 
     QVBoxLayout* root = new QVBoxLayout(this);
 
@@ -234,6 +240,8 @@ StatisticsDialog::StatisticsDialog(QWidget* parent) : QDialog(parent) {
         ScrollArea* scroll = makeScrollArea(page, inner);
         if (i == 3) {
             buildNetworkPage(inner);
+        } else if (i == 2) {
+            buildCachePage(inner);
         } else {
             (new QVBoxLayout(inner))->addWidget(new QLabel(qFromUtf8("（待定）"), inner));
         }
@@ -363,9 +371,65 @@ void StatisticsDialog::onTabClicked() {
         if (m_tabButtons[i] == btn) {
             qStackSetCurrent(m_pageStack, m_pages[i]);
             if (i == 3) { updateNetStats(); }
+            if (i == 2) { updateCacheStats(); }
             break;
         }
     }
+}
+
+void StatisticsDialog::buildCachePage(QWidget* inner) {
+    QVBoxLayout* lay = new QVBoxLayout(inner);
+
+    QHBoxLayout* topRow = new QHBoxLayout;
+    QPushButton* refreshBtn = new QPushButton(qFromUtf8("刷新"), inner);
+    connect(refreshBtn, SIGNAL(clicked()), this, SLOT(updateCacheStats()));
+    topRow->addWidget(refreshBtn);
+    topRow->addStretch(1);
+    lay->addLayout(topRow);
+
+    QWidget* box = new QWidget(inner);
+    QGridLayout* grid = new QGridLayout(box);
+    grid->setSpacing(6);
+#ifdef QT3_BUILD
+    grid->setColStretch(1, 1);
+#else
+    grid->setColumnStretch(1, 1);
+#endif
+    int row = 0;
+    auto addHeader = [&](const QString& text) {
+        QLabel* h = new QLabel(text, box);
+        QFont f = h->font();
+        f.setBold(true);
+        h->setFont(f);
+#ifdef QT3_BUILD
+        grid->addMultiCellWidget(h, row, row, 0, 1);
+#else
+        grid->addWidget(h, row, 0, 1, 2);
+#endif
+        ++row;
+    };
+    auto addNameRow = [&](const QString& name) {
+        QLabel* nl = new QLabel(name, box);
+        nl->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        grid->addWidget(nl, row, 0);
+        QLabel* vl = new QLabel("-", box);
+        vl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        grid->addWidget(vl, row, 1);
+        m_valueLabels.push_back(vl);
+        ++row;
+    };
+
+    /* 顺序必须与 m_vals 下标一致：14..19=内存图像缓存（12/13 在总览页） */
+    addHeader(qFromUtf8("内存图像缓存（上限 4096 条，淘汰时写日志）"));
+    addNameRow(qFromUtf8("avatar 缓存条目"));
+    addNameRow(qFromUtf8("avatar 缓存大小"));
+    addNameRow(qFromUtf8("emoji 缓存条目"));
+    addNameRow(qFromUtf8("emoji 缓存大小"));
+    addNameRow(qFromUtf8("identicon 缓存条目"));
+    addNameRow(qFromUtf8("identicon 缓存大小"));
+
+    lay->addWidget(box, 1);
+    lay->addStretch(1);
 }
 
 void StatisticsDialog::buildNetworkPage(QWidget* inner) {
@@ -422,11 +486,30 @@ void StatisticsDialog::updateNetStats() {
     m_netLabels[4]->setText(qFromUtf8(groupNum((int64_t)s.fail).c_str()));
 }
 
+void StatisticsDialog::updateCacheStats() {
+    if (m_valueLabels.size() < 20) { return; }
+    m_vals[14] = AvatarManager::inst().cacheCount();
+    m_vals[15] = AvatarManager::inst().cacheBytes();
+#ifdef EMOJI_RENDER_QT34
+    m_vals[16] = EmojiRenderer::instance().cacheCount();
+    m_vals[17] = EmojiRenderer::instance().cacheBytes();
+#else
+    m_vals[16] = 0;
+    m_vals[17] = 0;
+#endif
+    m_vals[18] = identiconCacheCount();
+    m_vals[19] = identiconCacheBytes();
+    for (int i = 14; i < 20; ++i) {
+        m_valueLabels[i]->setText(statValue(i, m_vals));
+    }
+}
+
 void StatisticsDialog::refreshStats() {
     if (m_worker) { return; }
     std::fill(m_vals.begin(), m_vals.end(), -1);
     std::string dir = Storage::instance().dataDir();
-    for (size_t i = 0; i < m_valueLabels.size(); ++i) {
+    /* 0..13 由 StatsWorker 填充；14..19（内存图像缓存）在切到“缓存”页时即时计算 */
+    for (size_t i = 0; i < m_valueLabels.size() && i < 14; ++i) {
         m_valueLabels[i]->setText(dir.empty() ? QString("-") : statValue((int)i, m_vals));
     }
     m_progressLabel->setText(qFromUtf8("正在统计 0/14"));
