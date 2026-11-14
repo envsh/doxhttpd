@@ -88,7 +88,7 @@ jobs:
           sudo apt update
           sudo apt install -y build-essential pkg-config \
             libcurl4-openssl-dev libfreetype-dev libopenal-dev \
-            libx11-dev libxext-dev uuid-dev libxss-dev
+            libx11-dev libxext-dev uuid-dev libxss-dev libgumbo-dev
       - name: Download and extract precompiled Qt3
         run: |
           sudo ln -sv /opt /opu
@@ -128,7 +128,7 @@ jobs:
         run: bash scripts/pollup_deps.sh
       - name: Install Qt5
         run: |
-          brew install qt@5 freetype openal-soft pkg-config
+          brew install qt@5 freetype openal-soft pkg-config gumbo-parser
           echo "/usr/local/opt/qt@5/bin" >> $GITHUB_PATH
       - name: Verify Qt5 installation
         run: |
@@ -188,7 +188,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo /opt/local/bin/port -q -b install \
-            qt4-mac pkgconfig freetype openal-soft sqlite3
+            qt4-mac pkgconfig freetype openal-soft sqlite3 gumbo-parser
           /opt/local/libexec/qt4/bin/qmake -v
           /opt/local/bin/pkg-config --modversion freetype2 openal sqlite3
 
@@ -398,7 +398,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgl-dev libegl-dev libfontconfig-dev libxkbcommon-dev
-          sudo apt-get install -y libcurl4-openssl-dev libsqlite3-dev
+          sudo apt-get install -y libcurl4-openssl-dev libsqlite3-dev libgumbo-dev
       - name: Cache QSkinny
         uses: actions/cache@v4
         id: cache-qskinny
@@ -561,6 +561,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Pull dependency repos
         run: bash scripts/pollup_deps.sh
+      - name: Install system dependencies
+        run: brew install gumbo-parser
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
