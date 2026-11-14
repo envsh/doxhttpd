@@ -2074,6 +2074,8 @@ void MainWindow::onContactSelected(int id, const QString& type, const QString& n
     std::string typeStr = std::string(qToUtf8(type).data());
     ChatHistory& hist = m_chatbuf.getOrCreate(id, typeStr);
     chatWidget->setBuffer(&hist);
+    /* 只保留最近 8 个聊天的内存历史，避免长期运行按聊天数累积 */
+    m_chatbuf.evictIdle(id, typeStr, 88888);
 
     if (!hist.loadedLatest50FromDB) {
         auto* db = Storage::instance().messageDb();
@@ -4003,11 +4005,13 @@ void MainWindow::onSwitchAccount() {
     chatWidget->setAttrForChat(QString(), -1);
     selfPubkey.clear();
     contactListWidget->clear();
+    /* 先让 ChatView 与旧 history 解绑（resetCanvas 会遍历并 stop 动画），
+     * 再销毁 ChatBuffer；否则 m_history 悬垂，切换账户时可能读已释放内存 */
+    chatWidget->setBuffer(nullptr);
     m_chatbuf = ChatBuffer();
 #ifdef __linux__
     malloc_trim(0);
 #endif
-    chatWidget->setBuffer(nullptr);
     chatWidget->setHeaderText("");
 
     // 重新加载数据

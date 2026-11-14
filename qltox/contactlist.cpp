@@ -9,6 +9,7 @@
 #include "LimeStyle.h"
 #include <qmessagebox.h>
 #include <algorithm>
+#include <cstdio>
 #include <set>
 #include <qpainter.h>
 #ifdef QT3_BUILD
@@ -142,6 +143,8 @@ static int calcItemHeight(const QFont& f) {
 
 QPixmap ContactListView::getCircularAvatar(uint32_t cp, int size) {
     if (size != m_avatarSize) {
+        fprintf(stderr, "[cache] contactlist avatar clear n=%d (size %d->%d)\n",
+                (int)m_circularAvatarCache.size(), m_avatarSize, size);
         m_circularAvatarCache.clear();
         m_avatarSize = size;
     }

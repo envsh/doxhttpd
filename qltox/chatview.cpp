@@ -2650,6 +2650,8 @@ void ChatView::onInsertOne(size_t index) {
 
 void ChatView::onInsertRange(size_t start, size_t cnt) {
     if (!m_history || cnt == 0 || start != 0) { return; }
+    /* 前插消息时索引整体后移，标记同步前插 */
+    m_gifFrameUpdated.insert(m_gifFrameUpdated.begin(), (size_t)cnt, (char)0);
     int w = contentWidth();
     if (w <= 0) { w = 400; }
     int addedH = 0;
@@ -2728,6 +2730,11 @@ void ChatView::onRemoveOne(size_t idx) {
 
 void ChatView::onRemoveRange(size_t start, size_t cnt) {
     if (!m_history || cnt == 0) { return; }
+    /* 与 history 同步裁剪逐索引标记，否则动画帧会命中错位的消息 */
+    if (start == 0 && cnt <= m_gifFrameUpdated.size()) {
+        m_gifFrameUpdated.erase(m_gifFrameUpdated.begin(),
+                                m_gifFrameUpdated.begin() + (long)cnt);
+    }
     _removeFromBlocks((int)start);
     if (start == 0) {
         m_evictLow = std::max(0, m_evictLow - (int)cnt);

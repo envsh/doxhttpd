@@ -2,6 +2,7 @@
 #define CHATBUFFER_H
 
 #include <deque>
+#include <list>
 #include <map>
 #include <utility>
 #include <string>
@@ -61,13 +62,17 @@ private:
 // - 若上游出现"需要清空"的需求，说明上游设计有误，需重新设计机制而非添加 clear()。
 class ChatBuffer {
 public:
+    typedef std::pair<int, std::string> Key;
     ChatHistory& getOrCreate(int chatId, const std::string& chatType);
     void append(int chatId, const std::string& chatType, const ChatElement& el);
     void prepend(int chatId, const std::string& chatType, const std::vector<ChatElement>& els);
     ChatHistory* ptr(int chatId, const std::string& chatType);
     void clearDisplayCacheFor(int chatId, const std::string& chatType);
+    /* 淘汰非当前聊天的空闲历史：只保留最近 keepN 个聊天 */
+    void evictIdle(int chatId, const std::string& chatType, int keepN = 8);
 private:
-    std::map<std::pair<int, std::string>, ChatHistory> m_map;
+    std::map<Key, ChatHistory> m_map;
+    std::list<Key> m_order;          /* LRU：表尾最新 */
 };
 
 #endif
