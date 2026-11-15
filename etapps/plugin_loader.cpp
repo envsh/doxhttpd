@@ -60,6 +60,57 @@ static inline PluginInfo& pluginRef(QList<PluginInfo>& list, int i) { return lis
 static inline const PluginInfo& pluginRef(const QList<PluginInfo>& list, int i) { return list[i]; }
 #endif
 
+/* 各平台动态库后缀（mac 默认 .dylib；Windows .dll；Linux .so，含版本号 .so.1） */
+static QStringList pluginSuffixes() {
+    QStringList s;
+#if defined(_WIN32) || defined(Q_OS_WIN)
+    s.append(".dll");
+#elif defined(__APPLE__) || defined(Q_OS_MAC)
+    s.append(".dylib");
+    s.append(".so");          /* 部分打包仍产出 .so */
+#else
+    s.append(".so");
+#endif
+    return s;
+}
+
+/* 去掉动态库后缀（含 .so.1 这类版本后缀） */
+static QString stripPluginSuffix(const QString& fileName) {
+    QString n = fileName;
+    const QStringList exts = pluginSuffixes();
+    int cut = -1;
+    for (int i = 0; i < exts.count(); ++i) {
+#ifdef QT3_BUILD
+        const int p = n.find(exts[i]);
+#else
+        const int p = n.indexOf(exts[i]);
+#endif
+        if (p > 0 && (cut < 0 || p < cut)) { cut = p; }
+    }
+    if (cut > 0) { n = n.left(cut); }
+    return n;
+}
+
+/* 插件身份 = 文件名规范化，避免依赖插件导出新符号：
+ *   libm3u8dl_ui.so  -> m3u8dl
+ *   libdummy_noui.so -> dummy
+ *   libfoo.so.1      -> foo
+ *   其它             -> 去掉 lib/.so 后的名字；为空则用完整文件名 */
+static QString derivePluginId(const QString& fileName) {
+    QString n = stripPluginSuffix(fileName);
+    if (n.startsWith("lib")) { n = n.mid(3); }
+    if (n.endsWith("_ui")) { n = n.left(n.length() - 3); }
+    if (n.endsWith("_noui")) { n = n.left(n.length() - 5); }
+    return n.isEmpty() ? fileName : n;
+}
+
+static PluginInfo* findPluginById(QList<PluginInfo>& list, const QString& id) {
+    for (int i = 0; i < list.count(); ++i) {
+        if (pluginRef(list, i).id == id) { return &pluginRef(list, i); }
+    }
+    return 0;
+}
+
 QStringList pluginBaseDirs() {
     QStringList dirs;
 
@@ -171,10 +222,14 @@ static void scanDir(const QString& path, int type, QList<PluginInfo>& out) {
     ALOG_INFO("[plugins] scanning:", path);
 
     QStringList nameFilter;
-    if (type == PLUGIN_TYPE_UIAPP) {
-        nameFilter << "lib*_ui.so";
-    } else {
-        nameFilter << "lib*_noui.so";
+    const QStringList exts = pluginSuffixes();
+    for (int e = 0; e < exts.count(); ++e) {
+        /* "*_ui.dll" 同时覆盖 libfoo_ui.so / foo_ui.dll（Windows 无 lib 前缀） */
+        if (type == PLUGIN_TYPE_UIAPP) {
+            nameFilter << (QString("*_ui") + exts[e]);
+        } else {
+            nameFilter << (QString("*_noui") + exts[e]);
+        }
     }
 
 #ifdef QT3_BUILD
@@ -216,6 +271,20 @@ static void scanDir(const QString& path, int type, QList<PluginInfo>& out) {
         info.destroy = 0;
         info.nouiInit = 0;
         info.nouiUninit = 0;
+        info.id = derivePluginId(fi->fileName());
+
+        /* 同一 ID 只保留先扫到的一份（目录顺序即优先级）；
+         * 覆盖「cwd==appdir 同目录扫两次」与「plugins/plugins4 同名副本」两种情况 */
+        {
+            PluginInfo* old = findPluginById(out, info.id);
+            if (old) {
+                ALOG_WARN("[plugins] duplicate id=", info.id,
+                          "ignored:", info.soPath,
+                          "(kept", old->soPath + ")");
+                dlclose(handle);
+                continue;
+            }
+        }
 
         if (type == PLUGIN_TYPE_UIAPP) {
             info.create = (void*(*)(void*))dlsym(handle, "plugin_create");

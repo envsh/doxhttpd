@@ -2033,9 +2033,21 @@ void MainWindow::rebuildEtappsMenu() {
 #ifndef QT3_BUILD
     m_etappActions.clear();
 #endif
+    QMap<QString, bool> seenIds;
     for (int i = 0; i < PluginLoader::uiappCount(); i++) {
         const PluginInfo& p = PluginLoader::uiappAt(i);
         if (!p.enabled) { continue; }
+        if (seenIds.contains(p.id)) {
+            /* 菜单不做过滤：若出现重复说明 loader 唯一性被破坏，暴露而不是掩盖 */
+#ifdef QT3_BUILD
+            qWarning("[etapps] duplicate plugin id in menu: %s",
+                     qToUtf8(p.id).data());
+#else
+            qWarning("[etapps] duplicate plugin id in menu: %s",
+                     p.id.toUtf8().constData());
+#endif
+        }
+        seenIds.insert(p.id, true);
 #ifdef QT3_BUILD
         int id = m_etappsMenu->insertItem(p.name);
         m_etappItemToIndex[id] = i;

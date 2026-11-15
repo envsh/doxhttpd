@@ -19,6 +19,7 @@ struct PluginInfo {
     QString version;
     QString description;
     QString soPath;
+    QString id;              /* 由文件名自动推导的稳定身份（不要求插件导出 plugin_id） */
     int     type;
     void*   handle;
     bool    enabled;
