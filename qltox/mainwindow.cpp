@@ -754,6 +754,11 @@ MainWindow::MainWindow(QWidget* parent)
 
     // ── Etapps 菜单 ──
     m_etappsMenu = mb->addMenu(qFromUtf8("Etapps(&E)"));
+    m_etappRunningMenu = 0;
+    m_etappRunningItemId = -1;
+    m_etappRunningSepId = -1;
+    m_etappRunningAction = 0;
+    m_etappsGen = -1;
     EmbeddedMenuBar::addItem(m_etappsMenu, qFromUtf8("插件管理..."), this, SLOT(openPluginManager()));
     EmbeddedMenuBar::addItem(m_etappsMenu, qFromUtf8("关闭全部窗口(&C)"), this, SLOT(onEtappCloseAll()));
     EmbeddedMenuBar::addSeparator(m_etappsMenu);
@@ -2028,8 +2033,20 @@ void MainWindow::initLoadPlugins() {
 /* 重建 Etapps 菜单：插件项 + 固定项（插件管理 / 关闭全部窗口） */
 void MainWindow::rebuildEtappsMenu() {
     if (!m_etappsMenu) { return; }
+    if (m_etappRunningMenu) {
+        /* 先摘除菜单项/动作，再销毁子菜单：Qt3 的 QMenuItem 只持有指针，不拥有对象 */
+#ifdef QT3_BUILD
+        if (m_etappRunningItemId >= 0) { m_etappsMenu->removeItem(m_etappRunningItemId); m_etappRunningItemId = -1; }
+        if (m_etappRunningSepId  >= 0) { m_etappsMenu->removeItem(m_etappRunningSepId);  m_etappRunningSepId  = -1; }
+#else
+        if (m_etappRunningAction) { m_etappsMenu->removeAction(m_etappRunningAction); m_etappRunningAction = 0; }
+#endif
+        delete m_etappRunningMenu;
+        m_etappRunningMenu = 0;
+    }
     m_etappsMenu->clear();
     m_etappItemToIndex.clear();
+    m_etappRunningItemToIndex.clear();
 #ifndef QT3_BUILD
     m_etappActions.clear();
 #endif
@@ -2059,6 +2076,45 @@ void MainWindow::rebuildEtappsMenu() {
         connect(act, SIGNAL(triggered()), this, SLOT(onEtappActionTriggered()));
 #endif
     }
+    /* ── 关闭实例子菜单：仅当有存活实例时出现 ── */
+    QStringList runningNames;
+    std::vector<int> runningIdx;
+    QString aliveSig;
+    for (int i = 0; i < PluginLoader::uiappCount(); ++i) {
+        const PluginInfo& p = PluginLoader::uiappAt(i);
+        if (!p.enabled) { continue; }
+        if (PluginLoader::winStateAt(i) != PW_None) {
+            runningIdx.push_back(i);
+            runningNames.append(p.name);
+            aliveSig += p.id + qFromUtf8(";");
+        }
+    }
+    m_etappAliveSig = aliveSig;
+
+    if (!runningIdx.empty()) {
+#ifdef QT3_BUILD
+        m_etappRunningMenu = new QPopupMenu(this);
+        for (int k = 0; k < (int)runningIdx.size(); ++k) {
+            int id = m_etappRunningMenu->insertItem(qFromUtf8("✕ ") + runningNames[k]);
+            m_etappRunningItemToIndex[id] = runningIdx[k];
+        }
+        connect(m_etappRunningMenu, SIGNAL(activated(int)),
+                this, SLOT(onEtappRunningActivated(int)));
+        m_etappRunningSepId = m_etappsMenu->insertSeparator();
+        m_etappRunningItemId = m_etappsMenu->insertItem(qFromUtf8("关闭实例 (")
+                                 + QString::number((int)runningIdx.size()) + ")", m_etappRunningMenu);
+#else
+        m_etappRunningMenu = m_etappsMenu->addMenu(qFromUtf8("关闭实例 (")
+                                 + QString::number((int)runningIdx.size()) + ")");
+        m_etappRunningAction = m_etappRunningMenu->menuAction();
+        for (int k = 0; k < (int)runningIdx.size(); ++k) {
+            QAction* a = m_etappRunningMenu->addAction(qFromUtf8("✕ ") + runningNames[k]);
+            a->setData(runningIdx[k]);
+            connect(a, SIGNAL(triggered()), this, SLOT(onEtappRunningTriggered()));
+        }
+#endif
+    }
+
 #ifdef QT3_BUILD
     m_etappsMenu->insertSeparator();
     m_etappsMenu->insertItem(qFromUtf8("插件管理..."), this, SLOT(openPluginManager()));
@@ -2073,10 +2129,51 @@ void MainWindow::rebuildEtappsMenu() {
 }
 
 /* App 级标识：勾选 + “（已打开）” = 内存中实例仍存在（隐藏或显示） */
+/* Qt3：关闭实例子菜单项（id → 插件索引） */
+void MainWindow::onEtappRunningActivated(int id) {
+#ifdef QT3_BUILD
+    QMap<int, int>::iterator it = m_etappRunningItemToIndex.find(id);
+    if (it == m_etappRunningItemToIndex.end()) { return; }
+    const int idx = it.data();
+    if (idx >= 0 && idx < PluginLoader::uiappCount()) {
+        PluginLoader::destroyUiApp(idx);
+        rebuildEtappsMenu();
+    }
+#else
+    (void)id;   /* Qt4 走 onEtappRunningTriggered() */
+#endif
+}
+
+/* Qt4：关闭实例 QAction（data = 插件索引） */
+void MainWindow::onEtappRunningTriggered() {
+#ifndef QT3_BUILD
+    QAction* a = qobject_cast<QAction*>(sender());
+    if (!a) { return; }
+    const int idx = a->data().toInt();
+    if (idx >= 0 && idx < PluginLoader::uiappCount()) {
+        PluginLoader::destroyUiApp(idx);
+        rebuildEtappsMenu();
+    }
+#endif
+}
+
 void MainWindow::syncEtappsMenuState() {
     if (!m_etappsMenu) { return; }
     if (m_etappsGen != PluginLoader::generation()) {
-        rebuildEtappsMenu();   /* 启用/禁用、重扫导致结构变化 */
+        /* aboutToShow 内不能改菜单结构（Qt3 会忽略），延迟一拍重建 */
+        QTimer::singleShot(0, this, SLOT(rebuildEtappsMenu()));
+        return;
+    }
+    /* 存活集合变化（新建/销毁）才重建；仅 Visible↔Hidden 不重建 */
+    QString aliveSig;
+    for (int i = 0; i < PluginLoader::uiappCount(); ++i) {
+        if (!PluginLoader::uiappAt(i).enabled) { continue; }
+        if (PluginLoader::winStateAt(i) != PW_None) {
+            aliveSig += PluginLoader::uiappAt(i).id + qFromUtf8(";");
+        }
+    }
+    if (aliveSig != m_etappAliveSig) {
+        QTimer::singleShot(0, this, SLOT(rebuildEtappsMenu()));
         return;
     }
     for (int i = 0; i < PluginLoader::uiappCount(); ++i) {
@@ -2110,7 +2207,7 @@ void MainWindow::onEtappActionTriggered() {
     const int idx = act->data().toInt();
     if (idx >= 0 && idx < PluginLoader::uiappCount()) {
         PluginLoader::createUiApp(idx, 0);
-        syncEtappsMenuState();
+        rebuildEtappsMenu();
     }
 #endif
 }
@@ -5234,11 +5331,13 @@ void MainWindow::onEtappActivated(int index) {
 #endif
     if (pluginIndex >= 0 && pluginIndex < PluginLoader::uiappCount()) {
         PluginLoader::createUiApp(pluginIndex, 0);
+        rebuildEtappsMenu();
     }
 }
 
 void MainWindow::onEtappCloseAll() {
     PluginLoader::closeAllUiApps();
+    rebuildEtappsMenu();
 }
 
 void MainWindow::openPluginManager() {

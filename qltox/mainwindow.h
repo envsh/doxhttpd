@@ -116,6 +116,8 @@ protected slots:
     void rebuildEtappsMenu();       /* 重建 Etapps 菜单（启用/禁用、重扫后） */
     void syncEtappsMenuState();     /* 同步“实例仍在”的勾选/文案标识 */
     void onEtappActionTriggered();  /* Qt4：QAction 触发（Qt3 由 activated(int) 处理） */
+    void onEtappRunningActivated(int id);   /* Qt3：关闭实例子菜单项 */
+    void onEtappRunningTriggered();         /* Qt4：关闭实例 QAction */
     void openMdEditor();
     void quitApp();                 // 真正退出应用（绕过 closeEvent 托盘拦截）
     void onTitleUilang(int index);   // titlebar 外观三件套：语言
@@ -190,6 +192,11 @@ private:
     SleepBlocker* m_sleepBlocker;
     MenuWidget34* m_etappsMenu;
     int m_etappsGen;                /* 已构建菜单对应的 PluginLoader::generation() */
+    QString m_etappAliveSig;        /* 存活实例集合签名（变化才重建） */
+    MenuWidget34* m_etappRunningMenu;   /* “关闭实例”子菜单（无实例时为空） */
+    int m_etappRunningItemId;       /* Qt3: 子菜单项 id（销毁前先 removeItem） */
+    int m_etappRunningSepId;        /* Qt3: 前置分隔线 id */
+    QAction* m_etappRunningAction;  /* Qt4: 子菜单的 menuAction（销毁前先 removeAction） */
     SystemTrayIcon* m_tray;   // 系统托盘（关闭时最小化到托盘）
     bool m_forceQuit;         // 退出菜单/托盘退出置 true，绕过 closeEvent 拦截
     QProcess* m_macShotProc;            // macOS 抓图进程（一次性，完成即销毁）
@@ -211,6 +218,7 @@ private:
 
     QMap<int, int> m_etappItemToIndex;    /* Qt3: 菜单项 id → 插件索引 */
     QMap<int, QAction*> m_etappActions;   /* Qt4: 插件索引 → QAction（勾选/文案同步用） */
+    QMap<int, int> m_etappRunningItemToIndex;   /* Qt3: 关闭实例子菜单 id → 插件索引 */
 };
 
 #endif // MAINWINDOW_H
