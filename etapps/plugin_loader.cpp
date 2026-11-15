@@ -4,10 +4,41 @@
 #include <qfileinfo.h>
 #include <qsettings.h>
 #include <qstringlist.h>
+#include <qevent.h>
+#include <qmap.h>
 #include <dlfcn.h>
 
 static QList<PluginInfo> s_uiapps;
 static QList<PluginInfo> s_nouis;
+
+/* 窗口与显式状态按 soPath 存放：rescan 清空列表时不会丢失存活窗口 */
+struct PluginRuntime {
+    QWidget* widget;
+    int winState;
+    PluginRuntime() : widget(0), winState(PW_None) {}
+};
+static QMap<QString, PluginRuntime> s_runtime;
+static int s_generation = 0;
+
+/* 事件过滤器：Show/Hide/Destroy 同步显式状态（菜单“已打开”标识的数据源） */
+class PluginWinWatcher : public QObject {
+public:
+    explicit PluginWinWatcher(const QString& path, QObject* parent = 0)
+        : QObject(parent), m_path(path) {}
+protected:
+    bool eventFilter(QObject* obj, QEvent* e) {
+        if (e->type() == QEvent::Show) {
+            PluginLoader::setWinStateForPath(m_path, PW_Visible);
+        } else if (e->type() == QEvent::Hide) {
+            PluginLoader::setWinStateForPath(m_path, PW_Hidden);
+        } else if (e->type() == QEvent::Destroy) {
+            PluginLoader::setWinStateForPath(m_path, PW_None);
+        }
+        return QObject::eventFilter(obj, e);
+    }
+private:
+    QString m_path;
+};
 
 // Qt3 QPtrList<PluginInfo>: must heap-allocate items (list stores pointers)
 // Call setAutoDelete(true) so clear() frees items.
@@ -180,6 +211,7 @@ static void scanDir(const QString& path, int type, QList<PluginInfo>& out) {
 #endif
         info.type = type;
         info.widget = 0;
+        info.winState = PW_None;
         info.create = 0;
         info.destroy = 0;
         info.nouiInit = 0;
@@ -248,6 +280,28 @@ void PluginLoader::scanPlugins() {
         scanDir(dirs[i] + "/noui", PLUGIN_TYPE_NOUI, s_nouis);
     }
 
+    /* 已不存在的插件：其窗口必须销毁（未变化的保留窗口与状态） */
+    QStringList keys = s_runtime.keys();
+    QStringList gone;
+    for (int k = 0; k < keys.count(); ++k) {
+        bool found = false;
+        for (int i = 0; i < s_uiapps.count(); ++i) {
+            if (pluginRef(s_uiapps, i).soPath == keys[k]) { found = true; break; }
+        }
+        if (!found) { gone.append(keys[k]); }
+    }
+    for (int k = 0; k < gone.count(); ++k) {
+        PluginRuntime& rt = s_runtime[gone[k]];
+        if (rt.widget) {
+            ALOG_INFO("[plugins] plugin gone, destroy window:", gone[k]);
+            rt.widget->deleteLater();
+            rt.widget = 0;
+        }
+        rt.winState = PW_None;
+        s_runtime.remove(gone[k]);
+    }
+    bumpGeneration();
+
     ALOG_INFO("[plugins] total:", s_uiapps.count(), "uiapp,",
               s_nouis.count(), "noui plugins found");
 }
@@ -278,10 +332,12 @@ QWidget* PluginLoader::createUiApp(int index, QWidget* parent) {
     }
 
     PluginInfo& info = pluginRef(s_uiapps, index);
-    if (info.widget) {
-        info.widget->show();
-        info.widget->raise();
-        return info.widget;
+    PluginRuntime& rt = s_runtime[info.soPath];
+    if (rt.widget) {
+        rt.widget->show();
+        rt.widget->raise();
+        rt.winState = PW_Visible;
+        return rt.widget;
     }
 
     if (!info.create) {
@@ -289,11 +345,14 @@ QWidget* PluginLoader::createUiApp(int index, QWidget* parent) {
     }
 
     ALOG_INFO("[plugins] createUiApp:", info.name);
-    info.widget = (QWidget*)info.create(parent);
-    if (info.widget) {
-        info.widget->show();
+    rt.widget = (QWidget*)info.create(parent);
+    if (rt.widget) {
+        /* 事件过滤器 parent=window：窗口销毁时自动回收 */
+        rt.widget->installEventFilter(new PluginWinWatcher(info.soPath, rt.widget));
+        rt.winState = PW_Visible;
+        rt.widget->show();
     }
-    return info.widget;
+    return rt.widget;
 }
 
 void PluginLoader::destroyUiApp(int index) {
@@ -302,10 +361,12 @@ void PluginLoader::destroyUiApp(int index) {
     }
 
     PluginInfo& info = pluginRef(s_uiapps, index);
-    if (info.widget && info.destroy) {
-        info.destroy(info.widget);
-        info.widget = 0;
+    PluginRuntime& rt = s_runtime[info.soPath];
+    if (rt.widget && info.destroy) {
+        info.destroy(rt.widget);
+        rt.widget = 0;
     }
+    rt.winState = PW_None;
     if (info.handle) {
         dlclose(info.handle);
         info.handle = 0;
@@ -315,13 +376,43 @@ void PluginLoader::destroyUiApp(int index) {
 void PluginLoader::closeAllUiApps() {
     for (int i = 0; i < s_uiapps.count(); i++) {
         PluginInfo& info = pluginRef(s_uiapps, i);
-        if (info.widget && info.destroy) {
+        PluginRuntime& rt = s_runtime[info.soPath];
+        if (rt.widget && info.destroy) {
             ALOG_INFO("[plugins] closeAllUiApps: destroying", info.name);
-            info.destroy(info.widget);
-            info.widget = 0;
+            info.destroy(rt.widget);
+            rt.widget = 0;
         }
+        rt.winState = PW_None;
     }
 }
+
+int PluginLoader::winStateAt(int index) {
+    if (index < 0 || index >= s_uiapps.count()) { return PW_None; }
+    const PluginInfo& info = pluginRef(s_uiapps, index);
+    QMap<QString, PluginRuntime>::iterator it = s_runtime.find(info.soPath);
+    if (it == s_runtime.end()) { return PW_None; }
+#ifdef QT3_BUILD
+    return it.data().winState;
+#else
+    return it.value().winState;
+#endif
+}
+
+void PluginLoader::setWinStateForPath(const QString& soPath, int state) {
+    s_runtime[soPath].winState = state;
+}
+
+/* 应用退出：先销毁全部窗口（插件代码仍在），再卸载 .so */
+void PluginLoader::shutdownAll() {
+    closeAllUiApps();
+    for (int i = 0; i < s_uiapps.count(); i++) {
+        PluginInfo& info = pluginRef(s_uiapps, i);
+        if (info.handle) { dlclose(info.handle); info.handle = 0; }
+    }
+}
+
+int PluginLoader::generation() { return s_generation; }
+void PluginLoader::bumpGeneration() { ++s_generation; }
 
 void PluginLoader::initNouiPlugins() {
     for (int i = 0; i < s_nouis.count(); i++) {
@@ -362,6 +453,7 @@ void PluginLoader::setEnabled(int index, bool on) {
         pluginRef(s_nouis, index - s_uiapps.count()).enabled = on;
     }
     saveState();
+    bumpGeneration();
 }
 
 bool PluginLoader::isEnabled(int index) {

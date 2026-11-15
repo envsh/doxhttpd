@@ -38,6 +38,8 @@
 class QProcess;   // macOS 异步 screencapture（仅在 .cpp 包含头文件）
 struct ChatElement;
 
+class QAction;
+
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
@@ -111,6 +113,9 @@ protected slots:
     void onEtappActivated(int index);
     void onEtappCloseAll();
     void openPluginManager();
+    void rebuildEtappsMenu();       /* 重建 Etapps 菜单（启用/禁用、重扫后） */
+    void syncEtappsMenuState();     /* 同步“实例仍在”的勾选/文案标识 */
+    void onEtappActionTriggered();  /* Qt4：QAction 触发（Qt3 由 activated(int) 处理） */
     void openMdEditor();
     void quitApp();                 // 真正退出应用（绕过 closeEvent 托盘拦截）
     void onTitleUilang(int index);   // titlebar 外观三件套：语言
@@ -184,6 +189,7 @@ private:
     QColor m_savedPlayedColor;
     SleepBlocker* m_sleepBlocker;
     MenuWidget34* m_etappsMenu;
+    int m_etappsGen;                /* 已构建菜单对应的 PluginLoader::generation() */
     SystemTrayIcon* m_tray;   // 系统托盘（关闭时最小化到托盘）
     bool m_forceQuit;         // 退出菜单/托盘退出置 true，绕过 closeEvent 拦截
     QProcess* m_macShotProc;            // macOS 抓图进程（一次性，完成即销毁）
@@ -203,9 +209,8 @@ private:
     MenuWidget34* m_darkMenu;
     std::vector<AppearanceMenuItemRef> m_appearanceItems;
 
-#ifdef QT3_BUILD
-    QMap<int, int> m_etappItemToIndex;
-#endif
+    QMap<int, int> m_etappItemToIndex;    /* Qt3: 菜单项 id → 插件索引 */
+    QMap<int, QAction*> m_etappActions;   /* Qt4: 插件索引 → QAction（勾选/文案同步用） */
 };
 
 #endif // MAINWINDOW_H

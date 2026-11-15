@@ -164,7 +164,12 @@ void PluginManagerDialog::onToggleEnabled() {
         return;
     }
     int index = m_checkboxToIndex[cb];
-    PluginLoader::setEnabled(index, cb->isChecked());
+    const bool on = cb->isChecked();
+    PluginLoader::setEnabled(index, on);
+    if (!on && index < PluginLoader::uiappCount()) {
+        /* App 规则：禁用插件必须立即关闭其窗口（不保留隐藏实例） */
+        PluginLoader::destroyUiApp(index);
+    }
 }
 
 void PluginManagerDialog::onOpenPlugin() {

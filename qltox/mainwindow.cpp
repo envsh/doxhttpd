@@ -1954,6 +1954,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
 // （触发窗口关闭、子控件析构等清理逻辑）。
 void MainWindow::quitApp() {
     m_forceQuit = true;
+    /* App 规则：先销毁插件窗口，再退出（随后 dlclose） */
+    PluginLoader::shutdownAll();
     close();
 }
 
@@ -2015,24 +2017,88 @@ void MainWindow::onFirstPaintComplete() {
 void MainWindow::initLoadPlugins() {
     PluginLoader::scanPlugins();
 #ifdef QT3_BUILD
+    connect(m_etappsMenu, SIGNAL(activated(int)), this, SLOT(onEtappActivated(int)));
+    connect(m_etappsMenu, SIGNAL(aboutToShow()), this, SLOT(syncEtappsMenuState()));
+#else
+    connect(m_etappsMenu, SIGNAL(aboutToShow()), this, SLOT(syncEtappsMenuState()));
+#endif
+    rebuildEtappsMenu();
+}
+
+/* 重建 Etapps 菜单：插件项 + 固定项（插件管理 / 关闭全部窗口） */
+void MainWindow::rebuildEtappsMenu() {
+    if (!m_etappsMenu) { return; }
+    m_etappsMenu->clear();
+    m_etappItemToIndex.clear();
+#ifndef QT3_BUILD
+    m_etappActions.clear();
+#endif
     for (int i = 0; i < PluginLoader::uiappCount(); i++) {
         const PluginInfo& p = PluginLoader::uiappAt(i);
-        if (!p.enabled) continue;
+        if (!p.enabled) { continue; }
+#ifdef QT3_BUILD
         int id = m_etappsMenu->insertItem(p.name);
         m_etappItemToIndex[id] = i;
-    }
-    connect(m_etappsMenu, SIGNAL(activated(int)), this, SLOT(onEtappActivated(int)));
 #else
-    {
-        QSignalMapper* etappMapper = new QSignalMapper(this);
-        for (int i = 0; i < PluginLoader::uiappCount(); i++) {
-            const PluginInfo& p = PluginLoader::uiappAt(i);
-            if (!p.enabled) continue;
-            QAction* action = m_etappsMenu->addAction(p.name);
-            etappMapper->setMapping(action, i);
-            connect(action, SIGNAL(triggered()), etappMapper, SLOT(map()));
+        QAction* act = m_etappsMenu->addAction(p.name);
+        act->setCheckable(true);
+        act->setData(i);
+        m_etappActions.insert(i, act);
+        connect(act, SIGNAL(triggered()), this, SLOT(onEtappActionTriggered()));
+#endif
+    }
+#ifdef QT3_BUILD
+    m_etappsMenu->insertSeparator();
+    m_etappsMenu->insertItem(qFromUtf8("插件管理..."), this, SLOT(openPluginManager()));
+    m_etappsMenu->insertItem(qFromUtf8("关闭全部窗口(&C)"), this, SLOT(onEtappCloseAll()));
+#else
+    m_etappsMenu->addSeparator();
+    m_etappsMenu->addAction(qFromUtf8("插件管理..."), this, SLOT(openPluginManager()));
+    m_etappsMenu->addAction(qFromUtf8("关闭全部窗口(&C)"), this, SLOT(onEtappCloseAll()));
+#endif
+    m_etappsGen = PluginLoader::generation();
+    syncEtappsMenuState();
+}
+
+/* App 级标识：勾选 + “（已打开）” = 内存中实例仍存在（隐藏或显示） */
+void MainWindow::syncEtappsMenuState() {
+    if (!m_etappsMenu) { return; }
+    if (m_etappsGen != PluginLoader::generation()) {
+        rebuildEtappsMenu();   /* 启用/禁用、重扫导致结构变化 */
+        return;
+    }
+    for (int i = 0; i < PluginLoader::uiappCount(); ++i) {
+        if (!PluginLoader::uiappAt(i).enabled) { continue; }
+        const bool alive = (PluginLoader::winStateAt(i) != PW_None);
+#ifdef QT3_BUILD
+        for (QMap<int, int>::iterator it = m_etappItemToIndex.begin();
+             it != m_etappItemToIndex.end(); ++it) {
+            if (it.data() != i) { continue; }
+            m_etappsMenu->setItemChecked(it.key(), alive);
+            break;
         }
-        connect(etappMapper, SIGNAL(mapped(int)), this, SLOT(onEtappActivated(int)));
+#else
+        QMap<int, QAction*>::iterator ai = m_etappActions.find(i);
+        if (ai != m_etappActions.end()) {
+            QAction* act = ai.value();
+            act->setChecked(alive);
+            const QString base = PluginLoader::uiappAt(i).name;
+            act->setText(alive ? (base + qFromUtf8("（已打开）")) : base);
+        }
+#endif
+    }
+}
+
+void MainWindow::onEtappActionTriggered() {
+#ifdef QT3_BUILD
+    /* Qt3 使用 QPopupMenu::activated(int)，不进入此槽 */
+#else
+    QAction* act = qobject_cast<QAction*>(sender());
+    if (!act) { return; }
+    const int idx = act->data().toInt();
+    if (idx >= 0 && idx < PluginLoader::uiappCount()) {
+        PluginLoader::createUiApp(idx, 0);
+        syncEtappsMenuState();
     }
 #endif
 }
