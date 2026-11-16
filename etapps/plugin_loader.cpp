@@ -5,6 +5,7 @@
 #include <qsettings.h>
 #include <qstringlist.h>
 #include <qevent.h>
+#include <qapplication.h>
 #include <qmap.h>
 #include <dlfcn.h>
 
@@ -395,6 +396,34 @@ const PluginInfo& PluginLoader::nouiAt(int i) {
     return pluginRef(s_nouis, i);
 }
 
+/* 重新加载已 dlclose 的 UI 插件 .so 并恢复 create/destroy 符号。
+ * ⚠ 坑：destroyUiApp 关实例时会 dlclose，之后再次 createUiApp 必须先重载，
+ *   否则调用悬空的 info.create 函数指针（指向已卸载代码）→ SIGSEGV。
+ *   返回 false 表示重载失败（文件丢失/符号缺失），调用方不得再调 info.create。 */
+static bool reloadUiPlugin(PluginInfo& info) {
+#ifdef QT3_BUILD
+    void* handle = dlopen(info.soPath.utf8(), RTLD_LAZY);
+#else
+    void* handle = dlopen(info.soPath.toUtf8().constData(), RTLD_LAZY);
+#endif
+    if (!handle) {
+        ALOG_WARN("[plugins] reload dlopen failed:", dlerror());
+        return false;
+    }
+    void* createFn = dlsym(handle, "plugin_create");
+    void* destroyFn = dlsym(handle, "plugin_destroy");
+    if (!createFn || !destroyFn) {
+        ALOG_WARN("[plugins] reload symbol missing in", info.soPath);
+        dlclose(handle);
+        return false;
+    }
+    info.handle = handle;
+    info.create = (void*(*)(void*))createFn;
+    info.destroy = (void(*)(void*))destroyFn;
+    ALOG_INFO("[plugins] reloaded:", info.soPath);
+    return true;
+}
+
 QWidget* PluginLoader::createUiApp(int index, QWidget* parent) {
     if (index < 0 || index >= s_uiapps.count()) {
         return 0;
@@ -409,6 +438,10 @@ QWidget* PluginLoader::createUiApp(int index, QWidget* parent) {
         return rt.widget;
     }
 
+    /* 实例已关（destroyUiApp 曾 dlclose）：先重载 .so 再取符号 */
+    if (!info.handle && !reloadUiPlugin(info)) {
+        return 0;
+    }
     if (!info.create) {
         return 0;
     }
@@ -437,6 +470,14 @@ void PluginLoader::destroyUiApp(int index) {
     }
     rt.winState = PW_None;
     if (info.handle) {
+        /* ⚠ dlclose 前必须排干 DeferredDelete 事件队列：
+         * 插件析构期（destroyed() 等）可能 post 了 deleteLater（如 logSlot），
+         * 若先 dlclose，事件循环稍后处理该 DeferredDelete 时，析构会间接调用
+         * 已卸载 .so 内的代码（std::function 的 lambda 闭包 manager 编译在
+         * 插件 .so 内）→ SIGSEGV（栈顶 ?? ()）。dlclose 前先 sendPostedEvents
+         * 把挂起的删除全部处理掉，之后 .so 才能安全卸载。 */
+        QApplication::sendPostedEvents(0, QEvent::DeferredDelete);
+        ALOG_INFO("[plugins] dlclose:", info.soPath);
         dlclose(info.handle);
         info.handle = 0;
     }
@@ -474,9 +515,16 @@ void PluginLoader::setWinStateForPath(const QString& soPath, int state) {
 /* 应用退出：先销毁全部窗口（插件代码仍在），再卸载 .so */
 void PluginLoader::shutdownAll() {
     closeAllUiApps();
+    /* ⚠ 同 destroyUiApp：dlclose 前必须排干 DeferredDelete（插件析构期 post 的
+     * deleteLater 若拖到 dlclose 之后处理，会调用已卸载代码 → 崩溃）。 */
+    QApplication::sendPostedEvents(0, QEvent::DeferredDelete);
     for (int i = 0; i < s_uiapps.count(); i++) {
         PluginInfo& info = pluginRef(s_uiapps, i);
-        if (info.handle) { dlclose(info.handle); info.handle = 0; }
+        if (info.handle) {
+            ALOG_INFO("[plugins] shutdown dlclose:", info.soPath);
+            dlclose(info.handle);
+            info.handle = 0;
+        }
     }
 }
 

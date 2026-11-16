@@ -2070,16 +2070,19 @@ void MainWindow::rebuildEtappsMenu() {
         const bool alive = (PluginLoader::winStateAt(i) != PW_None);
         EtappRow* row = new EtappRow(i, p.name, alive, alive);
 
-        row->openFn = [this, row]() {
-            PluginLoader::createUiApp(row->index, 0);
+        row->openFn = [this, i]() {
+            PluginLoader::createUiApp(i, 0);
             if (m_etappsMenu) { m_etappsMenu->close(); }
             syncEtappsMenuState();
         };
-        LambdaSlot* openSlot = new LambdaSlot(row->nameBox, row->openFn);
+        /* 槽对象 parent 挂到菜单（跨重建常驻，clear() 不会删 children），
+         * 避免随行 widget 被 clear()/DeferredDelete 二次释放导致崩溃；
+         * 回调捕获插件索引 i，不捕获 row（row 由菜单拥有，生命周期不归我们管）。 */
+        LambdaSlot* openSlot = new LambdaSlot(m_etappsMenu, row->openFn);
         QObject::connect(row->nameBox, SIGNAL(clicked()), openSlot, SLOT(call()));
 
-        LambdaSlot* closeSlot = new LambdaSlot(row->closeBtn, [this, row]() {
-            PluginLoader::destroyUiApp(row->index);
+        LambdaSlot* closeSlot = new LambdaSlot(m_etappsMenu, [this, i]() {
+            PluginLoader::destroyUiApp(i);
             if (m_etappsMenu) { m_etappsMenu->close(); }
             syncEtappsMenuState();
         });
