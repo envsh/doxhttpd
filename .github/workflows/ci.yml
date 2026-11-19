@@ -681,3 +681,649 @@ jobs:
           name: qsktox-macos-arm64
           path: bin/
           retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Windows legacy-compat targets for qltox (Phase 0+ skeletons, improved)
+  # Baselines:
+  #   - win32 x86: XP SP3 (0x0501) primary; Win2000 (0x0500) PoC for Qt3 only (Plan A)
+  #   - win64 x86_64: XP x64 / Server 2003 (0x0502)
+  # Requirements: controlled msvcrt-based toolchain + Qt + dependency closure per target,
+  # with recursive PE subsystem/import/runtime audit on all shipped binaries.
+  # SDK layout: set *_SDK_URL and optionally *_QTDIR/*_DEPS_PREFIX; otherwise auto-detect.
+  # Until closures are ready, jobs are manual (workflow_dispatch) and/or vars-gated.
+  # ---------------------------------------------------------------------------
+
+  build-qltox-win32-qt4:
+    name: build-qltox-win32-qt4 (XP x86 0x0501)
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.ENABLE_WINXP_QT4_WIN32_CI == 'true' }}
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup MSYS2 (MINGW32)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: false
+          install: >-
+            base-devel git zip unzip curl mingw-w64-i686-toolchain mingw-w64-i686-pkg-config
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Provision XP-compatible Qt4 x86 SDK (placeholder)
+        env:
+          XP_QT4_WIN32_SDK_URL: ${{ vars.XP_QT4_WIN32_SDK_URL }}
+          XP_QT4_WIN32_QTDIR: ${{ vars.XP_QT4_WIN32_QTDIR }}
+          XP_QT4_WIN32_DEPS_PREFIX: ${{ vars.XP_QT4_WIN32_DEPS_PREFIX }}
+        run: |
+          set -euo pipefail
+          if [ -z "${XP_QT4_WIN32_SDK_URL:-}" ]; then
+            echo "ERROR: XP_QT4_WIN32_SDK_URL not configured (controlled SDK required)." >&2
+            exit 1
+          fi
+          mkdir -p /opt/xp-sdk
+          curl -fL "${XP_QT4_WIN32_SDK_URL}" -o /tmp/xp-sdk.tar.gz
+          tar -xzf /tmp/xp-sdk.tar.gz -C /opt/xp-sdk
+          QTDIR="${XP_QT4_WIN32_QTDIR:-/opt/xp-sdk/qt4-win32-xp}"
+          if [ ! -x "$QTDIR/bin/qmake" ] && [ ! -x "$QTDIR/bin/qmake.exe" ]; then
+            QTDIR="$(find /opt/xp-sdk -type f \( -name qmake -o -name qmake.exe \) 2>/dev/null | head -n 1 | xargs -r dirname | xargs -r dirname || true)"
+          fi
+          XP_DEPS_PREFIX="${XP_QT4_WIN32_DEPS_PREFIX:-/opt/xp-sdk/deps-win32-xp}"
+          if [ -n "$XP_DEPS_PREFIX" ] && [ ! -d "$XP_DEPS_PREFIX" ]; then
+            XP_DEPS_PREFIX="$(find /opt/xp-sdk -type d \( -name pkgconfig -o -name lib \) 2>/dev/null | head -n 1 | xargs -r dirname || echo "$XP_DEPS_PREFIX")"
+          fi
+          echo "QTDIR=$QTDIR" >> "$GITHUB_ENV"
+          echo "XP_DEPS_PREFIX=$XP_DEPS_PREFIX" >> "$GITHUB_ENV"
+          echo "Resolved QTDIR=$QTDIR"
+          echo "Resolved XP_DEPS_PREFIX=$XP_DEPS_PREFIX"
+      - name: Build qltox (XP x86, Qt4)
+        run: |
+          set -euo pipefail
+          export PATH="$QTDIR/bin:${XP_DEPS_PREFIX:+$XP_DEPS_PREFIX/bin:}$PATH"
+          export PKG_CONFIG_PATH="${XP_DEPS_PREFIX:+$XP_DEPS_PREFIX/lib/pkgconfig:}${PKG_CONFIG_PATH:-}"
+          bash qltox/build-win32-qt4-xp.sh
+      - name: Package artifact
+        run: |
+          set -euo pipefail
+          mkdir -p dist/qltox-win32-qt4
+          BIN="qltox/build-win32-qt4-xp/qltox.exe"
+          test -f "$BIN" || BIN="qltox/build-win32-qt4-xp/release/qltox.exe"
+          cp "$BIN" dist/qltox-win32-qt4/
+          BINDIR="$(dirname "$BIN")"
+          for f in "$BINDIR"/*.dll "$BINDIR"/*.DLL; do
+            [ -f "$f" ] && cp -u "$f" dist/qltox-win32-qt4/ || true
+          done
+          # Best-effort runtime collection from controlled SDK/deps (refine per actual layout).
+          for d in "${QTDIR:-}/bin" "${XP_DEPS_PREFIX:-}/bin"; do
+            if [ -n "$d" ] && [ -d "$d" ]; then
+              for f in "$d"/*.dll "$d"/*.DLL; do
+                [ -f "$f" ] && cp -u "$f" dist/qltox-win32-qt4/ || true
+              done
+            fi
+          done
+          # Best-effort Qt plugins and translations (layouts vary by Qt3/Qt4/toolchain).
+          for psrc in "${QTDIR:-}/plugins" "${QTDIR:-}/lib/qt4/plugins" "${QTDIR:-}/lib/qt3/plugins" "${QTDIR:-}/lib/plugins"; do
+            if [ -d "$psrc" ]; then
+              mkdir -p dist/qltox-win32-qt4/plugins
+              cp -a "$psrc/." dist/qltox-win32-qt4/plugins/ || true
+            fi
+          done
+          if [ -d qltox/lang ]; then
+            mkdir -p dist/qltox-win32-qt4/lang
+            cp -a qltox/lang/*.json dist/qltox-win32-qt4/lang/ 2>/dev/null || true
+          fi
+          # TODO(xp-toolchain): verify exact Qt plugin dirs, resources, and runtime file set for XP x86 Qt4 closure.
+      - name: Static XP compatibility check (x86 / 0x0501, recursive)
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find dist/qltox-win32-qt4 -type f \( -iname '*.exe' -o -iname '*.dll' \) | sort)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "error: no PE binaries found in dist/qltox-win32-qt4" >&2
+            exit 1
+          fi
+          printf 'auditing %s binaries\n' "${#files[@]}"
+          bash scripts/ci_check_pe_xp_compat.sh xp-x86 "${files[@]}"
+      - name: Generate compatibility metadata
+        run: |
+          set -euo pipefail
+          mkdir -p dist/qltox-win32-qt4
+          out="dist/qltox-win32-qt4/README-xp-compat.txt"
+          {
+            echo "target=xp-x86 (Windows XP SP3, 0x0501)"
+            echo "job=build-qltox-win32-qt4"
+            echo "git_sha=${GITHUB_SHA:-unknown}"
+            echo "git_ref=${GITHUB_REF_NAME:-unknown}"
+            echo "built_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "sdk_url_var=XP_QT4_WIN32_SDK_URL"
+            echo "qtdir=${QTDIR:-}"
+            echo "xp_deps_prefix=${XP_DEPS_PREFIX:-}"
+            echo "binaries_sha256:"
+            (cd dist/qltox-win32-qt4 && find . -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0 | sort -z | xargs -0 sha256sum 2>/dev/null) || true
+          } > "$out"
+          cat "$out"
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qltox-win32-qt4-diagnostics
+          path: |
+            dist/qltox-win32-qt4
+            qltox/build-win32-qt4-xp
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qltox-win32-qt4
+          path: dist/qltox-win32-qt4/
+          retention-days: 30
+
+  build-qltox-win64-qt4:
+    name: build-qltox-win64-qt4 (XP x64 0x0502)
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.ENABLE_WINXP_QT4_WIN64_CI == 'true' }}
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup MSYS2 (MINGW64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            base-devel git zip unzip curl mingw-w64-x86_64-toolchain mingw-w64-x86_64-pkg-config
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Provision XP-compatible Qt4 x64 SDK (placeholder)
+        env:
+          XP_QT4_WIN64_SDK_URL: ${{ vars.XP_QT4_WIN64_SDK_URL }}
+          XP_QT4_WIN64_QTDIR: ${{ vars.XP_QT4_WIN64_QTDIR }}
+          XP_QT4_WIN64_DEPS_PREFIX: ${{ vars.XP_QT4_WIN64_DEPS_PREFIX }}
+        run: |
+          set -euo pipefail
+          if [ -z "${XP_QT4_WIN64_SDK_URL:-}" ]; then
+            echo "BLOCKED: XP_QT4_WIN64_SDK_URL not configured (self-built XP x64/Server 2003 compatible Qt4 x64 SDK required)." >&2
+            exit 1
+          fi
+          mkdir -p /opt/xp-sdk
+          curl -fL "${XP_QT4_WIN64_SDK_URL}" -o /tmp/xp-sdk.tar.gz
+          tar -xzf /tmp/xp-sdk.tar.gz -C /opt/xp-sdk
+          QTDIR="${XP_QT4_WIN64_QTDIR:-/opt/xp-sdk/qt4-win64-xp}"
+          if [ ! -x "$QTDIR/bin/qmake" ] && [ ! -x "$QTDIR/bin/qmake.exe" ]; then
+            QTDIR="$(find /opt/xp-sdk -type f \( -name qmake -o -name qmake.exe \) 2>/dev/null | head -n 1 | xargs -r dirname | xargs -r dirname || true)"
+          fi
+          XP_DEPS_PREFIX="${XP_QT4_WIN64_DEPS_PREFIX:-/opt/xp-sdk/deps-win64-xp}"
+          if [ -n "$XP_DEPS_PREFIX" ] && [ ! -d "$XP_DEPS_PREFIX" ]; then
+            XP_DEPS_PREFIX="$(find /opt/xp-sdk -type d \( -name pkgconfig -o -name lib \) 2>/dev/null | head -n 1 | xargs -r dirname || echo "$XP_DEPS_PREFIX")"
+          fi
+          echo "QTDIR=$QTDIR" >> "$GITHUB_ENV"
+          echo "XP_DEPS_PREFIX=$XP_DEPS_PREFIX" >> "$GITHUB_ENV"
+          echo "Resolved QTDIR=$QTDIR"
+          echo "Resolved XP_DEPS_PREFIX=$XP_DEPS_PREFIX"
+      - name: Build qltox (XP x64, Qt4)
+        run: |
+          set -euo pipefail
+          export PATH="$QTDIR/bin:${XP_DEPS_PREFIX:+$XP_DEPS_PREFIX/bin:}$PATH"
+          export PKG_CONFIG_PATH="${XP_DEPS_PREFIX:+$XP_DEPS_PREFIX/lib/pkgconfig:}${PKG_CONFIG_PATH:-}"
+          bash qltox/build-win64-qt4-xp.sh
+      - name: Package artifact
+        run: |
+          set -euo pipefail
+          mkdir -p dist/qltox-win64-qt4
+          BIN="qltox/build-win64-qt4-xp/qltox.exe"
+          test -f "$BIN" || BIN="qltox/build-win64-qt4-xp/release/qltox.exe"
+          cp "$BIN" dist/qltox-win64-qt4/
+          BINDIR="$(dirname "$BIN")"
+          for f in "$BINDIR"/*.dll "$BINDIR"/*.DLL; do
+            [ -f "$f" ] && cp -u "$f" dist/qltox-win64-qt4/ || true
+          done
+          # Best-effort runtime collection from controlled SDK/deps (refine per actual layout).
+          for d in "${QTDIR:-}/bin" "${XP_DEPS_PREFIX:-}/bin"; do
+            if [ -n "$d" ] && [ -d "$d" ]; then
+              for f in "$d"/*.dll "$d"/*.DLL; do
+                [ -f "$f" ] && cp -u "$f" dist/qltox-win64-qt4/ || true
+              done
+            fi
+          done
+          # Best-effort Qt plugins and translations (layouts vary by Qt3/Qt4/toolchain).
+          for psrc in "${QTDIR:-}/plugins" "${QTDIR:-}/lib/qt4/plugins" "${QTDIR:-}/lib/qt3/plugins" "${QTDIR:-}/lib/plugins"; do
+            if [ -d "$psrc" ]; then
+              mkdir -p dist/qltox-win64-qt4/plugins
+              cp -a "$psrc/." dist/qltox-win64-qt4/plugins/ || true
+            fi
+          done
+          if [ -d qltox/lang ]; then
+            mkdir -p dist/qltox-win64-qt4/lang
+            cp -a qltox/lang/*.json dist/qltox-win64-qt4/lang/ 2>/dev/null || true
+          fi
+          # TODO(xp-toolchain): verify exact Qt plugin dirs, resources, and runtime file set for XP x64/Server 2003 Qt4 closure.
+      - name: Static XP compatibility check (x64 / 0x0502, recursive)
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find dist/qltox-win64-qt4 -type f \( -iname '*.exe' -o -iname '*.dll' \) | sort)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "error: no PE binaries found in dist/qltox-win64-qt4" >&2
+            exit 1
+          fi
+          printf 'auditing %s binaries\n' "${#files[@]}"
+          bash scripts/ci_check_pe_xp_compat.sh xp-x64 "${files[@]}"
+      - name: Generate compatibility metadata
+        run: |
+          set -euo pipefail
+          mkdir -p dist/qltox-win64-qt4
+          out="dist/qltox-win64-qt4/README-xp-compat.txt"
+          {
+            echo "target=xp-x64 (Windows XP x64 / Server 2003, 0x0502)"
+            echo "job=build-qltox-win64-qt4"
+            echo "git_sha=${GITHUB_SHA:-unknown}"
+            echo "git_ref=${GITHUB_REF_NAME:-unknown}"
+            echo "built_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "sdk_url_var=XP_QT4_WIN64_SDK_URL"
+            echo "qtdir=${QTDIR:-}"
+            echo "xp_deps_prefix=${XP_DEPS_PREFIX:-}"
+            echo "binaries_sha256:"
+            (cd dist/qltox-win64-qt4 && find . -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0 | sort -z | xargs -0 sha256sum 2>/dev/null) || true
+          } > "$out"
+          cat "$out"
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qltox-win64-qt4-diagnostics
+          path: |
+            dist/qltox-win64-qt4
+            qltox/build-win64-qt4-xp
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qltox-win64-qt4
+          path: dist/qltox-win64-qt4/
+          retention-days: 30
+
+  build-qltox-win32-qt3:
+    name: "build-qltox-win32-qt3 (XP x86 0x0501) [BLOCKED: Qt3 Windows toolchain]"
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.ENABLE_WINXP_QT3_WIN32_CI == 'true' }}
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup MSYS2 (MINGW32)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: false
+          install: >-
+            base-devel git zip unzip curl mingw-w64-i686-toolchain mingw-w64-i686-pkg-config
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Provision XP-compatible Qt3 x86 SDK (placeholder)
+        env:
+          XP_QT3_WIN32_SDK_URL: ${{ vars.XP_QT3_WIN32_SDK_URL }}
+          XP_QT3_WIN32_QTDIR: ${{ vars.XP_QT3_WIN32_QTDIR }}
+          XP_QT3_WIN32_DEPS_PREFIX: ${{ vars.XP_QT3_WIN32_DEPS_PREFIX }}
+        run: |
+          set -euo pipefail
+          if [ -z "${XP_QT3_WIN32_SDK_URL:-}" ]; then
+            echo "BLOCKED: XP_QT3_WIN32_SDK_URL not configured (Windows tde-qt338sh x86 toolchain required)." >&2
+            exit 1
+          fi
+          mkdir -p /opt/xp-sdk
+          curl -fL "${XP_QT3_WIN32_SDK_URL}" -o /tmp/xp-sdk.tar.gz
+          tar -xzf /tmp/xp-sdk.tar.gz -C /opt/xp-sdk
+          QTDIR="${XP_QT3_WIN32_QTDIR:-/opt/xp-sdk/qt338sh-win32-xp}"
+          if [ ! -x "$QTDIR/bin/qmake" ] && [ ! -x "$QTDIR/bin/qmake.exe" ]; then
+            QTDIR="$(find /opt/xp-sdk -type f \( -name qmake -o -name qmake.exe \) 2>/dev/null | head -n 1 | xargs -r dirname | xargs -r dirname || true)"
+          fi
+          XP_DEPS_PREFIX="${XP_QT3_WIN32_DEPS_PREFIX:-/opt/xp-sdk/deps-win32-xp}"
+          if [ -n "$XP_DEPS_PREFIX" ] && [ ! -d "$XP_DEPS_PREFIX" ]; then
+            XP_DEPS_PREFIX="$(find /opt/xp-sdk -type d \( -name pkgconfig -o -name lib \) 2>/dev/null | head -n 1 | xargs -r dirname || echo "$XP_DEPS_PREFIX")"
+          fi
+          echo "QTDIR=$QTDIR" >> "$GITHUB_ENV"
+          echo "XP_DEPS_PREFIX=$XP_DEPS_PREFIX" >> "$GITHUB_ENV"
+          echo "Resolved QTDIR=$QTDIR"
+          echo "Resolved XP_DEPS_PREFIX=$XP_DEPS_PREFIX"
+      - name: Build qltox (XP x86, Qt3)
+        run: |
+          set -euo pipefail
+          export PATH="$QTDIR/bin:${XP_DEPS_PREFIX:+$XP_DEPS_PREFIX/bin:}$PATH"
+          export PKG_CONFIG_PATH="${XP_DEPS_PREFIX:+$XP_DEPS_PREFIX/lib/pkgconfig:}${PKG_CONFIG_PATH:-}"
+          bash qltox/build-win32-qt3-xp.sh
+      - name: Package artifact
+        run: |
+          set -euo pipefail
+          mkdir -p dist/qltox-win32-qt3
+          BIN="qltox/build-win32-qt3-xp/qltox.exe"
+          test -f "$BIN" || BIN="qltox/build-win32-qt3-xp/release/qltox.exe"
+          cp "$BIN" dist/qltox-win32-qt3/
+          BINDIR="$(dirname "$BIN")"
+          for f in "$BINDIR"/*.dll "$BINDIR"/*.DLL; do
+            [ -f "$f" ] && cp -u "$f" dist/qltox-win32-qt3/ || true
+          done
+          # Best-effort runtime collection from controlled SDK/deps (refine per actual layout).
+          for d in "${QTDIR:-}/bin" "${XP_DEPS_PREFIX:-}/bin"; do
+            if [ -n "$d" ] && [ -d "$d" ]; then
+              for f in "$d"/*.dll "$d"/*.DLL; do
+                [ -f "$f" ] && cp -u "$f" dist/qltox-win32-qt3/ || true
+              done
+            fi
+          done
+          # Best-effort Qt plugins and translations (layouts vary by Qt3/Qt4/toolchain).
+          for psrc in "${QTDIR:-}/plugins" "${QTDIR:-}/lib/qt4/plugins" "${QTDIR:-}/lib/qt3/plugins" "${QTDIR:-}/lib/plugins"; do
+            if [ -d "$psrc" ]; then
+              mkdir -p dist/qltox-win32-qt3/plugins
+              cp -a "$psrc/." dist/qltox-win32-qt3/plugins/ || true
+            fi
+          done
+          if [ -d qltox/lang ]; then
+            mkdir -p dist/qltox-win32-qt3/lang
+            cp -a qltox/lang/*.json dist/qltox-win32-qt3/lang/ 2>/dev/null || true
+          fi
+          # TODO(xp-toolchain): verify exact Qt plugin dirs, resources, and runtime file set for XP x86 Qt3 closure.
+      - name: Static XP compatibility check (x86 / 0x0501, recursive)
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find dist/qltox-win32-qt3 -type f \( -iname '*.exe' -o -iname '*.dll' \) | sort)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "error: no PE binaries found in dist/qltox-win32-qt3" >&2
+            exit 1
+          fi
+          printf 'auditing %s binaries\n' "${#files[@]}"
+          bash scripts/ci_check_pe_xp_compat.sh xp-x86 "${files[@]}"
+      - name: Generate compatibility metadata
+        run: |
+          set -euo pipefail
+          mkdir -p dist/qltox-win32-qt3
+          out="dist/qltox-win32-qt3/README-xp-compat.txt"
+          {
+            echo "target=xp-x86 (Windows XP SP3, 0x0501)"
+            echo "job=build-qltox-win32-qt3"
+            echo "git_sha=${GITHUB_SHA:-unknown}"
+            echo "git_ref=${GITHUB_REF_NAME:-unknown}"
+            echo "built_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "sdk_url_var=XP_QT3_WIN32_SDK_URL"
+            echo "qtdir=${QTDIR:-}"
+            echo "xp_deps_prefix=${XP_DEPS_PREFIX:-}"
+            echo "binaries_sha256:"
+            (cd dist/qltox-win32-qt3 && find . -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0 | sort -z | xargs -0 sha256sum 2>/dev/null) || true
+          } > "$out"
+          cat "$out"
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qltox-win32-qt3-diagnostics
+          path: |
+            dist/qltox-win32-qt3
+            qltox/build-win32-qt3-xp
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qltox-win32-qt3
+          path: dist/qltox-win32-qt3/
+          retention-days: 30
+
+  build-qltox-win32-qt3-win2k:
+    name: build-qltox-win32-qt3-win2k (Win2000 x86 0x0500, PoC) [BLOCKED]
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.ENABLE_WIN2K_QT3_WIN32_POC == 'true' }}
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup MSYS2 (MINGW32)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: false
+          install: >-
+            base-devel git zip unzip curl mingw-w64-i686-toolchain mingw-w64-i686-pkg-config
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Provision Win2000-compatible Qt3 x86 SDK (placeholder)
+        env:
+          WIN2K_QT3_WIN32_SDK_URL: ${{ vars.WIN2K_QT3_WIN32_SDK_URL }}
+          WIN2K_QT3_WIN32_QTDIR: ${{ vars.WIN2K_QT3_WIN32_QTDIR }}
+          WIN2K_QT3_WIN32_DEPS_PREFIX: ${{ vars.WIN2K_QT3_WIN32_DEPS_PREFIX }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WIN2K_QT3_WIN32_SDK_URL:-}" ]; then
+            echo "BLOCKED: WIN2K_QT3_WIN32_SDK_URL not configured (Qt3 x86 + Win2000 0x0500 toolchain/deps required)." >&2
+            exit 1
+          fi
+          mkdir -p /opt/xp-sdk
+          curl -fL "${WIN2K_QT3_WIN32_SDK_URL}" -o /tmp/xp-sdk.tar.gz
+          tar -xzf /tmp/xp-sdk.tar.gz -C /opt/xp-sdk
+          QTDIR="${WIN2K_QT3_WIN32_QTDIR:-/opt/xp-sdk/qt338sh-win32-win2k}"
+          if [ ! -x "$QTDIR/bin/qmake" ] && [ ! -x "$QTDIR/bin/qmake.exe" ]; then
+            QTDIR="$(find /opt/xp-sdk -type f \( -name qmake -o -name qmake.exe \) 2>/dev/null | head -n 1 | xargs -r dirname | xargs -r dirname || true)"
+          fi
+          XP_DEPS_PREFIX="${WIN2K_QT3_WIN32_DEPS_PREFIX:-/opt/xp-sdk/deps-win32-win2k}"
+          if [ -n "$XP_DEPS_PREFIX" ] && [ ! -d "$XP_DEPS_PREFIX" ]; then
+            XP_DEPS_PREFIX="$(find /opt/xp-sdk -type d \( -name pkgconfig -o -name lib \) 2>/dev/null | head -n 1 | xargs -r dirname || echo "$XP_DEPS_PREFIX")"
+          fi
+          echo "QTDIR=$QTDIR" >> "$GITHUB_ENV"
+          echo "XP_DEPS_PREFIX=$XP_DEPS_PREFIX" >> "$GITHUB_ENV"
+          echo "Resolved QTDIR=$QTDIR"
+          echo "Resolved XP_DEPS_PREFIX=$XP_DEPS_PREFIX"
+      - name: Build qltox (Win2000 x86, Qt3 PoC)
+        run: |
+          set -euo pipefail
+          export PATH="$QTDIR/bin:${XP_DEPS_PREFIX:+$XP_DEPS_PREFIX/bin:}$PATH"
+          export PKG_CONFIG_PATH="${XP_DEPS_PREFIX:+$XP_DEPS_PREFIX/lib/pkgconfig:}${PKG_CONFIG_PATH:-}"
+          bash qltox/build-win32-qt3-win2k.sh
+      - name: Package artifact
+        run: |
+          set -euo pipefail
+          mkdir -p dist/qltox-win32-qt3-win2k
+          BIN="qltox/build-win32-qt3-win2k/qltox.exe"
+          test -f "$BIN" || BIN="qltox/build-win32-qt3-win2k/release/qltox.exe"
+          cp "$BIN" dist/qltox-win32-qt3-win2k/
+          BINDIR="$(dirname "$BIN")"
+          for f in "$BINDIR"/*.dll "$BINDIR"/*.DLL; do
+            [ -f "$f" ] && cp -u "$f" dist/qltox-win32-qt3-win2k/ || true
+          done
+          # Best-effort runtime collection from controlled SDK/deps (refine per actual layout).
+          for d in "${QTDIR:-}/bin" "${XP_DEPS_PREFIX:-}/bin"; do
+            if [ -n "$d" ] && [ -d "$d" ]; then
+              for f in "$d"/*.dll "$d"/*.DLL; do
+                [ -f "$f" ] && cp -u "$f" dist/qltox-win32-qt3-win2k/ || true
+              done
+            fi
+          done
+          # Best-effort Qt plugins and translations (layouts vary by Qt3/Qt4/toolchain).
+          for psrc in "${QTDIR:-}/plugins" "${QTDIR:-}/lib/qt4/plugins" "${QTDIR:-}/lib/qt3/plugins" "${QTDIR:-}/lib/plugins"; do
+            if [ -d "$psrc" ]; then
+              mkdir -p dist/qltox-win32-qt3-win2k/plugins
+              cp -a "$psrc/." dist/qltox-win32-qt3-win2k/plugins/ || true
+            fi
+          done
+          if [ -d qltox/lang ]; then
+            mkdir -p dist/qltox-win32-qt3-win2k/lang
+            cp -a qltox/lang/*.json dist/qltox-win32-qt3-win2k/lang/ 2>/dev/null || true
+          fi
+          # TODO(xp-toolchain): verify exact Qt plugin dirs, resources, and runtime file set for Win2000 x86 Qt3 PoC closure.
+      - name: Static Win2000 compatibility check (x86 / 0x0500, recursive)
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find dist/qltox-win32-qt3-win2k -type f \( -iname '*.exe' -o -iname '*.dll' \) | sort)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "error: no PE binaries found in dist/qltox-win32-qt3-win2k" >&2
+            exit 1
+          fi
+          printf 'auditing %s binaries\n' "${#files[@]}"
+          bash scripts/ci_check_pe_xp_compat.sh win2k-x86 "${files[@]}"
+      - name: Generate compatibility metadata
+        run: |
+          set -euo pipefail
+          mkdir -p dist/qltox-win32-qt3-win2k
+          out="dist/qltox-win32-qt3-win2k/README-xp-compat.txt"
+          {
+            echo "target=win2k-x86 (Windows 2000, 0x0500, PoC)"
+            echo "job=build-qltox-win32-qt3-win2k"
+            echo "git_sha=${GITHUB_SHA:-unknown}"
+            echo "git_ref=${GITHUB_REF_NAME:-unknown}"
+            echo "built_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "sdk_url_var=WIN2K_QT3_WIN32_SDK_URL"
+            echo "qtdir=${QTDIR:-}"
+            echo "xp_deps_prefix=${XP_DEPS_PREFIX:-}"
+            echo "binaries_sha256:"
+            (cd dist/qltox-win32-qt3-win2k && find . -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0 | sort -z | xargs -0 sha256sum 2>/dev/null) || true
+          } > "$out"
+          cat "$out"
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qltox-win32-qt3-win2k-diagnostics
+          path: |
+            dist/qltox-win32-qt3-win2k
+            qltox/build-win32-qt3-win2k
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qltox-win32-qt3-win2k
+          path: dist/qltox-win32-qt3-win2k/
+          retention-days: 30
+
+  build-qltox-win64-qt3:
+    name: "build-qltox-win64-qt3 (XP x64 0x0502) [BLOCKED: Qt3 x64+XP PoC required]"
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.ENABLE_WINXP_QT3_WIN64_CI == 'true' }}
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup MSYS2 (MINGW64)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: >-
+            base-devel git zip unzip curl mingw-w64-x86_64-toolchain mingw-w64-x86_64-pkg-config
+      - name: Pull dependency repos
+        run: bash scripts/pollup_deps.sh
+      - name: Provision XP-compatible Qt3 x64 SDK (placeholder)
+        env:
+          XP_QT3_WIN64_SDK_URL: ${{ vars.XP_QT3_WIN64_SDK_URL }}
+          XP_QT3_WIN64_QTDIR: ${{ vars.XP_QT3_WIN64_QTDIR }}
+          XP_QT3_WIN64_DEPS_PREFIX: ${{ vars.XP_QT3_WIN64_DEPS_PREFIX }}
+        run: |
+          set -euo pipefail
+          if [ -z "${XP_QT3_WIN64_SDK_URL:-}" ]; then
+            echo "BLOCKED: XP_QT3_WIN64_SDK_URL not configured (Qt3 x64 + XP/Server2003 PoC and toolchain required)." >&2
+            exit 1
+          fi
+          mkdir -p /opt/xp-sdk
+          curl -fL "${XP_QT3_WIN64_SDK_URL}" -o /tmp/xp-sdk.tar.gz
+          tar -xzf /tmp/xp-sdk.tar.gz -C /opt/xp-sdk
+          QTDIR="${XP_QT3_WIN64_QTDIR:-/opt/xp-sdk/qt338sh-win64-xp}"
+          if [ ! -x "$QTDIR/bin/qmake" ] && [ ! -x "$QTDIR/bin/qmake.exe" ]; then
+            QTDIR="$(find /opt/xp-sdk -type f \( -name qmake -o -name qmake.exe \) 2>/dev/null | head -n 1 | xargs -r dirname | xargs -r dirname || true)"
+          fi
+          XP_DEPS_PREFIX="${XP_QT3_WIN64_DEPS_PREFIX:-/opt/xp-sdk/deps-win64-xp}"
+          if [ -n "$XP_DEPS_PREFIX" ] && [ ! -d "$XP_DEPS_PREFIX" ]; then
+            XP_DEPS_PREFIX="$(find /opt/xp-sdk -type d \( -name pkgconfig -o -name lib \) 2>/dev/null | head -n 1 | xargs -r dirname || echo "$XP_DEPS_PREFIX")"
+          fi
+          echo "QTDIR=$QTDIR" >> "$GITHUB_ENV"
+          echo "XP_DEPS_PREFIX=$XP_DEPS_PREFIX" >> "$GITHUB_ENV"
+          echo "Resolved QTDIR=$QTDIR"
+          echo "Resolved XP_DEPS_PREFIX=$XP_DEPS_PREFIX"
+      - name: Build qltox (XP x64, Qt3)
+        run: |
+          set -euo pipefail
+          export PATH="$QTDIR/bin:${XP_DEPS_PREFIX:+$XP_DEPS_PREFIX/bin:}$PATH"
+          export PKG_CONFIG_PATH="${XP_DEPS_PREFIX:+$XP_DEPS_PREFIX/lib/pkgconfig:}${PKG_CONFIG_PATH:-}"
+          bash qltox/build-win64-qt3-xp.sh
+      - name: Package artifact
+        run: |
+          set -euo pipefail
+          mkdir -p dist/qltox-win64-qt3
+          BIN="qltox/build-win64-qt3-xp/qltox.exe"
+          test -f "$BIN" || BIN="qltox/build-win64-qt3-xp/release/qltox.exe"
+          cp "$BIN" dist/qltox-win64-qt3/
+          BINDIR="$(dirname "$BIN")"
+          for f in "$BINDIR"/*.dll "$BINDIR"/*.DLL; do
+            [ -f "$f" ] && cp -u "$f" dist/qltox-win64-qt3/ || true
+          done
+          # Best-effort runtime collection from controlled SDK/deps (refine per actual layout).
+          for d in "${QTDIR:-}/bin" "${XP_DEPS_PREFIX:-}/bin"; do
+            if [ -n "$d" ] && [ -d "$d" ]; then
+              for f in "$d"/*.dll "$d"/*.DLL; do
+                [ -f "$f" ] && cp -u "$f" dist/qltox-win64-qt3/ || true
+              done
+            fi
+          done
+          # Best-effort Qt plugins and translations (layouts vary by Qt3/Qt4/toolchain).
+          for psrc in "${QTDIR:-}/plugins" "${QTDIR:-}/lib/qt4/plugins" "${QTDIR:-}/lib/qt3/plugins" "${QTDIR:-}/lib/plugins"; do
+            if [ -d "$psrc" ]; then
+              mkdir -p dist/qltox-win64-qt3/plugins
+              cp -a "$psrc/." dist/qltox-win64-qt3/plugins/ || true
+            fi
+          done
+          if [ -d qltox/lang ]; then
+            mkdir -p dist/qltox-win64-qt3/lang
+            cp -a qltox/lang/*.json dist/qltox-win64-qt3/lang/ 2>/dev/null || true
+          fi
+          # TODO(xp-toolchain): verify exact Qt plugin dirs, resources, and runtime file set for XP x64/Server 2003 Qt3 closure.
+      - name: Static XP compatibility check (x64 / 0x0502, recursive)
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find dist/qltox-win64-qt3 -type f \( -iname '*.exe' -o -iname '*.dll' \) | sort)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "error: no PE binaries found in dist/qltox-win64-qt3" >&2
+            exit 1
+          fi
+          printf 'auditing %s binaries\n' "${#files[@]}"
+          bash scripts/ci_check_pe_xp_compat.sh xp-x64 "${files[@]}"
+      - name: Generate compatibility metadata
+        run: |
+          set -euo pipefail
+          mkdir -p dist/qltox-win64-qt3
+          out="dist/qltox-win64-qt3/README-xp-compat.txt"
+          {
+            echo "target=xp-x64 (Windows XP x64 / Server 2003, 0x0502)"
+            echo "job=build-qltox-win64-qt3"
+            echo "git_sha=${GITHUB_SHA:-unknown}"
+            echo "git_ref=${GITHUB_REF_NAME:-unknown}"
+            echo "built_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "sdk_url_var=XP_QT3_WIN64_SDK_URL"
+            echo "qtdir=${QTDIR:-}"
+            echo "xp_deps_prefix=${XP_DEPS_PREFIX:-}"
+            echo "binaries_sha256:"
+            (cd dist/qltox-win64-qt3 && find . -type f \( -iname '*.exe' -o -iname '*.dll' \) -print0 | sort -z | xargs -0 sha256sum 2>/dev/null) || true
+          } > "$out"
+          cat "$out"
+      - name: Upload diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qltox-win64-qt3-diagnostics
+          path: |
+            dist/qltox-win64-qt3
+            qltox/build-win64-qt3-xp
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qltox-win64-qt3
+          path: dist/qltox-win64-qt3/
+          retention-days: 30

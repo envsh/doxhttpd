@@ -84,6 +84,41 @@ contains(CONFIG, asan) {
 
 !win32: QMAKE_LFLAGS += -rdynamic
 
+# --- Optional Windows legacy compatibility targets (XP/Win2000) --------------
+# Enable via: CONFIG+=xpcompat and/or XP_TARGET_ARCH=x86|x64, XP_TARGET_OS=winxp|win2k
+# Defaults (when active): x86 + winxp -> 0x0501; x64 -> 0x0502; x86 + win2k -> 0x0500 (PoC)
+win32 {
+    XPCOMPAT_ACTIVE = 0
+    contains(CONFIG, xpcompat): XPCOMPAT_ACTIVE = 1
+    !isEmpty(XP_TARGET_ARCH):   XPCOMPAT_ACTIVE = 1
+    !isEmpty(XP_TARGET_OS):     XPCOMPAT_ACTIVE = 1
+    equals(XPCOMPAT_ACTIVE, 1) {
+        XP_TARGET_ARCH_EFFECTIVE = $$XP_TARGET_ARCH
+        isEmpty(XP_TARGET_ARCH_EFFECTIVE): contains(QMAKE_TARGET.arch, x86_64): XP_TARGET_ARCH_EFFECTIVE = x64
+        isEmpty(XP_TARGET_ARCH_EFFECTIVE): contains(QMAKE_TARGET.arch, amd64):  XP_TARGET_ARCH_EFFECTIVE = x64
+        isEmpty(XP_TARGET_ARCH_EFFECTIVE): contains(QT_ARCH, x86_64):           XP_TARGET_ARCH_EFFECTIVE = x64
+        isEmpty(XP_TARGET_ARCH_EFFECTIVE): XP_TARGET_ARCH_EFFECTIVE = x86
+
+        XP_TARGET_OS_EFFECTIVE = $$XP_TARGET_OS
+        isEmpty(XP_TARGET_OS_EFFECTIVE): XP_TARGET_OS_EFFECTIVE = winxp
+
+        equals(XP_TARGET_ARCH_EFFECTIVE, x64) {
+            message("Windows legacy target: x64 (0x0502 / XP x64, Server 2003)")
+            DEFINES += _WIN32_WINNT=0x0502 WINVER=0x0502 _WIN32_IE=0x0501 NTDDI_VERSION=0x05020200
+        } else {
+            equals(XP_TARGET_OS_EFFECTIVE, win2k) {
+                message("Windows legacy target: x86 (0x0500 / Windows 2000, PoC)")
+                DEFINES += _WIN32_WINNT=0x0500 WINVER=0x0500 _WIN32_IE=0x0501 NTDDI_VERSION=0x05000400
+            } else {
+                message("Windows legacy target: x86 (0x0501 / Windows XP SP3)")
+                DEFINES += _WIN32_WINNT=0x0501 WINVER=0x0501 _WIN32_IE=0x0501 NTDDI_VERSION=0x05010300
+            }
+        }
+        # NOTE: legacy targets require an msvcrt-based toolchain/Qt/dependencies built for the same baseline.
+        # CI/static checks must validate PE subsystem and imports for the produced binaries and shipped DLLs.
+    }
+}
+
 # Qt 版本检测：必须用同一个 .pro 文件
 # 方法：用 system() 调用 qmake -v，检测输出是否包含 "Qt 3" 或 "4."
 # Qt3 qmake (1.07a) 不支持 QT_VERSION 变量
@@ -190,8 +225,9 @@ isEmpty(QT_VERSION) {
 # — 添加 screenshot 模块前无此需要，因为没有代码直接调用 X11 API。
 unix:!macx: LIBS += -lX11
 
-# dlopen/dlsym/dlclose/dlerror for plugin loading
-LIBS += -ldl
+# dlopen/dlsym/dlclose/dlerror for plugin loading (Unix); Windows uses Win32 APIs where applicable.
+unix:!macx: LIBS += -ldl
+win32: LIBS += -luser32 -lgdi32 -lshell32 -ladvapi32 -lole32 -luuid -lws2_32 -liphlpapi -lcrypt32 -lwinmm
 
 # 安装
 target.path = /usr/local/bin
