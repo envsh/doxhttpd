@@ -596,6 +596,8 @@ V2RayLogic::V2RayLogic(QObject* parent)
     coreRunningKnown = false;
     coreStartPending = false;
     testCoreAdvancePending = false;
+    coreRestartPending = false;
+    coreRestartNodeIdx = -1;
     coreFailTicks = 0;
     statsProc = 0;
     apiPort = 0;
@@ -1856,6 +1858,8 @@ void V2RayLogic::onSaveAllOnQuit() {
 /* 退出时统一终止所有子进程（保留 core/runningLast 以便下次自动恢复） */
 void V2RayLogic::shutdownProcesses() {
     appQuitting = true;
+    coreRestartPending = false;
+    coreRestartNodeIdx = -1;
     QProcess34* ps[] = { probeProc, coreProc, latProc, testCurlProc, testCoreProc,
                        subProc, dlProc, unzipProc, detectProc, geoProc };
     int n = (int)(sizeof(ps) / sizeof(ps[0]));
@@ -4485,7 +4489,64 @@ void V2RayLogic::startCoreAtIndex(int idxIn) {
             return;
         }
     }
-    if (coreProc && coreProc->isRunning()) { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心已在运行")); return; }
+    /* 解析目标节点：正常启动与“运行中/退出中切换”共用 */
+    int targetIdx = idxIn;
+    if (targetIdx < 0) { targetIdx = selectedNodeIndex(); }
+    if (targetIdx < 0) {
+        if ((int)nodes.count() >= 1) {
+            targetIdx = 0;
+            for (int i = 0; i < (int)nodes.count(); ++i) {
+                if (nodes[i].supported) { targetIdx = i; break; }
+            }
+        }
+    }
+    if (targetIdx < 0 || targetIdx >= (int)nodes.count()) {
+        appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("没有可用节点，请先更新订阅"));
+        setCoreMessage(qFromUtf8("状态：启动失败：没有可用节点（请先更新订阅）"));
+        return;
+    }
+    /* 先校验目标可用，避免停掉当前可用核心后才发现无法切换 */
+    if (!nodeSupportedByCore(nodes[targetIdx], coreKind)) {
+        appendLogWithPrefix(qFromUtf8("[核心]"),
+            qFromUtf8("该节点当前内核不支持（REALITY/XTLS-Vision 或未实现协议），请换节点"));
+        setCoreMessage(qFromUtf8("状态：启动失败：该节点需要 Xray 内核（当前不支持）"));
+        return;
+    }
+    /* 核心运行中：请求停止并在退出后使用目标节点启动（标准 stop-then-start-on-exit 替换） */
+    if (coreProc && coreProc->isRunning()) {
+        coreRestartPending = true;
+        coreRestartNodeIdx = targetIdx;
+        if (!coreStopRequested) {
+            coreStopRequested = true;
+            {
+                QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+                st.setValue("core/runningLast", 0);
+                st.sync();
+            }
+            coreProc->tryTerminate();
+            appendLogWithPrefix(qFromUtf8("[核心]"),
+                qFromUtf8("核心正在运行，已请求停止并将在退出后切换到所选节点"));
+        } else {
+            appendLogWithPrefix(qFromUtf8("[核心]"),
+                qFromUtf8("核心正在停止，退出后将切换到所选节点"));
+        }
+        setCoreMessage(qFromUtf8("状态：正在切换节点…"));
+        refreshCoreState();
+        refreshActiveNodeLabel();
+        return;
+    }
+    /* 核心对象仍存在但尚未完全退出：排队，待 onCoreExit 收尾后再启动 */
+    if (coreProc) {
+        coreRestartPending = true;
+        coreRestartNodeIdx = targetIdx;
+        appendLogWithPrefix(qFromUtf8("[核心]"),
+            qFromUtf8("上一次核心尚未退出，退出后将使用所选节点启动"));
+        setCoreMessage(qFromUtf8("状态：等待旧核心退出后切换节点…"));
+        return;
+    }
+    /* 正常启动路径：清理残留挂起标记 */
+    coreRestartPending = false;
+    coreRestartNodeIdx = -1;
     /* 启动核心前终止可能仍在运行的端口探针（监听端口将变化） */
     if (probeProc && probeProc->isRunning()) { probeProc->tryTerminate(); }
     /* D：监听地址/端口校验（SOCKS + HTTP 双端口） */
@@ -4521,26 +4582,8 @@ void V2RayLogic::startCoreAtIndex(int idxIn) {
             qFromUtf8("注意：监听地址 ") + laddr + qFromUtf8(" 会把 SOCKS 端口暴露给局域网/外部"));
     }
     saveSettings();
-    int idx = (idxIn >= 0) ? idxIn : selectedNodeIndex();
-    if (idx < 0) {
-        if (nodes.count() >= 1) {
-            idx = 0;
-            for (int i = 0; i < (int)nodes.count(); ++i) {
-                if (nodes[i].supported) { idx = i; break; }
-            }
-        } else {
-            appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("没有可用节点，请先更新订阅"));
-            setCoreMessage(qFromUtf8("状态：启动失败：没有可用节点（请先更新订阅）"));
-            return;
-        }
-    }
+    int idx = targetIdx;
     V2Node node = nodes[idx];
-    if (!nodeSupportedByCore(node, coreKind)) {
-        appendLogWithPrefix(qFromUtf8("[核心]"),
-            qFromUtf8("该节点当前内核不支持（REALITY/XTLS-Vision 或未实现协议），请换节点"));
-        setCoreMessage(qFromUtf8("状态：启动失败：该节点需要 Xray 内核（当前不支持）"));
-        return;
-    }
     /* 记住当前活动节点 */
     {
         QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
@@ -4563,11 +4606,6 @@ void V2RayLogic::startCoreAtIndex(int idxIn) {
             setCoreMessage(qFromUtf8("状态：启动失败：核心不可执行（请重新下载核心）"));
             return;
         }
-    }
-    if (coreProc) {
-        /* 旧核心尚未退出：绝不 delete；等 onCoreExit 里收尾后再启动 */
-        appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("上一次核心尚未退出，请稍候再启动"));
-        return;
     }
     coreProc = new QProcess34(this);
     QProcess34::connectStdout(coreProc, this, SLOT(onCoreOutput()));
@@ -4791,12 +4829,29 @@ void V2RayLogic::onCoreExit() {
     }
     refreshCoreState();
     refreshActiveNodeLabel();
+    if (coreRestartPending && !appQuitting) {
+        int restartIdx = coreRestartNodeIdx;
+        coreRestartPending = false;
+        coreRestartNodeIdx = -1;
+        if (restartIdx >= 0 && restartIdx < (int)nodes.count()) {
+            appendLogWithPrefix(qFromUtf8("[核心]"),
+                qFromUtf8("旧核心已退出，正在使用所选节点启动"));
+            startCoreAtIndex(restartIdx);
+            return;
+        }
+        appendLogWithPrefix(qFromUtf8("[核心]"),
+            qFromUtf8("切换失败：目标节点已失效"));
+    }
+    coreRestartPending = false;
+    coreRestartNodeIdx = -1;
     setCoreMessage(stopped ? qFromUtf8("状态：核心已停止")
                            : qFromUtf8("状态：核心已退出（异常，详见日志）"));
 }
 void V2RayLogic::onStopCore() {
     if (!coreProc || !coreProc->isRunning()) { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心未在运行")); return; }
     coreStopRequested = true;
+    coreRestartPending = false;
+    coreRestartNodeIdx = -1;
     {
         QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
         st.setValue("core/runningLast", 0);

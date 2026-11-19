@@ -461,6 +461,8 @@ private:
     bool coreStartSignaled; /* 是否已收到 started 信号（用于兜底判断） */
     bool coreRunningKnown;  /* 上一次已知的核心运行状态（状态同步用） */
     bool coreStartPending;  /* 已请求启动、尚未确认运行（连续未运行 → 判失败） */
+    bool coreRestartPending;/* 运行中/退出中切换节点：旧核心退出后自动启动目标节点 */
+    int  coreRestartNodeIdx;/* coreRestartPending 对应的目标节点索引 */
     bool testCoreAdvancePending; /* 临时核心退出后需要推进下一个节点 */
     int  coreFailTicks;     /* 连续未运行周期计数（1s/次） */
     bool appQuitting;       /* 退出中：不覆盖 runningLast，便于下次恢复 */
