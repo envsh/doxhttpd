@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build qltox for Windows XP SP3 x86 (0x0501) with Qt3 (tde-qt338sh Windows port).
-# BLOCKED until Windows x86 tde-qt338sh toolchain + XP-compatible deps are available.
+# Requires Windows x86 tde-qt338sh toolchain + XP-compatible deps to be available.
 set -euo pipefail
 set -x
 

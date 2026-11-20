@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build qltox for Windows XP x64 / Server 2003 (0x0502) with Qt3.
-# BLOCKED: requires Qt3/tde-qt338sh x64+0x0502 PoC and XP-compatible SDK/deps.
+# Requires Qt3/tde-qt338sh x64+0x0502 PoC and XP-compatible SDK/deps.
 set -euo pipefail
 set -x
 

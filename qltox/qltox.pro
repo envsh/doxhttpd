@@ -60,6 +60,11 @@ INCLUDEPATH += ../3rdparty/bloom ../3rdparty/barrust_bloom
 macx {
     INCLUDEPATH += /opt/vcpkg/installed/x64-osx-dynamic/include
     LIBS += -L/opt/vcpkg/installed/x64-osx-dynamic/lib -Wl,-rpath,/opt/vcpkg/installed/x64-osx-dynamic/lib -lhjson
+} else:win32 {
+    # Windows: hjson is built by qltox/winbuild/build-hjson.sh into $$(HJSON_ROOT).
+    # upstream installs the header as include/hjson/hjson.h; support both layouts
+    INCLUDEPATH += $$(HJSON_ROOT)/include $$(HJSON_ROOT)/include/hjson
+    LIBS += -L$$(HJSON_ROOT)/lib -lhjson
 } else {
     INCLUDEPATH += /opt/vcpkg/installed/x64-linux-dynamic/include
     LIBS += -L/opt/vcpkg/installed/x64-linux-dynamic/lib -Wl,-rpath,/opt/vcpkg/installed/x64-linux-dynamic/lib -lhjson
@@ -105,13 +110,16 @@ win32 {
         equals(XP_TARGET_ARCH_EFFECTIVE, x64) {
             message("Windows legacy target: x64 (0x0502 / XP x64, Server 2003)")
             DEFINES += _WIN32_WINNT=0x0502 WINVER=0x0502 _WIN32_IE=0x0501 NTDDI_VERSION=0x05020200
+            QMAKE_LFLAGS += -Wl,--major-subsystem-version,5 -Wl,--minor-subsystem-version,2 -Wl,--major-os-version,5 -Wl,--minor-os-version,2
         } else {
             equals(XP_TARGET_OS_EFFECTIVE, win2k) {
                 message("Windows legacy target: x86 (0x0500 / Windows 2000, PoC)")
                 DEFINES += _WIN32_WINNT=0x0500 WINVER=0x0500 _WIN32_IE=0x0501 NTDDI_VERSION=0x05000400
+                QMAKE_LFLAGS += -Wl,--major-subsystem-version,5 -Wl,--minor-subsystem-version,0 -Wl,--major-os-version,5 -Wl,--minor-os-version,0
             } else {
                 message("Windows legacy target: x86 (0x0501 / Windows XP SP3)")
                 DEFINES += _WIN32_WINNT=0x0501 WINVER=0x0501 _WIN32_IE=0x0501 NTDDI_VERSION=0x05010300
+                QMAKE_LFLAGS += -Wl,--major-subsystem-version,5 -Wl,--minor-subsystem-version,1 -Wl,--major-os-version,5 -Wl,--minor-os-version,1
             }
         }
         # NOTE: legacy targets require an msvcrt-based toolchain/Qt/dependencies built for the same baseline.
@@ -163,16 +171,20 @@ LIBS += $$system(pkg-config --libs openal 2>/dev/null)
 FREETYPE_LIBS = $$system(pkg-config --libs freetype2 2>/dev/null)
 !isEmpty(FREETYPE_LIBS) {
     QMAKE_CXXFLAGS += $$system(pkg-config --cflags freetype2 2>/dev/null)
-    LIBS += -lcurl -lopenal -ldl $$FREETYPE_LIBS
+    LIBS += -lcurl $$FREETYPE_LIBS
+    # -ldl/-lopenal are Unix-only; Windows has neither libdl nor an OpenAL package in MSYS2
+    unix: LIBS += -lopenal -ldl
     message("FreeType2: detected via pkg-config")
 } else {
     INCLUDEPATH += /usr/include/freetype2
     LIBS += -lcurl -lfreetype
+    unix: LIBS += -lopenal -ldl
     message("FreeType2: pkg-config not found, using fallback paths")
 }
 
 # SQLite 依赖检测
-SQLITE_CFLAGS = $$system(pkg-config --cflags sqlite3 2>/dev/null)
+# pkg-config emits "-I/..." which must not be fed into INCLUDEPATH verbatim
+SQLITE_CFLAGS = $$system(pkg-config --cflags-only-I sqlite3 2>/dev/null | sed 's/-I//g')
 SQLITE_LIBS = $$system(pkg-config --libs sqlite3 2>/dev/null)
 isEmpty(SQLITE_LIBS) {
     error("sqlite3 not found. Install libsqlite3-dev (Debian) or libsqlite3x-devel (RHEL)")

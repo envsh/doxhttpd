@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build qltox for Windows 2000 x86 (0x0500) with Qt3 (tde-qt338sh Windows port) - PoC target.
-# BLOCKED until Windows x86 tde-qt338sh toolchain + Win2000-compatible deps are available.
+# Requires Windows x86 tde-qt338sh toolchain + Win2000-compatible deps to be available.
 set -euo pipefail
 set -x
 
