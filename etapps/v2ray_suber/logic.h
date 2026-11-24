@@ -214,6 +214,7 @@ private slots:
     void onCoreOutput();
     void onCoreErrOutput();
     void onCoreExit();
+    void onCoreKillTimeout();
     void onLatOutput();
     void onLatErrOutput();
     void onLatExited();

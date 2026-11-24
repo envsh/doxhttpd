@@ -4662,6 +4662,7 @@ void V2RayLogic::onStartCore() {
         appendLogWithPrefix(qFromUtf8("[核心]"),
             qFromUtf8("选中了 ") + QString::number((int)sel.count())
             + qFromUtf8(" 个节点；启动核心请只选一个节点"));
+        setCoreMessage(qFromUtf8("状态：请只选一个节点后再启动核心"));
         return;
     }
     startCoreAtIndex(-1);
@@ -4710,14 +4711,16 @@ void V2RayLogic::startCoreAtIndex(int idxIn) {
     if (coreProc && coreProc->isRunning()) {
         coreRestartPending = true;
         coreRestartNodeIdx = targetIdx;
+        /* 切换节点仍是“期望运行”，避免切换窗口丢失自动恢复意图 */
+        {
+            QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+            st.setValue("core/runningLast", 1);
+            st.sync();
+        }
         if (!coreStopRequested) {
             coreStopRequested = true;
-            {
-                QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
-                st.setValue("core/runningLast", 0);
-                st.sync();
-            }
             coreProc->tryTerminate();
+            QTimer::singleShot(4000, this, SLOT(onCoreKillTimeout()));
             appendLogWithPrefix(qFromUtf8("[核心]"),
                 qFromUtf8("核心正在运行，已请求停止并将在退出后切换到所选节点"));
         } else {
@@ -4729,14 +4732,36 @@ void V2RayLogic::startCoreAtIndex(int idxIn) {
         refreshActiveNodeLabel();
         return;
     }
-    /* 核心对象仍存在但尚未完全退出：排队，待 onCoreExit 收尾后再启动 */
+    /* 核心对象仍存在但尚未完全退出：若进程已死则清理后继续；否则排队等待退出 */
     if (coreProc) {
-        coreRestartPending = true;
-        coreRestartNodeIdx = targetIdx;
-        appendLogWithPrefix(qFromUtf8("[核心]"),
-            qFromUtf8("上一次核心尚未退出，退出后将使用所选节点启动"));
-        setCoreMessage(qFromUtf8("状态：等待旧核心退出后切换节点…"));
-        return;
+        if (!coreProc->isRunning()) {
+            appendLogWithPrefix(qFromUtf8("[核心]"),
+                qFromUtf8("检测到旧核心进程已退出但未清理，正在清理后启动"));
+            stopTrafficPoll();
+            flushTrafficTotals();
+            coreRunningKnown = false;
+            coreStartPending = false;
+            testCoreAdvancePending = false;
+            coreFailTicks = 0;
+            coreStopRequested = false;
+            coreProc->deleteLater();
+            coreProc = 0;
+            {
+                QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+                st.setValue("core/lastPid", 0);
+                st.sync();
+            }
+            refreshCoreState();
+            /* 继续走正常启动路径，使用 targetIdx */
+        } else {
+            coreRestartPending = true;
+            coreRestartNodeIdx = targetIdx;
+            appendLogWithPrefix(qFromUtf8("[核心]"),
+                qFromUtf8("上一次核心尚未退出，退出后将使用所选节点启动"));
+            setCoreMessage(qFromUtf8("状态：等待旧核心退出后切换节点…"));
+            refreshCoreState();
+            return;
+        }
     }
     /* 正常启动路径：清理残留挂起标记 */
     coreRestartPending = false;
@@ -4962,7 +4987,18 @@ void V2RayLogic::onCoreError() {
 }
 
 
+void V2RayLogic::onCoreKillTimeout() {
+    if (!coreProc) { return; }
+    if (!(coreStopRequested || coreRestartPending)) { return; }
+    if (coreProc->isRunning()) {
+        appendLogWithPrefix(qFromUtf8("[核心]"),
+            qFromUtf8("核心在 4 秒内未退出，发送强制终止"));
+        coreProc->kill();
+    }
+}
+
 void V2RayLogic::onCoreExit() {
+    if (!coreProc) { return; }
     bool stopped = coreStopRequested;
     coreStopRequested = false;
     coreRunningKnown = false;   /* 退出后状态同步复位 */
@@ -5042,7 +5078,31 @@ void V2RayLogic::onCoreExit() {
                            : qFromUtf8("状态：核心已退出（异常，详见日志）"));
 }
 void V2RayLogic::onStopCore() {
-    if (!coreProc || !coreProc->isRunning()) { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心未在运行")); return; }
+    if (!coreProc) { appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心未在运行")); return; }
+    if (!coreProc->isRunning()) {
+        /* 进程对象残留但已退出：清理状态，避免后续启动被“尚未退出”卡住 */
+        stopTrafficPoll();
+        flushTrafficTotals();
+        coreRunningKnown = false;
+        coreStartPending = false;
+        testCoreAdvancePending = false;
+        coreStopRequested = false;
+        coreRestartPending = false;
+        coreRestartNodeIdx = -1;
+        coreFailTicks = 0;
+        coreProc->deleteLater();
+        coreProc = 0;
+        {
+            QSettings34 st(qFromUtf8("v2ray_suber"), qFromUtf8("settings"));
+            st.setValue("core/runningLast", 0);
+            st.setValue("core/lastPid", 0);
+            st.sync();
+        }
+        appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("核心进程已退出，已清理残留状态"));
+        refreshCoreState();
+        refreshActiveNodeLabel();
+        return;
+    }
     coreStopRequested = true;
     coreRestartPending = false;
     coreRestartNodeIdx = -1;
@@ -5052,6 +5112,7 @@ void V2RayLogic::onStopCore() {
         st.sync();
     }
     coreProc->tryTerminate();
+    QTimer::singleShot(4000, this, SLOT(onCoreKillTimeout()));
     appendLogWithPrefix(qFromUtf8("[核心]"), qFromUtf8("已发送停止请求"));
     refreshCoreState();
     refreshActiveNodeLabel();
@@ -5925,16 +5986,33 @@ bool V2RayLogic::buildTestConfig(const V2Node& n, int port, QString& cfg) {
 /* ── 核心状态 ── */
 void V2RayLogic::refreshCoreState() {
     if (!coreState || !startBtn || !stopBtn) { return; }
+    bool running = coreProc && coreProc->isRunning();
+    bool switching = coreRestartPending;
+    bool starting = coreStartPending && !running;
     QString s;
-    if (coreProc && coreProc->isRunning()) {
+    if (running) {
         int sp = listenSocksPort();
         int hp = listenHttpPort();
-        s = qFromUtf8("状态：核心运行中（PID ")
-            + QString::number((long)coreProc->processIdentifier())
-            + qFromUtf8(" · SOCKS ")
-            + listenAddress() + ":" + QString::number(sp > 0 ? sp : 10808)
-            + qFromUtf8(" · HTTP ") + listenAddress() + ":"
-            + QString::number(hp > 0 ? hp : 10809) + qFromUtf8("）");
+        if (switching) {
+            s = qFromUtf8("状态：正在切换节点（当前 PID ")
+                + QString::number((long)coreProc->processIdentifier())
+                + qFromUtf8("）");
+        } else if (coreStopRequested) {
+            s = qFromUtf8("状态：正在停止核心（PID ")
+                + QString::number((long)coreProc->processIdentifier())
+                + qFromUtf8("）");
+        } else {
+            s = qFromUtf8("状态：核心运行中（PID ")
+                + QString::number((long)coreProc->processIdentifier())
+                + qFromUtf8(" · SOCKS ")
+                + listenAddress() + ":" + QString::number(sp > 0 ? sp : 10808)
+                + qFromUtf8(" · HTTP ") + listenAddress() + ":"
+                + QString::number(hp > 0 ? hp : 10809) + qFromUtf8("）");
+        }
+    } else if (switching) {
+        s = qFromUtf8("状态：等待旧核心退出后切换节点…");
+    } else if (starting) {
+        s = qFromUtf8("状态：核心启动中…");
     } else if (coreInstalled()) {
         s = qFromUtf8("状态：已就绪 · ") + coreDisplayName()
             + qFromUtf8(" @ ") + coreBinaryPath();
@@ -5942,8 +6020,8 @@ void V2RayLogic::refreshCoreState() {
         s = qFromUtf8("状态：") + coreDisplayName() + qFromUtf8(" 不可用，请下载安装或切换内核");
     }
     coreState->setText(s);
-    bool running = coreProc && coreProc->isRunning();
-    startBtn->setEnabled(coreInstalled() && !running);
+    bool busy = running || switching || starting;
+    startBtn->setEnabled(coreInstalled() && !busy);
     stopBtn->setEnabled(running);
     if (coreDlBtn) {
         bool needDl = !(coreKind == CoreXray && coreSourceSystem);
