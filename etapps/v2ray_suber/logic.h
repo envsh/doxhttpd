@@ -261,7 +261,11 @@ private:
     int  indexByNodeId(const QString& id) const;
     void removeNodesBySource(const QString& src);
     void pruneSubNodesForUpdate(const QString& src);
-    void refreshFavList();
+    void ensureFavTable();
+    int  favRowByNodeId(const QString& nodeId) const;
+    void addFavRow(int nodeIdx);
+    void updateFavRowByNodeId(const QString& nodeId);
+    void removeFavRowByNodeId(const QString& nodeId);
     int  favNodeIndex(int row) const;
     void startCoreAtIndex(int idx);
     QString geoAssetDir() const;
@@ -301,8 +305,20 @@ private:
     void saveSubLast(const QString& content);
     void appendLog(const QString& msg);
     void appendLogWithPrefix(const QString& prefix, const QString& msg);
-    void refreshSubList();
-    void refreshNodeList();
+    void ensureSubTable();
+    int  subRowByUrl(const QString& url) const;
+    void addSubRow(const QString& url);
+    void updateSubRow(const QString& url);
+    void removeSubRow(const QString& url);
+    void ensureNodeTable();
+    V2IndexList buildNodeView() const;
+    int  nodeRowByNodeId(const QString& nodeId) const;
+    void setNodeRow(int row, int nodeIdx);
+    void syncNodeViewIncremental();
+    void syncFavTable();
+    void buildNodeTestView(const V2Node& n, QString& tcp, QString& real,
+                           QString& st, QString& geoText, int& avail) const;
+    void updateNodeTestRow(const QString& nodeId);
     bool coreInstalled() const;
     bool hasGeoFiles() const;
     QString maybeDecodeBase64(const QString& in);
